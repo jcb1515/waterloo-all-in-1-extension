@@ -57,6 +57,7 @@ export function ProfileSection({ settings, save }) {
             })
           }
           placeholders={["ECE 105", "LEC 002, TUT 104"]}
+          emptyHint="Filled automatically from Portal, or add your own."
         />
       </Card>
 
@@ -73,6 +74,7 @@ export function ProfileSection({ settings, save }) {
           }}
           onAdd={(code, value) => setGroups({ ...groups, [code]: value })}
           placeholders={["ECE 190", "5"]}
+          emptyHint="Filled automatically from Portal, or add your own."
         />
       </Card>
     </div>
@@ -81,9 +83,9 @@ export function ProfileSection({ settings, save }) {
 
 /**
  * Two-column editable table with add/remove rows.
- * @param {{cols: string[], rows: [string, any][], renderRow: Function, onRemove: Function, onAdd: Function, placeholders: string[]}} p
+ * @param {{cols: string[], rows: [string, any][], renderRow: Function, onRemove: Function, onAdd: Function, placeholders: string[], emptyHint?: string}} p
  */
-function Table({ cols, rows, renderRow, onRemove, onAdd, placeholders }) {
+function Table({ cols, rows, renderRow, onRemove, onAdd, placeholders, emptyHint }) {
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const add = () => {
@@ -94,6 +96,8 @@ function Table({ cols, rows, renderRow, onRemove, onAdd, placeholders }) {
     setB("");
   };
   return (
+    <div class="edit-table-wrap">
+      {rows.length ? null : <p class="help">{emptyHint || "Nothing here yet."}</p>}
     <table class="edit-table">
       <thead>
         <tr>
@@ -145,5 +149,6 @@ function Table({ cols, rows, renderRow, onRemove, onAdd, placeholders }) {
         </tr>
       </tbody>
     </table>
+    </div>
   );
 }

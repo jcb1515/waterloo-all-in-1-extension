@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
+  "license": "MIT",
+  "repository": "https://github.com/jcb1515/waterloo-all-in-1-extension",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "node tools/build.mjs",
     "dev": "node tools/build.mjs --watch",

@@ -71,11 +71,17 @@ async function catchUp() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   migrateStorage()
     .then(setup)
     .then(catchUp)
     .catch((e) => console.warn("[wa1] install", e));
+  if (details && details.reason === "install") {
+    // First run: the options page opens on the setup checklist.
+    chrome.tabs
+      .create({ url: chrome.runtime.getURL("src/options/options.html#welcome") })
+      .catch(() => {});
+  }
 });
 chrome.runtime.onStartup.addListener(() => {
   setup()

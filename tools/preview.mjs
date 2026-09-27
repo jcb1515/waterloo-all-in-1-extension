@@ -60,6 +60,7 @@ const SHOTS = [
   { name: "panel-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
   { name: "panel-compact-light", url: "/src/panel/panel.html?preview=1&density=compact", size: [400, 900] },
   { name: "panel-sources", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
+  { name: "options-welcome-light", url: "/src/options/options.html?preview=empty#welcome", size: [1280, 900] },
   { name: "options-general-light", url: "/src/options/options.html#general", size: [1280, 900] },
   { name: "options-sources-dark", url: "/src/options/options.html#sources", size: [1280, 900], dark: true },
   { name: "options-privacy-light", url: "/src/options/options.html#privacy", size: [1280, 900] },

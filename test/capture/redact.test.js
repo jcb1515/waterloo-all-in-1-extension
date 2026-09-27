@@ -7,9 +7,9 @@ import { redactText, normalizePath, shapeOf, htmlOutline, datePattern } from "..
 test("redactText strips emails, 8+ digit numbers and extra words", () => {
   assert.equal(redactText("mail jsmith@uwaterloo.ca"), "mail <email>");
   assert.equal(redactText("student 20812345 due"), "student <number> due");
-  assert.equal(redactText("posted by james smith", ["James Smith"]), "posted by <redacted>");
+  assert.equal(redactText("posted by jane smith", ["Jane Smith"]), "posted by <redacted>");
   // Extra words are case-insensitive; one-letter words are ignored.
-  assert.equal(redactText("JAMES Smith", ["james"]), "<redacted> Smith");
+  assert.equal(redactText("JANE Smith", ["jane"]), "<redacted> Smith");
   assert.equal(redactText("a b c", ["b"]), "a b c");
 });
 
@@ -43,11 +43,11 @@ test("normalizePath replaces numeric ids, snowflakes and UUIDs, drops query valu
 
 test("shapeOf redacts identity keys but keeps short status labels", () => {
   const shape = shapeOf({
-    FirstName: "James",
+    FirstName: "Jane",
     email: "j@x.ca",
     status: "Not Selected",
     applicationStatus: "Not Selected",
-    nested: { username: "jdoe", name: "James" },
+    nested: { username: "jdoe", name: "Jane" },
     course: { name: "ECE 105" },
     count: 7,
     active: true,

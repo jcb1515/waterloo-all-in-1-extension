@@ -3,6 +3,12 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
+  "description": "Self-hosted iCal calendar feed for Waterloo All-in-1 (Cloudflare Worker).",
+  "license": "MIT",
+  "repository": "https://github.com/jcb1515/waterloo-all-in-1-extension",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --test",
     "deploy": "npx --yes wrangler@4.129.0 deploy --env-file ../.env"

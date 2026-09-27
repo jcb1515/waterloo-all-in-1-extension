@@ -260,3 +260,64 @@ html[data-theme="dark"] .opt-nav-links a.active {
     box-shadow: none;
   }
 }
+
+/* welcome checklist */
+.welcome-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.welcome-step {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+}
+.welcome-num {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--text-3);
+  border: 1.5px solid var(--border-strong);
+  margin-top: 1px;
+}
+.welcome-num.done {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--on-gold);
+}
+.welcome-body {
+  min-width: 0;
+}
+.welcome-title {
+  margin: 0;
+  font-weight: var(--w-medium);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.welcome-body .help {
+  margin: var(--sp-1) 0 0;
+}
+.welcome-link {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--gold-ink);
+}
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}

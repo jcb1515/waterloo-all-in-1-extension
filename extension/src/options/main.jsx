@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, IS_PREVIEW } from "../panel/data.js";
 import { setSettings } from "../core/store.js";
 import { BrandMark } from "../ui/brand.jsx";
+import { WelcomeSection } from "./sections/Welcome.jsx";
 import { GeneralSection } from "./sections/General.jsx";
 import { ProfileSection } from "./sections/Profile.jsx";
 import { SourcesSection } from "./sections/SourcesSection.jsx";
@@ -14,6 +15,7 @@ import { SoonCard } from "./bits.jsx";
 import { CalendarIcon, BellIcon } from "../ui/icons.jsx";
 
 const SECTIONS = [
+  ["welcome", "Welcome", WelcomeSection],
   ["general", "General", GeneralSection],
   ["profile", "Profile", ProfileSection],
   ["sources", "Sources", SourcesSection],
@@ -110,7 +112,7 @@ function OptionsApp() {
       <main class="opt-content">
         <h1 class="opt-heading">{activeLabel}</h1>
         {state.ready ? (
-          <ActiveView settings={state.settings} save={save} now={new Date()} />
+          <ActiveView settings={state.settings} save={save} now={new Date()} state={state} />
         ) : (
           <div class="opt-stack">
             <div class="skeleton" style={{ height: "140px" }} />
