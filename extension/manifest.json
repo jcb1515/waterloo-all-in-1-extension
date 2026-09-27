@@ -43,6 +43,7 @@
     "https://learn.uwaterloo.ca/*",
     "https://outline.uwaterloo.ca/*",
     "https://portal.uwaterloo.ca/*",
+    "https://portalapi2.uwaterloo.ca/*",
     "https://waterlooworks.uwaterloo.ca/*",
     "https://discord.com/*",
     "https://outlook.office.com/*",
@@ -55,6 +56,7 @@
     {
       "matches": [
         "https://learn.uwaterloo.ca/*",
+        "https://outline.uwaterloo.ca/*",
         "https://portal.uwaterloo.ca/*",
         "https://waterlooworks.uwaterloo.ca/*",
         "https://discord.com/*",
@@ -70,6 +72,11 @@
     {
       "matches": ["https://learn.uwaterloo.ca/*"],
       "js": ["src/capture/recorder.content.js", "src/sources/learn/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://outline.uwaterloo.ca/*"],
+      "js": ["src/capture/recorder.content.js", "src/sources/outline/content.js"],
       "run_at": "document_start"
     },
     {

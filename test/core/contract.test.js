@@ -26,16 +26,17 @@ test("itemId builds source:key ids", () => {
   assert.equal(itemId("waterlooworks", "offer-9"), "waterlooworks:offer-9");
 });
 
-test("SITE_BY_HOST covers every manifest host except outline and the feed worker", () => {
+test("SITE_BY_HOST covers every manifest host except the feed worker", () => {
   const manifest = JSON.parse(readFileSync(path.join(REPO, "extension", "manifest.json"), "utf8"));
   const hosts = new Set();
   for (const p of manifest.host_permissions || []) hosts.add(new URL(p).hostname);
   for (const cs of manifest.content_scripts || []) for (const m of cs.matches || []) hosts.add(new URL(m).hostname);
   for (const host of hosts) {
-    if (host === "outline.uwaterloo.ca") continue; // public pages, fetched directly
+    if (host === "portalapi2.uwaterloo.ca") continue; // API host, no pages load on it
     if (host.endsWith(".workers.dev")) continue; // our own calendar feed server
     assert.ok(SITE_BY_HOST[host], `SITE_BY_HOST is missing ${host}`);
   }
+  assert.equal(SITE_BY_HOST["outline.uwaterloo.ca"], "outline");
 });
 
 test("recorder message names are stable", () => {
