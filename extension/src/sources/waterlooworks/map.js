@@ -484,7 +484,7 @@ const nextDay = (d) =>
  * date that moves keeps its id (the core records "moved").
  * @param {{date: string, cycle: string|null, text: string,
  *   time: string|null, endOfDay: boolean}[]} entries  parseCoopDates output
- * @param {{url?: string, nowIso: string}} opts
+ * @param {{url?: string, nowIso?: string}} opts
  * @returns {Item[]}
  */
 export function coopDateItems(entries, { url, nowIso } = {}) {
