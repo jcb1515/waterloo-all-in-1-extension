@@ -352,7 +352,6 @@ export function parseSyllabusText(text, opts = {}) {
     code,
     name: title || undefined,
     term: term ?? undefined,
-    sections: opts.sections,
     weights,
     assessments,
   };

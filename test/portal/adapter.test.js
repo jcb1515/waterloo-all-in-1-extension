@@ -147,7 +147,7 @@ test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => 
   assert.deepEqual(res.readOk, ["portal:events:2026-09-01..2026-12-31"]);
 
   const byTitle = (t) => res.items.find((i) => i.title === t);
-  assert.equal(res.items.length, 5); // cancelled + class echo skipped
+  assert.equal(res.items.length, 6); // cancelled + class echo skipped
 
   const begin = byTitle("Lectures begin");
   assert.equal(begin.type, "term-date");
@@ -165,6 +165,11 @@ test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => 
   assert.equal(exams.startAt, "2026-12-10T05:00:00.000Z");
   assert.equal(exams.endAt, "2026-12-24T05:00:00.000Z"); // 00:00 end is already exclusive
 
+  const mid = byTitle("Midterm week");
+  assert.equal(mid.type, "term-date");
+  assert.equal(mid.startAt, "2026-10-19T04:00:00.000Z");
+  assert.equal(mid.endAt, "2026-10-24T04:00:00.000Z"); // inclusive Oct 23 -> next midnight
+
   const karaoke = byTitle("Bomber Karaoke Night");
   assert.equal(karaoke.type, "event");
   assert.equal(karaoke.category, "campus");
@@ -176,15 +181,21 @@ test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => 
   assert.equal(karaoke.meta.feed, "WUSA Events");
   assert.equal(karaoke.evidence.url, "https://portal.uwaterloo.ca/calendar");
 
-  assert.deepEqual(res.terms, [
-    {
-      termCode: 1269,
-      readingWeek: { start: "2026-10-12", end: "2026-10-16" },
-      examPeriod: { start: "2026-12-10", end: "2026-12-23" },
-      start: "2026-09-09",
-      end: "2026-12-07",
-    },
-  ]);
+  assert.equal(res.terms.length, 1);
+  const { weeks, ...fields } = res.terms[0];
+  assert.deepEqual(fields, {
+    termCode: 1269,
+    start: "2026-09-09",
+    end: "2026-12-07",
+    readingWeek: { start: "2026-10-12", end: "2026-10-16" },
+    midtermWeek: { start: "2026-10-19", end: "2026-10-23" },
+    examPeriod: { start: "2026-12-10", end: "2026-12-23" },
+  });
+  // UW week numbering: week 1 starts mid-week, reading week is week 6.
+  assert.equal(weeks.length, 14);
+  assert.deepEqual(weeks[0], { n: 1, start: "2026-09-09", end: "2026-09-13" });
+  assert.deepEqual(weeks[5], { n: 6, start: "2026-10-12", end: "2026-10-18" });
+  assert.deepEqual(weeks[13], { n: 14, start: "2026-12-07", end: "2026-12-07" });
 });
 
 test("courses and terms accumulate across observes", async () => {

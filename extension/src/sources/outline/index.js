@@ -65,24 +65,77 @@ function readingWeeksFor(ctx, datas) {
   return out;
 }
 
+/**
+ * Section precedence: the profile holds defaults, Portal's enrollment
+ * sections override per component kind (LEC/TUT/LAB/SEM/TST). For each kind
+ * Portal knows about, Portal wins; kinds Portal doesn't list fall back to the
+ * profile. Both listing a kind with different sections is a mismatch.
+ * @param {string[]} [profile] @param {string[]} [portal]
+ * @returns {{sections: string[], mismatches: {kind: string, profile: string[], portal: string[]}[]}}
+ */
+export function pickSections(profile = [], portal = []) {
+  /** @param {string[]} list */
+  const byKind = (list) => {
+    /** @type {Map<string, string[]>} */
+    const m = new Map();
+    for (const s of list || []) {
+      const kind = String(s).trim().split(/\s+/)[0];
+      if (!kind) continue;
+      const list = m.get(kind) || [];
+      if (!list.length) m.set(kind, list);
+      list.push(s);
+    }
+    return m;
+  };
+  const pm = byKind(profile);
+  const tm = byKind(portal);
+  /** @type {string[]} */
+  const sections = [];
+  /** @type {{kind: string, profile: string[], portal: string[]}[]} */
+  const mismatches = [];
+  const kinds = [...pm.keys(), ...[...tm.keys()].filter((k) => !pm.has(k))];
+  for (const kind of kinds) {
+    const prof = pm.get(kind);
+    const port = tm.get(kind);
+    sections.push(...(port || prof || []));
+    if (prof && port) {
+      const same = prof.length === port.length && [...prof].sort().join(" ") === [...port].sort().join(" ");
+      if (!same) mismatches.push({ kind, profile: prof, portal: port });
+    }
+  }
+  return { sections, mismatches };
+}
+
+/** A section mismatch becomes a review Update the panel can surface. */
+function mismatchUpdates(code, mismatches, now) {
+  const at = (now || new Date()).toISOString();
+  return mismatches.map((mm) => ({
+    id: `outline:section-mismatch:${code.replace(/\s+/g, "")}:${mm.kind}:${mm.portal.join(",")}|${mm.profile.join(",")}`,
+    at,
+    source: /** @type {const} */ ("outline"),
+    kind: /** @type {const} */ ("review"),
+    text: `Portal lists ${code} ${mm.portal.join(", ")} but your profile says ${mm.profile.join(", ")}; using Portal's.`,
+  }));
+}
+
 /** Settings ∪ ctx.courses section/group/OH choice, then expand. Shared by sync and observe. */
 function buildFor(ctx, data, url, readingWeeks) {
   const settings = ctx.settings || {};
   const code = normCourseCode(data.code || "");
   const ctxCourse = (ctx.courses || []).find((c) => normCourseCode(c.code) === code);
-  const sections = [
-    ...new Set([...((settings.sections || {})[code] || []), ...((ctxCourse && ctxCourse.sections) || [])]),
-  ];
-  if (!sections.length) ctx.log(`outline: ${code} has no selected sections; classes skipped`);
-  return buildOutline(data, {
+  // Portal (enrollment) sections win over the profile defaults, per kind.
+  const picked = pickSections((settings.sections || {})[code] || [], (ctxCourse && ctxCourse.sections) || []);
+  if (!picked.sections.length) ctx.log(`outline: ${code} has no selected sections; classes skipped`);
+  const built = buildOutline(data, {
     now: ctx.now,
     url,
-    sections,
+    sections: picked.sections,
     group: (settings.groups || {})[code] ?? null,
     officeHours: !!settings.officeHours,
     readingWeeks,
     textDates: ctx.textDates || extractDates,
   });
+  return { ...built, updates: mismatchUpdates(code, picked.mismatches, ctx.now) };
 }
 
 /** 2xx + body + parseOutline returning data with a code. */
@@ -116,7 +169,7 @@ const adapter = {
         return { items: [], complete: false, scope: "outline:none", state };
       }
       const code = normCourseCode(data.code);
-      const { items, course } = buildFor(ctx, data, payload.url, readingWeeksFor(ctx, [data]));
+      const { items, course, updates } = buildFor(ctx, data, payload.url, readingWeeksFor(ctx, [data]));
       // Scope-mode merges replace `courses` wholesale — carry every outline
       // course seen so far, not just this one.
       const courseMap = { ...(state.courses || {}), [code]: course };
@@ -124,6 +177,7 @@ const adapter = {
         items,
         courses: Object.values(courseMap),
         complete: true,
+        updates: updates.length ? updates : undefined,
         readOk: [code],
         scope: code,
         session: "signed-in",
@@ -153,6 +207,8 @@ const adapter = {
     let complete = true;
     let sawShell = false;
     let urlOk = false;
+    /** @type {import("../../core/contract.js").Update[]} */
+    const updates = [];
 
     for (const url of urls) {
       let data = null;
@@ -192,13 +248,23 @@ const adapter = {
             ctx.log(`outline: file ${file.name} is not a syllabus text`);
             continue;
           }
-          const sections = (settings.sections || {})[probe.code] || [];
+          const code = normCourseCode(probe.code);
+          const ctxCourse = (ctx.courses || []).find((c) => normCourseCode(c.code) === code);
+          const picked = pickSections(
+            (settings.sections || {})[code] || [],
+            (ctxCourse && ctxCourse.sections) || [],
+          );
           const r =
-            (sections.length &&
-              parseSyllabusText(file.text, { now: ctx.now, sections, officeHours: !!settings.officeHours })) ||
+            (picked.sections.length &&
+              parseSyllabusText(file.text, {
+                now: ctx.now,
+                sections: picked.sections,
+                officeHours: !!settings.officeHours,
+              })) ||
             probe;
           if (r.skippedClasses) ctx.log(`outline: ${r.code} syllabus classes skipped (section not selected)`);
-          direct.push({ ...r, code: normCourseCode(r.code) });
+          updates.push(...mismatchUpdates(code, picked.mismatches, ctx.now));
+          direct.push({ ...r, code });
           continue;
         }
         const data = await ctx.parseHtml(String(file.html || ""), "outline/parseOutline");
@@ -231,6 +297,7 @@ const adapter = {
         items.push(...built.items);
         courseMap[code] = built.course;
         readOk.push(code);
+        updates.push(...built.updates);
         if (url) seenUrls[code] = url;
       } catch (e) {
         complete = false;
@@ -246,7 +313,14 @@ const adapter = {
     }
     const courses = Object.values(courseMap);
     /** @type {SyncResult} */
-    const result = { items, courses, complete, readOk, state: { ...state, seenUrls, courses: courseMap } };
+    const result = {
+      items,
+      courses,
+      complete,
+      readOk,
+      updates: updates.length ? updates : undefined,
+      state: { ...state, seenUrls, courses: courseMap },
+    };
     if (urlOk) result.session = "signed-in";
     else if (sawShell) result.session = "signed-out";
     return result;

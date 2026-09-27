@@ -11,7 +11,7 @@
 import { normCourseCode } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
 import { termCodeFor, zonedIso } from "../../lib/textdates/index.js";
-import { KIND_TITLE, slug, torontoDate } from "../outline/expand.js";
+import { KIND_TITLE, addDays, dow, slug, torontoDate } from "../outline/expand.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 
@@ -182,7 +182,7 @@ export function mapEnrollments(rows, { now }) {
 
 /** Titles that mean an academic-calendar date rather than a campus event. */
 const TERM_RE =
-  /(lectures?|classes) (begin|start|end)|first day of (lectures|classes)|last day of (lectures|classes)|reading week|(final )?exam(ination)?s? (period|begin|start|end)|drop|withdraw|add (period|deadline)|holiday|thanksgiving|remembrance|fall break|study (day|break)|convocation|tuition|fee (payment|deadline)|grades? (due|available)/i;
+  /(lectures?|classes) (begin|start|end)|first day of (lectures|classes)|last day of (lectures|classes)|reading week|mid-?term (week|period|break)|(final )?exam(ination)?s? (period|begin|start|end)|drop|withdraw|add (period|deadline)|holiday|thanksgiving|remembrance|fall break|study (day|break)|convocation|tuition|fee (payment|deadline)|grades? (due|available)/i;
 
 /** Class echoes on the calendar feed duplicate CourseSchedule rows. */
 const CLASS_ECHO = /^[A-Z]{2,5}\s?\d{3}[A-Z]?\s*[-–:]?\s*(LEC|TUT|LAB|SEM|TST)\b/;
@@ -264,6 +264,26 @@ function endDayInclusive(row, startDay) {
 const nextDay = (day) => new Date(Date.parse(`${day}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
 const prevDay = (day) => new Date(Date.parse(`${day}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
 
+/**
+ * UW week numbering for a term: week 1 runs from `start` to the following
+ * Sunday, every later week runs Monday–Sunday, and the last week is clipped
+ * to `end`. Reading week counts (outlines number it).
+ * @param {string} start @param {string} end  inclusive YYYY-MM-DD
+ * @returns {{n: number, start: string, end: string}[]}
+ */
+export function termWeeks(start, end) {
+  /** @type {{n: number, start: string, end: string}[]} */
+  const weeks = [];
+  let ws = String(start);
+  const last = String(end);
+  for (let n = 1; ws && ws <= last; n++) {
+    const sunday = addDays(ws, (7 - dow(ws)) % 7);
+    weeks.push({ n, start: ws, end: sunday < last ? sunday : last });
+    ws = addDays(sunday, 1);
+  }
+  return weeks;
+}
+
 /** Fold a term-date title into a TermInfo patch keyed by termCode. */
 function collectTerm(terms, title, startDay, endDay) {
   const t = title.toLowerCase();
@@ -271,6 +291,8 @@ function collectTerm(terms, title, startDay, endDay) {
   const p = terms.get(termCode) || { termCode };
   if (/reading week|fall break|study (day|break)/.test(t)) {
     p.readingWeek = { start: startDay, end: endDay || startDay };
+  } else if (/mid-?term/.test(t)) {
+    p.midtermWeek = { start: startDay, end: endDay || startDay };
   } else if (/(exam(ination)?s? (period|begin|start))/.test(t)) {
     p.examPeriod = { ...(p.examPeriod || {}), start: startDay };
     if (/period/.test(t) && endDay && endDay > startDay) p.examPeriod.end = endDay;

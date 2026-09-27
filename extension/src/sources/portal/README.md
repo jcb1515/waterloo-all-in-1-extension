@@ -35,8 +35,12 @@ strings carrying `Z` or a `±hh:mm`/`±hhmm` offset are honoured literally.
   so `endAt` becomes the *next* day's midnight. Same-day all-day rows get no
   `endAt`.
 - **Term dates** build `state.terms[termCode]`: `start`/`end` from
-  "lectures/classes begin|end" titles, `readingWeek` and `examPeriod` as
-  inclusive `{start, end}` ranges (`termCode` from `termCodeFor(startDay)`).
+  "lectures/classes begin|end" titles, `readingWeek`, `midtermWeek` and
+  `examPeriod` as inclusive `{start, end}` ranges (`termCode` from
+  `termCodeFor(startDay)`). On the way out, `termWeeks(start, end)` derives
+  `weeks` — week 1 runs from `start` to the following Sunday, later weeks run
+  Monday–Sunday clipped to `end`, and reading week counts (outlines number
+  it). Weeks are computed at read time, never stored in state.
 - **Course accumulation.** Scope-mode merges replace `courses`/`terms`
   wholesale, so every successful observe returns the full accumulated lists
   (`Object.values(state.courses)`/`terms`), not just what this payload saw.

@@ -30,6 +30,20 @@
       "feedId": 7
     },
     {
+      "summary": "Midterm week",
+      "name": "Important dates",
+      "description": null,
+      "location": null,
+      "allDay": true,
+      "startDate": "2026-10-19T00:00:00",
+      "endDate": "2026-10-23T23:59:00",
+      "key": "cal-term-midterm-week-1269",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "important",
+      "feedId": 7
+    },
+    {
       "summary": "Lectures end",
       "name": "Important dates",
       "description": null,

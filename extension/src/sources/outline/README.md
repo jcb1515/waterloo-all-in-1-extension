@@ -93,6 +93,18 @@ settings: {
 ```
 
 - `urls` is unioned with `ctx.courses[].outlineUrl` (Learn TOC links feed it).
+
+## Section precedence
+
+The profile's `settings.sections` are defaults; Portal's enrollment sections
+win. `pickSections(profile, portal)` groups both lists by component kind
+(LEC/TUT/LAB/SEM/TST): kinds Portal lists use Portal's sections, kinds it
+doesn't fall back to the profile. When both list a kind and disagree, the
+pick emits a `SyncResult.updates` entry (`kind: "review"`, id
+`outline:section-mismatch:<CODE>:<kind>:<portal>|<profile>`) so the panel can
+flag the stale profile. Outline/syllabus `Course` objects deliberately carry
+**no** `sections` — Portal is the only writer of that field, so a stale
+profile choice can never resurrect an old section's classes.
 - `files` parses saved HTML directly — no fetch.
 - `sections[course]` selects which `LEC/TUT/LAB/SEM` rows expand; it's unioned
   with `ctx.courses[code].sections`. With no selection, no classes are emitted

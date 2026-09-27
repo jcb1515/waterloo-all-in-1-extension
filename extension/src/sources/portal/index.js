@@ -8,7 +8,7 @@
   as maps and every observe returns the full accumulated list.
 */
 
-import { mapEnrollments, mapEvents, mapExams, mapSchedule } from "./map.js";
+import { mapEnrollments, mapEvents, mapExams, mapSchedule, termWeeks } from "./map.js";
 
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
@@ -49,7 +49,10 @@ const lists = (state) => {
   /** @type {{courses?: any[], terms?: any[]}} */
   const r = {};
   const courses = Object.values(state.courses || {});
-  const terms = Object.values(state.terms || {});
+  // Week numbers are derived on the way out — never stored in state.
+  const terms = Object.values(state.terms || {}).map((t) =>
+    t && t.start && t.end ? { ...t, weeks: termWeeks(t.start, t.end) } : t,
+  );
   if (courses.length) r.courses = courses;
   if (terms.length) r.terms = terms;
   return r;

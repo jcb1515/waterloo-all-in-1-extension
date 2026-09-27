@@ -627,7 +627,6 @@ export function buildOutline(data, opts = {}) {
     code,
     name: data.title || undefined,
     term: termCode,
-    sections: opts.sections,
     outlineUrl: url,
     weights: (scheme0 ? scheme0.rows : [])
       .filter((r) => r.weight != null)

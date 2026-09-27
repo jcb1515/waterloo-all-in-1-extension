@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHTML } from "linkedom";
-import adapter, { isLoginShell } from "../../extension/src/sources/outline/index.js";
+import adapter, { isLoginShell, pickSections } from "../../extension/src/sources/outline/index.js";
 import { parseOutline } from "../../extension/src/sources/outline/parsers.js";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 
@@ -207,6 +207,51 @@ test("isLoginShell flags SSO shells, not real pages or plain errors", () => {
   assert.equal(isLoginShell({ status: 200, url: "https://outline.uwaterloo.ca/viewer/view/abc", text: html("MATH117") }), false);
   assert.equal(isLoginShell({ status: 404, url: "https://outline.uwaterloo.ca/viewer/view/nope", text: "not found" }), false);
   assert.equal(isLoginShell(null), false);
+});
+
+test("pickSections: Portal overrides per kind, mismatches flagged", () => {
+  const a = pickSections(["LEC 002"], ["LEC 001", "TUT 102"]);
+  assert.deepEqual(a.sections, ["LEC 001", "TUT 102"]);
+  assert.deepEqual(a.mismatches, [{ kind: "LEC", profile: ["LEC 002"], portal: ["LEC 001"] }]);
+
+  const b = pickSections(["LEC 002"], ["TUT 102"]);
+  assert.deepEqual(b.sections, ["LEC 002", "TUT 102"]);
+  assert.deepEqual(b.mismatches, []);
+
+  assert.deepEqual(pickSections([], []), { sections: [], mismatches: [] });
+});
+
+test("Portal sections override the profile and flag the mismatch", async () => {
+  const ctx = makeCtx(
+    { urls: ["https://outline.uwaterloo.ca/viewer/math117"], sections: { "MATH 117": ["LEC 001"] } },
+    { courses: [{ code: "MATH 117", term: 1269, sections: ["LEC 002"] }] },
+  );
+  const res = await adapter.sync(ctx);
+  const classes = res.items.filter((i) => i.type === "class" && i.section === "LEC 002");
+  assert.equal(classes.length, 37); // same set as the profile-selected LEC 002 run
+  assert.ok(!res.items.some((i) => i.section === "LEC 001"));
+  const updates = res.updates || [];
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].kind, "review");
+  assert.match(updates[0].text, /Portal lists MATH 117 LEC 002 but your profile says LEC 001/);
+});
+
+test("syllabus files honour Portal sections from ctx.courses", async () => {
+  const text = fs.readFileSync(path.join(DIR, "ENGL192-syllabus.txt"), "utf8");
+  const withRight = await adapter.sync(
+    makeCtx(
+      { files: [{ name: "ENGL192.txt", text }] },
+      { courses: [{ code: "ENGL 192", term: 1269, sections: ["LEC 008"] }] },
+    ),
+  );
+  assert.equal(withRight.items.filter((i) => i.type === "class").length, 22);
+  const withWrong = await adapter.sync(
+    makeCtx(
+      { files: [{ name: "ENGL192.txt", text }] },
+      { courses: [{ code: "ENGL 192", term: 1269, sections: ["LEC 001"] }] },
+    ),
+  );
+  assert.equal(withWrong.items.filter((i) => i.type === "class").length, 0);
 });
 
 test("sync accepts {name, text} syllabus files", async () => {
