@@ -5,27 +5,22 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, query, IS_PREVIEW } from "./data.js";
 import { storeSyncSummary } from "./model/sources.js";
+import { visibleTabs } from "./model/tabs.js";
 import { ADAPTERS, stageForAdapter } from "../core/registry.js";
 import { BrandMark } from "../ui/brand.jsx";
 import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon, PlusIcon } from "../ui/icons.jsx";
 import { Agenda } from "./views/Agenda.jsx";
+import { Todo } from "./views/Todo.jsx";
 import { CalendarView } from "./views/Calendar.jsx";
 import { Coop } from "./views/Coop.jsx";
 import { Courses } from "./views/Courses.jsx";
+import { Projects } from "./views/Projects.jsx";
 import { Sources } from "./views/Sources.jsx";
 import { Review } from "./views/Review.jsx";
 import { Updates } from "./views/Updates.jsx";
 import { ItemSheet } from "./views/ItemSheet.jsx";
 import { QuickAdd } from "./views/QuickAdd.jsx";
 import { Teams } from "./views/Teams.jsx";
-
-const TABS = [
-  ["agenda", "Agenda"],
-  ["calendar", "Calendar"],
-  ["coop", "Co-op"],
-  ["courses", "Courses"],
-  ["teams", "Teams"],
-];
 
 const OVERLAY_TITLES = {
   review: "Review",
@@ -58,10 +53,12 @@ function unreadCount(updates, seenAt) {
 
 export function App() {
   const state = useStore();
+  const tabs = useMemo(() => visibleTabs(state.settings), [state.settings]);
   const [tab, setTab] = useState(() => {
     const t = query.get("tab");
-    return TABS.some(([id]) => id === t) ? /** @type {string} */ (t) : "agenda";
+    return t || "agenda";
   });
+  const tabsNav = useRef(/** @type {any} */ (null));
   const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [qaEditId, setQaEditId] = useState(() => null);
   const [reviewOrg, setReviewOrg] = useState(() => query.get("org"));
@@ -143,6 +140,23 @@ export function App() {
     return () => clearInterval(tick);
   }, []);
 
+  // A hidden current tab (via Settings → Panel tabs) falls back to Agenda.
+  useEffect(() => {
+    if (tabs.length && !tabs.some((t) => t.id === tab)) setTab("agenda");
+  }, [tabs, tab]);
+
+  // Keep the active tab in view when the strip scrolls horizontally.
+  useEffect(() => {
+    const el = tabsNav.current && tabsNav.current.querySelector('[aria-selected="true"]');
+    if (el && el.scrollIntoView) {
+      try {
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      } catch {
+        el.scrollIntoView();
+      }
+    }
+  }, [tab, tabs.length]);
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
@@ -151,10 +165,10 @@ export function App() {
         setOverlay(null);
         return;
       }
-      const digit = ["1", "2", "3", "4", "5"].indexOf(e.key);
-      if (digit >= 0 && digit < TABS.length) {
+      const digit = ["1", "2", "3", "4", "5", "6", "7"].indexOf(e.key);
+      if (digit >= 0 && digit < tabs.length) {
         setOverlay(null);
-        setTab(TABS[digit][0]);
+        setTab(tabs[digit].id);
       }
       if (e.key === "/") {
         e.preventDefault();
@@ -168,7 +182,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [syncing, overlay]);
+  }, [syncing, overlay, tabs]);
 
   /** Known orgs for quick-add: course codes + watched Discord team names. */
   const orgs = useMemo(() => {
@@ -276,18 +290,18 @@ export function App() {
       </header>
 
       {overlay ? null : (
-        <nav class="panel-tabs" aria-label="Views">
+        <nav class="panel-tabs" aria-label="Views" ref={tabsNav}>
           <div class="segmented" role="tablist">
-            {TABS.map(([id, label], i) => (
+            {tabs.map((t, i) => (
               <button
-                key={id}
+                key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={tab === id}
-                title={`${label} (${i + 1})`}
-                onClick={() => setTab(id)}
+                aria-selected={tab === t.id}
+                title={`${t.label} (${i + 1})`}
+                onClick={() => setTab(t.id)}
               >
-                {label}
+                {t.label}
               </button>
             ))}
           </div>
@@ -336,6 +350,10 @@ export function App() {
           <Sources state={state} actions={actions} now={now} />
         ) : tab === "agenda" ? (
           <Agenda state={state} actions={actions} now={now} onGoSources={() => setOverlay("sources")} />
+        ) : tab === "todo" ? (
+          <Todo state={state} actions={actions} now={now} orgs={orgs} />
+        ) : tab === "projects" ? (
+          <Projects />
         ) : tab === "calendar" ? (
           <CalendarView state={state} actions={actions} now={now} />
         ) : tab === "coop" ? (

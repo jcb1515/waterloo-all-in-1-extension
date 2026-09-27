@@ -403,6 +403,11 @@ html[data-theme="dark"] .segmented button[aria-pressed="true"] {
   border: 1px dashed var(--border-strong);
   color: var(--text-2);
 }
+.badge-auto {
+  background: var(--gold-soft);
+  color: var(--gold-ink);
+  border: 1px solid var(--gold);
+}
 
 /* ---------------------------------- cards ----------------------------------- */
 
