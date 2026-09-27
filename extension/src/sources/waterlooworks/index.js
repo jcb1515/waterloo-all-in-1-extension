@@ -146,6 +146,8 @@ export default {
       const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
       /** @type {Record<string, any>} */
       const state = { ...prev, lastGood: { ...prev.lastGood }, needsUpdate: { ...prev.needsUpdate } };
+      // Updates now ride on SyncResult.updates; drop any persisted copy.
+      delete state.lastUpdates;
       state.lastSeenAt = payload.at;
 
       const body = String(payload.body || "").trim();
@@ -195,20 +197,21 @@ export default {
       const now = ctx.now || new Date();
       const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
       const readOk = [];
+      /** @type {import("../../core/contract.js").Update[]|undefined} */
+      let updates;
       const found = new Set(
         Object.keys(parsed).filter((key) => key !== "page" && key !== "complete")
       );
 
       if (parsed.applications) {
         const next = toApplications(parsed.applications.rows);
-        const { applications, updates } = diffApplications(
+        const diff = diffApplications(
           prev.applications,
           next,
           now
         );
-        state.applications = applications;
-        // The core picks Updates up from here until W1 decides otherwise.
-        state.lastUpdates = updates;
+        state.applications = diff.applications;
+        updates = diff.updates;
         readOk.push("applications");
         delete state.needsUpdate.applications;
       }
@@ -333,6 +336,7 @@ export default {
         state,
       };
       if (readOk.length) result.readOk = [SCOPE];
+      if (updates) result.updates = updates;
       if (failed.length) {
         result.error = {
           code: "needs-update",

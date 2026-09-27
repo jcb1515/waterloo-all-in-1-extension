@@ -19,7 +19,7 @@ replay (T2) can't reproduce them. This adapter is **T3 only**:
 
 | Page | Section | Yields |
 |---|---|---|
-| `co-op/full/applications.htm` | applications grid | `Application[]` (status via `status.js`), diffed by `diff.js` → `state.applications` + `state.lastUpdates`. Grids opened filtered to one status ("View") are normal — absent apps are carried, never treated as removed |
+| `co-op/full/applications.htm` | applications grid | `Application[]` (status via `status.js`), diffed by `diff.js` → `state.applications` + `SyncResult.updates`. Grids opened filtered to one status ("View") are normal — absent apps are carried, never treated as removed |
 | `co-op/full/interviews.htm` | interviews list | `Item[]` type `interview` (startAt from "Interview Date / Time"; cancelled when schedule/confirmation says so) |
 | `interviews.htm` detail view | interview detail | booked → same `interview:<jobId>` item enriched (When/Where/interviewer/method/instructions); unbooked + available slots → `timeslot:<jobId>` deadline item (earliest slot −24 h, WW's own auto-pick rule) |
 | `dashboard.htm` | event registrations | `Item[]` type `event` |
@@ -59,8 +59,6 @@ tables → plain replace.
   lastGood:    { interviews, "interview-detail", events, posting:
                    { items: Item[], at: string } },
   needsUpdate: { [section]: true },    // expected section missing on a loaded page
-  lastUpdates: Update[],               // Update hand-off — the core reads these
-                                       // from state until W1 decides otherwise
   lastReadOk:  string[],               // sections that read OK on the last payload
   lastSeenAt:  string,
   messages:    [{ subject, receivedAt, from, priority }],
@@ -72,7 +70,10 @@ tables → plain replace.
 ```
 
 `sync()` only returns cached items + `complete:false` + `session:"no-tab"` —
-the core surfaces "open WaterlooWorks to refresh".
+the core surfaces "open WaterlooWorks to refresh". Application Updates ride on
+`SyncResult.updates` (never persisted): ids are replay-stable —
+`<appId>:<status>` for a status change, `<appId>:new` for a first-seen
+application — so the core's id-based dedupe makes replays free.
 
 ## Settings
 

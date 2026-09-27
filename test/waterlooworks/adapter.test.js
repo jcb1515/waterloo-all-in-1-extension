@@ -68,7 +68,8 @@ test("first applications read stores applications and emits no updates", async (
   assert.equal(result.state.applications.length, 3);
   assert.equal(result.state.applications[0].status, "applied");
   assert.equal(result.state.applications[1].status, "not-selected");
-  assert.deepEqual(result.state.lastUpdates, []);
+  assert.deepEqual(result.updates, []);
+  assert.equal(result.state.lastUpdates, undefined);
   assert.equal(result.items.length, 0); // the grid produces no Items
 });
 
@@ -92,14 +93,17 @@ test("second read with a status change emits a status update + history", async (
     },
     makeCtx(first.state)
   );
-  const updates = second.state.lastUpdates;
+  const updates = second.updates;
   assert.equal(updates.length, 1);
   assert.equal(updates[0].kind, "status");
+  assert.equal(updates[0].id, "waterlooworks:488135:selected-for-interview");
   assert.equal(
     updates[0].text,
     "Interview invite: Globex · Analog/Mixed-Signal Engineering Co-op"
   );
   assert.equal(updates[0].refId, "waterlooworks:488135");
+  // Updates ride on SyncResult.updates — nothing persisted in state.
+  assert.equal(second.state.lastUpdates, undefined);
   const app = second.state.applications[0];
   assert.equal(app.status, "selected-for-interview");
   assert.deepEqual(
@@ -129,7 +133,7 @@ test("unknown status preserves the previous status", async () => {
     makeCtx(first.state)
   );
   assert.equal(second.state.applications[0].status, "applied");
-  assert.equal(second.state.lastUpdates.length, 0);
+  assert.equal(second.updates.length, 0);
 });
 
 test("logged-out payload preserves items and marks the session", async () => {
