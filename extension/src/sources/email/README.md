@@ -31,7 +31,16 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
     zone is `exact`/`auto`, anything else `tentative`/`pending` with `meta.tz`.
     `Canceled event:` keeps `status "cancelled"`. "interview" in the subject
     or a WaterlooWorks sender makes it an `interview`. `meta.facts` carries
-    Organizer/Where/Join; `id = <provider>:invite:<key>:<startAt>`.
+    Organizer/Where/Join.
+    - `id = <provider>:invite:<slug(title)>:<startAt>` — **not** the message
+      key, so an Invitation / Updated invitation / reminder / forward / the
+      matching Canceled event of the same meeting collapse to one item; a
+      cancellation lands as `status "cancelled"` and the publisher drops it.
+    - `meta.employer` = sender domain label (e.g. `acme`) on interviews and
+      co-op mail, so core can link the item to a WaterlooWorks application.
+    - Gmail invite items get `meta.onCalendar = "google"`: Google already puts
+      Gmail invitations on the user's Google Calendar, so the publisher skips
+      them (opt back in with `settings.gmailInvitesToFeed: true`).
   - **Important mail → review items.** Sender gate: WaterlooWorks/co-op,
     Learn, a `courses[].instructors[].email` match, a course code in the
     subject, or `settings.teams`/`settings.senders` substrings — OR a keyword
@@ -45,13 +54,18 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
     offer-deadline, cycle-date, exam, meeting, deadline, else event); timed
     hits give `startAt`/`endAt` or `dueAt` (all-day deadline → 23:59 ET).
     Always `tentative`/`pending`; `id = <provider>:mail:<key>:<instant>`.
+    `exam` items take the outline/Portal titles ("Midterm"/"Final exam" when
+    `classify` finds one in the sentence or subject) plus
+    `details = "Email: " + cleanedSubject`, so they merge with the real exam.
 
 ## Settings
 
-`{gmail?, outlook?, folders?, senders?, keywords?, teams?}`
+`{gmail?, outlook?, folders?, senders?, keywords?, teams?, gmailInvitesToFeed?}`
 
 - `settings.gmail` / `settings.outlook` `=== false` → that provider returns
   an empty, incomplete result (`scope "email:off"`).
+- `gmailInvitesToFeed: true` → Gmail invite items lose `meta.onCalendar` and
+  publish normally (default: skipped, Google Calendar already has them).
 - `folders` (default `["inbox"]`) — case-insensitive allow-list on the
   extract's folder; `"sent"` yields nothing unless configured. A null folder
   is allowed.
