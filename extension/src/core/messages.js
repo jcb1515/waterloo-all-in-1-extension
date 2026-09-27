@@ -28,4 +28,8 @@ export const UI = Object.freeze({
   MANUAL_DELETE: "wa1:manual-delete",
   /** options -> background: { type, items } replace the manual list (import) */
   MANUAL_SET: "wa1:manual-set",
+  /** options/panel -> background: { type, provider } start a guided mail scan */
+  MAIL_SCAN_START: "wa1:mail-scan-start",
+  /** options/panel -> background: { type } stop the running mail scan */
+  MAIL_SCAN_STOP: "wa1:mail-scan-stop",
 });

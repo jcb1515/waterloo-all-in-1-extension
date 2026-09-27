@@ -105,6 +105,7 @@ export function SourcesSection({ settings, save, state }) {
             {a.id === "outlook" ? (
               <>
                 <EmailProviders src={src.outlook || {}} save={save} />
+                <MailScan src={src.outlook || {}} />
                 <EmailAdvanced src={src.outlook || {}} save={save} />
               </>
             ) : null}
@@ -377,6 +378,102 @@ function EmailProviders({ src, save }) {
     </div>
   );
 }
+
+/**
+ * Guided "Scan my mail" — one button per enabled provider. Gmail opens its
+ * search url in an existing mail tab; Outlook shows the query to paste.
+ * Nothing navigates until this click.
+ * @param {{src: any}} p
+ */
+function MailScan({ src }) {
+  const [outlookQuery, setOutlookQuery] = useState(
+    IS_PREVIEW && query.get("mailscan") === "outlook" ? PREVIEW_SCAN_QUERY : null
+  );
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(/** @type {string|null} */ (null));
+
+  /** Reuse an open Gmail tab for the scan url; otherwise open a new one. */
+  const openMailTab = async (url) => {
+    if (IS_PREVIEW || !url) return;
+    try {
+      const tabs = await chrome.tabs.query({ url: "https://mail.google.com/*" });
+      const tab = (tabs || []).find((t) => t.id != null && !t.discarded);
+      if (tab) await chrome.tabs.update(tab.id, { url, active: true });
+      else await chrome.tabs.create({ url });
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const start = async (provider) => {
+    if (IS_PREVIEW) {
+      if (provider === "outlook") setOutlookQuery(PREVIEW_SCAN_QUERY);
+      return;
+    }
+    setBusy(provider);
+    try {
+      const r = await send({ type: UI.MAIL_SCAN_START, provider });
+      if (r && r.url) await openMailTab(r.url);
+      else if (r && r.query) setOutlookQuery(r.query);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(outlookQuery || "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  return (
+    <div class="src-sub mail-scan">
+      <span class="label">Guided scan</span>
+      <p class="help">
+        Walk your older mail in a tab you control — the extension reads each message only while
+        you open it.
+      </p>
+      <div class="toggle-col">
+        {src.outlook !== false ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            disabled={busy === "outlook"}
+            onClick={() => start("outlook")}
+          >
+            Scan my Outlook mail (last 60 days)
+          </button>
+        ) : null}
+        {src.gmail !== false ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            disabled={busy === "gmail"}
+            onClick={() => start("gmail")}
+          >
+            Scan my Gmail (last 60 days)
+          </button>
+        ) : null}
+      </div>
+      {outlookQuery ? (
+        <div class="mail-scan-query">
+          <code class="mail-scan-code">{outlookQuery}</code>
+          <p class="help">Paste this into Outlook's search box.</p>
+          <button type="button" class="btn btn-sm" onClick={copy}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const PREVIEW_SCAN_QUERY =
+  'received:>=2025-11-25 AND (subject:interview OR subject:deadline OR subject:exam OR hasattachment:yes)';
 
 /**
  * Email Advanced: extra senders, keywords, team names and the folder

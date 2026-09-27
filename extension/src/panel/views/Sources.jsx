@@ -7,7 +7,7 @@ import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
 import { IS_PREVIEW, send } from "../data.js";
 import { UI } from "../../core/messages.js";
-import { GROUP_LABELS, neededGroups } from "../../core/permissions.js";
+import { GROUP_LABELS, neededGroups, OPTIONAL_PERMISSION_GROUPS } from "../../core/permissions.js";
 import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
 import { inventoryReport } from "../../sources/discord/index.js";
 import {
@@ -132,6 +132,7 @@ function SourceCard({ adapter, stage, st, status, state, actions, now }) {
         <p class="source-detail">Updates while you browse {adapter.label}.</p>
       ) : null}
       {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
+      {adapter.id === "outlook" && !needsPerm ? <EmailScanControls st={st} /> : null}
       <div class="source-actions">
         {missing.map((g) => (
           <AllowSourceButton
@@ -247,6 +248,66 @@ function DiscordControls({ st }) {
         ) : null}
         <button type="button" class="btn btn-sm btn-ghost" onClick={copyReport}>
           <ClipboardCheckIcon size={13} /> {copied ? "Copied" : "Copy Discord report"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Guided mail-scan progress. While sourceState.outlook.state.scan is set,
+ * the next queued subject is a click-through into the user's own mail tab;
+ * Stop clears the scan. Nothing navigates without a click.
+ * @param {{st: any}} p
+ */
+function EmailScanControls({ st }) {
+  const state = (st && st.state) || {};
+  const scan = state.scan;
+  const queue = Array.isArray(state.scanQueue) ? state.scanQueue : [];
+  const next = queue[0] || null;
+  if (!scan) return null;
+
+  const providerLabel = scan.provider === "gmail" ? "Gmail" : "Outlook";
+  const hostPatterns =
+    /** @type {Record<string, string[]>} */ (OPTIONAL_PERMISSION_GROUPS)[scan.provider] || [];
+
+  /** Open a queued thread in the provider's existing mail tab, else a new tab. */
+  const openQueued = async (url) => {
+    if (IS_PREVIEW || !url) return;
+    try {
+      const tabs = hostPatterns.length ? await chrome.tabs.query({ url: hostPatterns }) : [];
+      const tab = (tabs || []).find((t) => t.id != null && !t.discarded);
+      if (tab) await chrome.tabs.update(tab.id, { url, active: true });
+      else await chrome.tabs.create({ url });
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  return (
+    <div class="mail-scan-controls">
+      <p class="source-detail">
+        Mail scan running — {providerLabel}, last {scan.days} days.
+      </p>
+      <div class="source-actions">
+        {next ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            title={next.url}
+            onClick={() => openQueued(next.url)}
+          >
+            <ArrowRightIcon size={13} /> Next ({queue.length} left): {next.subject}
+          </button>
+        ) : (
+          <span class="source-detail">Queue empty — open the search results to feed it.</span>
+        )}
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost"
+          onClick={() => send({ type: UI.MAIL_SCAN_STOP })}
+        >
+          Stop
         </button>
       </div>
     </div>
