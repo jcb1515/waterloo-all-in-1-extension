@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_appName__",
+  "short_name": "__MSG_appName__",
+  "description": "__MSG_appDescription__",
+  "version": "0.0.1",
+  "default_locale": "en",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "__MSG_actionTitle__",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "src/panel/panel.html"
+  },
+  "options_page": "src/options/options.html",
+  "background": {
+    "service_worker": "src/background/index.js",
+    "type": "module"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "alarms",
+    "notifications",
+    "offscreen",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://learn.uwaterloo.ca/*",
+    "https://outline.uwaterloo.ca/*",
+    "https://portal.uwaterloo.ca/*",
+    "https://waterlooworks.uwaterloo.ca/*",
+    "https://discord.com/*",
+    "https://outlook.office.com/*",
+    "https://outlook.cloud.microsoft/*",
+    "https://outlook.live.com/*",
+    "https://mail.google.com/*",
+    "https://uwlearn-calendar-feed.gurshaan1124.workers.dev/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://learn.uwaterloo.ca/*",
+        "https://portal.uwaterloo.ca/*",
+        "https://waterlooworks.uwaterloo.ca/*",
+        "https://discord.com/*",
+        "https://outlook.office.com/*",
+        "https://outlook.cloud.microsoft/*",
+        "https://outlook.live.com/*",
+        "https://mail.google.com/*"
+      ],
+      "js": ["src/capture/observer.main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://learn.uwaterloo.ca/*"],
+      "js": ["src/capture/recorder.content.js", "src/sources/learn/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://portal.uwaterloo.ca/*"],
+      "js": ["src/capture/recorder.content.js", "src/sources/portal/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://waterlooworks.uwaterloo.ca/*"],
+      "js": ["src/capture/recorder.content.js", "src/sources/waterlooworks/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://discord.com/*"],
+      "js": ["src/capture/recorder.content.js", "src/sources/discord/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://outlook.office.com/*",
+        "https://outlook.cloud.microsoft/*",
+        "https://outlook.live.com/*",
+        "https://mail.google.com/*"
+      ],
+      "js": ["src/capture/recorder.content.js", "src/sources/email/content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
