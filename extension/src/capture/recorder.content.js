@@ -18,8 +18,34 @@ import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./r
   if (!site) return;
 
   const READY_EVENT = "wa1:recorder-ready";
-  const SNAP_DEBOUNCE_MS = 3000;
+  const SNAP_THROTTLE_MS = 3000;
   const SNAP_MIN_INTERVAL_MS = 10000;
+
+  /*
+    Per-site text policy for htmlOutline. "structural" records element counts
+    and text lengths only, so usernames, DM names and mail subjects never
+    leave the page. Discord's member list is an <aside>, its message headers
+    are <h3>, and the DM list under /channels/@me is a <nav>; Outlook keeps
+    the user's name in the tab title and subjects under [role=main].
+  */
+  const SITE_POLICY = {
+    discord: { textMode: "structural", excludeSelectors: ["aside", '[class*="members"]', '[data-list-id="chat-messages"]'] },
+    outlook: { textMode: "structural", excludeSelectors: ['[role="main"]'] },
+    gmail: { textMode: "structural", excludeSelectors: ['[role="main"]'] },
+    learn: { textMode: "full" },
+    portal: { textMode: "full" },
+    waterlooworks: { textMode: "full" },
+  };
+  const policy = SITE_POLICY[site] || { textMode: "full" };
+  const structural = policy.textMode === "structural";
+
+  /** Options for htmlOutline, including this site's privacy policy. */
+  function outlineOpts() {
+    const opts = { extraWords: redactWords, ...policy };
+    // The Discord DM list lives in a <nav> — record no nav texts there.
+    if (site === "discord" && location.pathname.startsWith("/channels/@me")) opts.navSelectors = "";
+    return opts;
+  }
 
   let enabled = true;
   /** @type {string[]} */
@@ -73,7 +99,7 @@ import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./r
           }
         } else if (/html/i.test(ct)) {
           try {
-            shape = htmlOutline(new DOMParser().parseFromString(d.body, "text/html"), redactWords);
+            shape = htmlOutline(new DOMParser().parseFromString(d.body, "text/html"), outlineOpts());
           } catch {
             shape = null;
           }
@@ -111,16 +137,19 @@ import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./r
     if (now - lastSentAt < SNAP_MIN_INTERVAL_MS) return;
     try {
       const path = normalizePath(location.href);
-      const outline = htmlOutline(document, redactWords);
+      const outline = htmlOutline(document, outlineOpts());
       const hash = hashString(JSON.stringify(outline));
       if (path === lastPath && hash === lastHash) return;
       lastPath = path;
       lastHash = hash;
       lastSentAt = now;
+      const title = structural
+        ? `<text ${String(document.title || "").replace(/\s+/g, " ").trim().length}>`
+        : redactText(document.title, redactWords);
       send({
         type: MSG.DISCOVERY,
         site,
-        entry: { kind: "page", path, title: redactText(document.title, redactWords), outline },
+        entry: { kind: "page", path, title, outline },
       });
     } catch {
       /* ignore */
@@ -135,10 +164,16 @@ import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./r
     }
     window.addEventListener("load", snapshot, { once: true });
     try {
+      // Throttle, not debounce: on sites that mutate constantly (Discord,
+      // Gmail) a debounce that resets every mutation would starve snapshots.
       new MutationObserver(() => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(snapshot, SNAP_DEBOUNCE_MS);
-      }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+        if (!debounceTimer) {
+          debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+            snapshot();
+          }, SNAP_THROTTLE_MS);
+        }
+      }).observe(document.documentElement, { childList: true, subtree: true });
     } catch {
       /* ignore */
     }
