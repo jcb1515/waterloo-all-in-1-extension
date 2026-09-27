@@ -24,9 +24,14 @@ const TZ = "America/Toronto";
 
 export const REMIND_ALARM = "wa1:remind";
 export const BRIEFING_ALARM = "wa1:briefing";
+export const DIGEST_ALARM = "wa1:digest";
 export const SENT_KEY = "remindersSent"; // {key: iso sent time}, pruned > 30 d
 export const SNOOZE_KEY = "reminderSnooze"; // {key: iso until}
 export const BRIEFING_KEY = "briefingLastSent"; // "YYYY-MM-DD" (Toronto)
+export const DIGEST_KEY = "digestLastSent"; // "YYYY-MM-DD" (Toronto)
+
+/** settings.reminders.digest.day values -> JS weekday (0=Sun). */
+export const DIGEST_DAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
 const STALE_MS = 6 * HOUR;
 const SENT_KEEP_MS = 30 * DAY;
@@ -213,6 +218,72 @@ export function briefingText(items, userState = {}, now = new Date(), settings =
   return parts.join(" · ");
 }
 
+/* ------------------------------ weekly digest ----------------------------- */
+
+const CLASSISH_TYPES = new Set(["class", "tutorial", "term-date"]);
+const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Weekly digest text: "This week: 6 due (2 worth ≥10%), 1 exam, 2 interviews
+ * · busiest: Thu". "This week" is the next 7 days from `now`. Null when the
+ * week holds nothing reportable.
+ * @param {Record<string, any>} items
+ * @param {Record<string, any>} userState
+ * @param {Date} now
+ * @param {any} [settings]
+ */
+export function digestText(items, userState = {}, now = new Date(), settings = {}) {
+  const acceptPending = !!(settings.review && settings.review.showPending);
+  const nowMs = now.getTime();
+  const weekEnd = nowMs + 7 * DAY;
+  let due = 0;
+  let heavy = 0;
+  let exams = 0;
+  let interviews = 0;
+  /** @type {Map<number, number>} */
+  const dayCounts = new Map();
+  for (const raw of Object.values(items || {})) {
+    if (!raw || !raw.id) continue;
+    const eff = effectiveItem(raw, userState[raw.id], { acceptPending });
+    if (!isVisible(eff, nowMs)) continue;
+    if (eff.status !== "open") continue;
+    const a = anchorOf(eff);
+    if (!a) continue;
+    const ms = Date.parse(a);
+    if (Number.isNaN(ms) || ms < nowMs || ms >= weekEnd) continue;
+    const p = zonedParts(new Date(ms), TZ);
+    if (eff.type === "exam") {
+      exams++;
+      dayCounts.set(p.weekday, (dayCounts.get(p.weekday) || 0) + 1);
+    } else if (eff.type === "interview") {
+      interviews++;
+      dayCounts.set(p.weekday, (dayCounts.get(p.weekday) || 0) + 1);
+    } else if (eff.dueAt && !CLASSISH_TYPES.has(eff.type)) {
+      due++;
+      if (typeof eff.weight === "number" && eff.weight >= 10) heavy++;
+      dayCounts.set(p.weekday, (dayCounts.get(p.weekday) || 0) + 1);
+    }
+  }
+  if (!due && !exams && !interviews) return null;
+  const parts = [];
+  if (due) {
+    parts.push(`${due} due${heavy ? ` (${heavy} worth ≥10%)` : ""}`);
+  }
+  if (exams) parts.push(`${exams} exam${exams === 1 ? "" : "s"}`);
+  if (interviews) parts.push(`${interviews} interview${interviews === 1 ? "" : "s"}`);
+  let busiest = -1;
+  let busiestN = 0;
+  for (const [d, n] of dayCounts) {
+    if (n > busiestN) {
+      busiest = d;
+      busiestN = n;
+    }
+  }
+  let text = `This week: ${parts.join(", ")}`;
+  if (busiest >= 0) text += ` · busiest: ${WD_SHORT[busiest]}`;
+  return text;
+}
+
 /* --------------------------- runtime (browser) --------------------------- */
 
 /** Read sent/snoozed maps, pruning sent keys older than 30 days. */
@@ -251,6 +322,7 @@ export async function rescheduleReminders(deps = {}) {
   const next = pending.find((r) => r.fireAt > now.getTime() - STALE_MS);
   alarm(REMIND_ALARM, next ? next.fireAt : null);
   await rescheduleBriefing(settings, deps);
+  await rescheduleDigest(settings, deps);
 }
 
 /** Arm `wa1:briefing` at the next Toronto occurrence of the briefing time. */
@@ -276,6 +348,33 @@ async function rescheduleBriefing(settings, deps = {}) {
   let at = Date.parse(zonedIso(p.y, p.m, p.d, t[0], t[1], TZ));
   if (at <= now.getTime()) at = Date.parse(zonedIso(p.y, p.m, p.d + 1, t[0], t[1], TZ));
   alarm(BRIEFING_ALARM, at);
+}
+
+/** Arm `wa1:digest` at the next Toronto occurrence of the digest day/time. */
+async function rescheduleDigest(settings, deps = {}) {
+  const alarm =
+    deps.alarm ||
+    ((name, at) => {
+      try {
+        if (at == null) chrome.alarms.clear(name);
+        else chrome.alarms.create(name, { when: at });
+      } catch {
+        /* alarms unavailable */
+      }
+    });
+  const digest = settings && settings.reminders && settings.reminders.digest;
+  const t = digest && parseHhMm(digest.time);
+  const dow = digest && DIGEST_DAYS[String(digest.day || "").toLowerCase()];
+  if (!digest || digest.enabled === false || !t || dow == null) {
+    alarm(DIGEST_ALARM, null);
+    return;
+  }
+  const now = new Date();
+  const p = zonedParts(now, TZ);
+  let delta = (dow - p.weekday + 7) % 7;
+  let at = Date.parse(zonedIso(p.y, p.m, p.d + delta, t[0], t[1], TZ));
+  if (at <= now.getTime()) at = Date.parse(zonedIso(p.y, p.m, p.d + delta + 7, t[0], t[1], TZ));
+  alarm(DIGEST_ALARM, at);
 }
 
 /** Reminders due right now (or up to a minute early), none older than 6 h. */
@@ -400,6 +499,35 @@ export async function sendBriefing() {
     console.warn("[wa1] briefing", e && /** @type {any} */ (e).message);
   }
   await rescheduleBriefing(settings);
+}
+
+/** One-per-week digest notification. */
+export async function sendDigest() {
+  const settings = await getSettings();
+  const digest = settings && settings.reminders && settings.reminders.digest;
+  if (!digest || digest.enabled === false) return;
+  const now = new Date();
+  const p = zonedParts(now, TZ);
+  const dayKey = `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
+  const last = await getLocal(DIGEST_KEY);
+  if (last === dayKey) return;
+  const mv = await getMergedView();
+  const text = digestText(mv.items, mv.userState, now, settings);
+  if (text) {
+    try {
+      await chrome.notifications.create("wa1:digest", {
+        type: "basic",
+        iconUrl: "icons/icon-128.png",
+        title: "Your week at Waterloo",
+        message: text,
+      });
+    } catch (e) {
+      console.warn("[wa1] digest", e && /** @type {any} */ (e).message);
+    }
+  }
+  // Mark the day even when the week is empty, so we don't keep checking.
+  await mutateKey(DIGEST_KEY, () => dayKey);
+  await rescheduleDigest(settings);
 }
 
 /** `<id>:<lead>:<anchor>` -> id. Item ids contain colons, so strip two tails. */

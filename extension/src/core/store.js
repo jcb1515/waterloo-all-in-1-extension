@@ -83,6 +83,7 @@ export const DEFAULT_SETTINGS = {
     },
     quietHours: { enabled: true, start: "23:00", end: "08:00" },
     briefing: { enabled: true, time: "08:00" },
+    digest: { enabled: true, day: "sun", time: "18:00" },
     includeTentative: false,
   },
   calendar: {

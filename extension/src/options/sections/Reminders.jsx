@@ -97,6 +97,7 @@ export function RemindersSection({ settings, save }) {
   const rem = settings.reminders || {};
   const quiet = rem.quietHours || {};
   const briefing = rem.briefing || {};
+  const digest = rem.digest || {};
   const leads = rem.leads || {};
   const [testMsg, setTestMsg] = useState("");
 
@@ -184,6 +185,38 @@ export function RemindersSection({ settings, save }) {
               value={briefing.time || "08:00"}
               disabled={briefing.enabled === false}
               onChange={(e) => patch({ briefing: { ...briefing, time: /** @type {any} */ (e.target).value } })}
+            />
+          </div>
+        </Field>
+
+        <Field label="Weekly digest" help="One notification a week with the next seven days: dues, exams, interviews and the busiest day.">
+          <div class="inline-row">
+            <Toggle
+              label="Weekly digest"
+              checked={digest.enabled !== false}
+              onChange={(v) => patch({ digest: { ...digest, enabled: v } })}
+            />
+            <select
+              class="select"
+              aria-label="Digest day"
+              value={digest.day || "sun"}
+              disabled={digest.enabled === false}
+              onChange={(e) => patch({ digest: { ...digest, day: /** @type {any} */ (e.target).value } })}
+            >
+              <option value="sun">Sunday</option>
+              <option value="mon">Monday</option>
+              <option value="tue">Tuesday</option>
+              <option value="wed">Wednesday</option>
+              <option value="thu">Thursday</option>
+              <option value="fri">Friday</option>
+              <option value="sat">Saturday</option>
+            </select>
+            <input
+              class="input time-input"
+              type="time"
+              value={digest.time || "18:00"}
+              disabled={digest.enabled === false}
+              onChange={(e) => patch({ digest: { ...digest, time: /** @type {any} */ (e.target).value } })}
             />
           </div>
         </Field>

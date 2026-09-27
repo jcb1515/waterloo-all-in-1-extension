@@ -44,9 +44,11 @@ import {
   rescheduleReminders,
   fireDueReminders,
   sendBriefing,
+  sendDigest,
   installNotificationHandlers,
   REMIND_ALARM,
   BRIEFING_ALARM,
+  DIGEST_ALARM,
 } from "../core/remind.js";
 
 const BADGE_BG = "#FED34C"; // school bus yellow
@@ -131,6 +133,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === BRIEFING_ALARM) {
     sendBriefing().catch((e) => console.warn("[wa1] briefing", e && e.message));
+  }
+  if (alarm.name === DIGEST_ALARM) {
+    sendDigest().catch((e) => console.warn("[wa1] digest", e && e.message));
   }
 });
 
