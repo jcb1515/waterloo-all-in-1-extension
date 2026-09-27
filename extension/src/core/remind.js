@@ -45,6 +45,8 @@ function anchorOf(eff) {
  * @param {Date} now
  * @param {Record<string, string>} [sent]     key -> iso time it fired
  * @param {Record<string, string>} [snoozed] key -> iso until
+ * Keys embed the anchor ms (`<id>:<lead>:<anchor>`) so a moved date is a new
+ * reminder, not a skipped one.
  * @returns {{key: string, itemId: string, fireAt: number, lead: number}[]}
  */
 export function nextReminders(items, userState = {}, settings = {}, now = new Date(), sent = {}, snoozed = {}) {
@@ -70,7 +72,7 @@ export function nextReminders(items, userState = {}, settings = {}, now = new Da
     if (!Array.isArray(typeLeads)) continue;
     for (const lead of typeLeads) {
       if (typeof lead !== "number" || !(lead > 0)) continue;
-      const key = `${eff.id}:${lead}`;
+      const key = `${eff.id}:${lead}:${anchorMs}`;
       if (sent[key]) continue;
       let fireAt = anchorMs - lead * MIN;
       // A snoozed reminder comes back at the snooze end — and stays fresh
@@ -400,13 +402,18 @@ export async function sendBriefing() {
   await rescheduleBriefing(settings);
 }
 
+/** `<id>:<lead>:<anchor>` -> id. Item ids contain colons, so strip two tails. */
+function itemIdFromKey(key) {
+  return key.replace(/:\d+:\d+$/, "");
+}
+
 /** Notification click + button handlers; call once at SW startup. */
 export function installNotificationHandlers() {
   try {
     chrome.notifications.onButtonClicked.addListener(async (id, btnIdx) => {
       if (!String(id).startsWith("wa1:rem:")) return;
       const key = String(id).slice("wa1:rem:".length);
-      const itemId = key.slice(0, key.lastIndexOf(":"));
+      const itemId = itemIdFromKey(key);
       try {
         if (btnIdx === 0) {
           await setUserState(itemId, { done: true, doneAt: new Date().toISOString() });
@@ -425,7 +432,7 @@ export function installNotificationHandlers() {
     chrome.notifications.onClicked.addListener(async (id) => {
       if (!String(id).startsWith("wa1:rem:")) return;
       const key = String(id).slice("wa1:rem:".length);
-      const itemId = key.slice(0, key.lastIndexOf(":"));
+      const itemId = itemIdFromKey(key);
       try {
         const mv = await getMergedView();
         const it = mv.items[itemId];

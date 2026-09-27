@@ -40,20 +40,36 @@ const item = (id, over = {}) => ({
   ...over,
 });
 
-test("leads produce <id>:<lead> keys, soonest first", () => {
+test("leads produce <id>:<lead>:<anchor> keys, soonest first", () => {
+  const A = Date.parse("2026-10-05T03:59:00Z");
   const items = { a: item("a", { dueAt: "2026-10-05T03:59:00Z" }) };
   const r = nextReminders(items, {}, SETTINGS(), NOW);
   // deadline leads [1440, 120]: the longer lead fires first.
   assert.deepEqual(
     r.map((x) => x.key),
-    ["a:1440", "a:120"]
+    [`a:1440:${A}`, `a:120:${A}`]
   );
   assert.equal(r[0].itemId, "a");
-  assert.equal(r[0].fireAt, Date.parse("2026-10-05T03:59:00Z") - 1440 * 60000);
-  assert.equal(r[1].fireAt, Date.parse("2026-10-05T03:59:00Z") - 120 * 60000);
+  assert.equal(r[0].fireAt, A - 1440 * 60000);
+  assert.equal(r[1].fireAt, A - 120 * 60000);
+});
+
+test("a moved date is a new key and fires again", () => {
+  const A1 = Date.parse("2026-10-05T03:59:00Z");
+  const A2 = Date.parse("2026-10-07T03:59:00Z");
+  // The 1440-min reminder for the old date already went out.
+  const sent = { [`a:1440:${A1}`]: NOW.toISOString() };
+  const before = nextReminders({ a: item("a", { dueAt: "2026-10-05T03:59:00Z" }) }, {}, SETTINGS(), NOW, sent);
+  assert.ok(!before.some((x) => x.lead === 1440), "old key is suppressed by sent");
+  const moved = nextReminders({ a: item("a", { dueAt: "2026-10-07T03:59:00Z" }) }, {}, SETTINGS(), NOW, sent);
+  assert.ok(
+    moved.some((x) => x.key === `a:1440:${A2}`),
+    "the moved date earns a fresh reminder"
+  );
 });
 
 test("timed events anchor on startAt, deadlines on dueAt", () => {
+  const S = Date.parse("2026-10-04T19:00:00Z");
   const items = {
     exam: item("exam", { type: "exam", startAt: "2026-10-04T19:00:00Z", dueAt: "2026-10-09T00:00:00Z" }),
   };
@@ -62,25 +78,27 @@ test("timed events anchor on startAt, deadlines on dueAt", () => {
   // 4320 -> Oct 1 19:00, 1440 -> Oct 3 19:00 (the dueAt is ignored).
   assert.deepEqual(
     r.map((x) => x.key),
-    ["exam:4320", "exam:1440"]
+    [`exam:4320:${S}`, `exam:1440:${S}`]
   );
-  assert.equal(r[0].fireAt, Date.parse("2026-10-04T19:00:00Z") - 4320 * 60000);
+  assert.equal(r[0].fireAt, S - 4320 * 60000);
 });
 
 test("sent keys are skipped; snoozed keys refire at the snooze end", () => {
+  const A = Date.parse("2026-10-05T03:59:00Z");
   const items = { a: item("a", { dueAt: "2026-10-05T03:59:00Z" }) };
-  const sent = { "a:1440": NOW.toISOString() };
+  const sent = { [`a:1440:${A}`]: NOW.toISOString() };
   const r = nextReminders(items, {}, SETTINGS(), NOW, sent);
   assert.deepEqual(
     r.map((x) => x.key),
-    ["a:120"]
+    [`a:120:${A}`]
   );
 
   // Snoozed to a later time: fireAt becomes the snooze end.
+  const A2 = Date.parse("2026-10-01T20:30:00Z");
   const items2 = { b: item("b", { dueAt: "2026-10-01T20:30:00Z" }) };
-  const snoozed = { "b:120": "2026-10-01T20:00:00Z" };
+  const snoozed = { [`b:120:${A2}`]: "2026-10-01T20:00:00Z" };
   const r2 = nextReminders(items2, {}, SETTINGS(), NOW, {}, snoozed);
-  const s = r2.find((x) => x.key === "b:120");
+  const s = r2.find((x) => x.key === `b:120:${A2}`);
   assert.equal(s.fireAt, Date.parse("2026-10-01T20:00:00Z"));
 });
 
