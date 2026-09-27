@@ -2,8 +2,18 @@
 // Parser rows/details -> contract objects (pure; no chrome APIs).
 
 import { itemId } from "../../core/contract.js";
+import { hashString } from "../../capture/redact.js";
+import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { normalizeStatus } from "./status.js";
-import { SCOPE } from "./selectors.js";
+import {
+  SCOPE,
+  COOP_KEEP_RE,
+  COOP_CATEGORIES,
+  COOP_ZONE_RE,
+  COOP_END_OF_DAY_RE,
+  COOP_TIME_RE,
+  COOP_WORK_TERM_LINE_RE,
+} from "./selectors.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 /** @typedef {import("../../core/contract.js").Application} Application */
@@ -275,6 +285,314 @@ export function postingItems(posting, now) {
       meta: { jobId: posting.jobId, division: posting.division },
     },
   ];
+}
+
+/** Message-date items are kept only when the hit clears this bar. */
+const MSG_MIN_CONFIDENCE = 0.6;
+/** Hits more than this far before the message's send time are past references. */
+const MSG_PAST_MS = DAY_MS;
+const SNIPPET_MAX = 300;
+const TITLE_MAX = 100;
+
+/** Normalize a message subject so list rows and detail pages hash alike. */
+const normalizeSubject = (subject) =>
+  String(subject || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * The Toronto calendar day (YYYY-MM-DD) of a send time. A bare "YYYY-MM-DD"
+ * input is already a calendar day; a timestamp is read in Toronto.
+ * @param {string|undefined} sentAt
+ * @param {Date} fallback
+ */
+function torontoDay(sentAt, fallback) {
+  if (typeof sentAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sentAt)) {
+    return sentAt;
+  }
+  const date = sentAt ? new Date(sentAt) : fallback;
+  const valid = date instanceof Date && !Number.isNaN(date.getTime()) ? date : fallback;
+  const p = zonedParts(valid);
+  return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
+}
+
+/**
+ * Stable per-message key. The inbox row's `receivedAt` and the detail page's
+ * `createdAt` are the same instant, so both hash to one key and the detail
+ * read replaces the list read's items rather than duplicating them.
+ * @param {string|undefined} subject
+ * @param {string|undefined} sentAt
+ * @param {Date} now  fallback when sentAt is missing/unparseable
+ */
+export function messageKey(subject, sentAt, now) {
+  return hashString(`${normalizeSubject(subject)}|${torontoDay(sentAt, now)}`);
+}
+
+/**
+ * The sentence of `text` containing the matched date (hit.index/hit.text),
+ * capped at SNIPPET_MAX chars. When the sentence itself overflows, keep a
+ * window centred on the match so the snippet still shows the date.
+ * @param {string} text
+ * @param {{index: number, text: string}} hit
+ */
+function snippetAround(text, hit) {
+  const start = hit.index;
+  const end = start + hit.text.length;
+  const before = text.slice(0, start);
+  const left =
+    Math.max(
+      before.lastIndexOf("."),
+      before.lastIndexOf("!"),
+      before.lastIndexOf("?"),
+      before.lastIndexOf("\n")
+    ) + 1;
+  const rest = /[.!?]/.exec(text.slice(end));
+  const right = rest ? end + rest.index + 1 : text.length;
+  let sentence = text.slice(left, right).replace(/\s+/g, " ").trim();
+  if (sentence.length > SNIPPET_MAX) {
+    const hitStart = Math.max(0, start - left);
+    const from = Math.max(
+      0,
+      Math.min(hitStart - Math.floor(SNIPPET_MAX / 2), sentence.length - SNIPPET_MAX)
+    );
+    sentence = sentence.slice(from, from + SNIPPET_MAX).trim();
+  }
+  return sentence.slice(0, SNIPPET_MAX);
+}
+
+/** First keyword match on subject + snippet decides the item type. */
+function messageType(subject, snippet) {
+  const text = `${subject || ""} ${snippet}`;
+  if (/interview/i.test(text)) return "interview";
+  if (/\b(rank|ranking|match|cycle|job postings?)\b/i.test(text)) return "cycle-date";
+  if (/\b(due|deadline|closes?|submit|by)\b/i.test(text)) return "deadline";
+  return "event";
+}
+
+/**
+ * Dates mentioned in a WaterlooWorks message -> pending Review items.
+ * `text` is transient (subject + body text); only the ≤300-char sentence that
+ * contains each matched date is stored, in `details` and `evidence.snippet`.
+ * @param {{subject?: string, sentAt?: string, text?: string, url?: string,
+ *   category?: string, employer?: string, origin?: "list"|"detail"}} msg
+ * @param {(text: string, opts: {now: Date, termCode?: number, tz?: string}) => any[]} extractDates
+ *   ctx.textDates — the shared textdates extractor
+ * @param {string} nowIso
+ * @returns {Item[]}
+ */
+export function messageDateItems(msg, extractDates, nowIso) {
+  if (typeof extractDates !== "function" || !msg?.text) return [];
+  const now = new Date(nowIso);
+  const sent = msg.sentAt ? new Date(msg.sentAt) : null;
+  const ref = sent && !Number.isNaN(sent.getTime()) ? sent : now;
+  const hits = extractDates(msg.text, {
+    now: ref,
+    termCode: termCodeFor(ref),
+  });
+  const msgKey = messageKey(msg.subject, msg.sentAt, now);
+  const cutoff = ref.getTime() - MSG_PAST_MS;
+  const items = [];
+  for (const hit of hits || []) {
+    if (hit.confidence < MSG_MIN_CONFIDENCE) continue;
+    const startMs = Date.parse(hit.startAt);
+    if (Number.isNaN(startMs) || startMs < cutoff) continue;
+    const snippet = snippetAround(msg.text, hit);
+    const type = messageType(msg.subject, snippet);
+    const key = `msg:${msgKey}:${hit.startAt}`;
+    /** @type {Item} */
+    const item = {
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type,
+      title: String(msg.subject || "WaterlooWorks message").trim().slice(0, TITLE_MAX) ||
+        "WaterlooWorks message",
+      org: msg.employer || "WaterlooWorks",
+      url: msg.url || undefined,
+      status: "open",
+      confidence: "tentative",
+      review: "pending",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      details: snippet || undefined,
+      evidence: { snippet, url: msg.url || undefined, method: "text" },
+      meta: {
+        messageKey: msgKey,
+        messageOrigin: msg.origin === "list" ? "list" : "detail",
+        category: msg.category || undefined,
+        weekdayMismatch: Boolean(hit.weekdayMismatch),
+      },
+    };
+    if (hit.allDay) {
+      item.startAt = hit.startAt;
+      item.allDay = true;
+      if (hit.endAt) item.endAt = hit.endAt; // exclusive midnight (textdates)
+    } else if (type === "deadline" || type === "cycle-date") {
+      item.dueAt = hit.startAt;
+    } else {
+      item.startAt = hit.startAt;
+      if (hit.endAt) item.endAt = hit.endAt;
+    }
+    items.push(item);
+  }
+  return items;
+}
+
+/** Ids are slug-based and date-free so a moved date reads as "moved". */
+const slug = (text, fallback = "general") =>
+  String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || fallback;
+
+/**
+ * An entry's work term. Lines that name their term ("Fall 2026 co-op work
+ * term starts") use the named season/year; otherwise the recruiting-month
+ * rule applies: Sep–Dec year Y is for the Winter Y+1 work term, Jan–Apr for
+ * Spring Y, May–Aug for Fall Y.
+ * @param {{date: string, text?: string}} e
+ */
+function coopWorkTerm(e) {
+  const named = COOP_WORK_TERM_LINE_RE.exec(e?.text || "");
+  if (named) {
+    const season = named[1][0].toUpperCase() + named[1].slice(1).toLowerCase();
+    return `${season} ${named[2]}`;
+  }
+  const [y, m] = e.date.split("-").map(Number);
+  if (m >= 9) return `Winter ${y + 1}`;
+  if (m <= 4) return `Spring ${y}`;
+  return `Fall ${y}`;
+}
+
+/** Event text minus the time phrase / "(ET)" / "by end of day" — for titles. */
+function coopTextWithoutTime(text) {
+  let t = String(text || "").replace(COOP_END_OF_DAY_RE, "");
+  const tm = COOP_TIME_RE.exec(t);
+  if (tm) t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  t = t.replace(COOP_ZONE_RE, " ");
+  return t
+    .replace(/\s*(?:at|by)\s*$/i, "")
+    .replace(/[\s,;:–—-]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function coopCategory(text) {
+  for (const pair of COOP_CATEGORIES) {
+    const [re, category] = /** @type {[RegExp, string]} */ (pair);
+    if (re.test(text)) return category;
+  }
+  return "other";
+}
+
+/** "HH:MM" -> [h, mi]; date "YYYY-MM-DD" -> [y, m, d]. */
+const parseHHMM = (t) => t.split(":").map(Number);
+const parseYMD = (d) => d.split("-").map(Number);
+const nextDay = (d) =>
+  new Date(Date.parse(`${d}T00:00:00.000Z`) + DAY_MS).toISOString().slice(0, 10);
+
+/**
+ * Co-op important-dates entries -> cycle-date Items. The page is
+ * authoritative: review "auto", confidence "exact". Ids contain no date so a
+ * date that moves keeps its id (the core records "moved").
+ * @param {{date: string, cycle: string|null, text: string,
+ *   time: string|null, endOfDay: boolean}[]} entries  parseCoopDates output
+ * @param {{url?: string, nowIso?: string}} opts
+ * @returns {Item[]}
+ */
+export function coopDateItems(entries, { url, nowIso } = {}) {
+  const keep = (e) =>
+    Boolean(e?.date) &&
+    COOP_KEEP_RE.test(`${e.cycle || ""} ${e.text || ""}`);
+
+  // "Interviews" runs collapse to one all-day range per (workTerm, cycle) —
+  // the same cycle name recurs each recruiting season, so the workTerm half
+  // of the key keeps September's and January's "Cycle 1" apart.
+  /** @type {Map<string, {first: number, min: string, max: string}>} */
+  const runs = new Map();
+  (entries || []).forEach((e, i) => {
+    if (!keep(e) || coopCategory(e.text) !== "interviews") return;
+    const key = `${coopWorkTerm(e)}|${e.cycle || "general"}`;
+    const run = runs.get(key);
+    if (run) {
+      run.min = e.date < run.min ? e.date : run.min;
+      run.max = e.date > run.max ? e.date : run.max;
+    } else {
+      runs.set(key, { first: i, min: e.date, max: e.date });
+    }
+  });
+  /** @type {Map<number, string>} index of each run's first entry -> run key */
+  const runFirst = new Map();
+  for (const [key, run] of runs) runFirst.set(run.first, key);
+
+  const used = new Set();
+  /** @type {Item[]} */
+  const items = [];
+  const push = ({ cycle, workTerm, category, text, timing }) => {
+    const leaf = category === "other" ? text : category;
+    const base = `cycle:${slug(workTerm)}:${slug(cycle || "general")}:${slug(leaf, "other")}`;
+    let key = base;
+    let n = 2;
+    while (used.has(key)) key = `${base}-${n++}`;
+    used.add(key);
+    /** @type {Item} */
+    const item = {
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type: "cycle-date",
+      category,
+      title: cycle ? `${cycle}: ${text}` : text,
+      org: "Co-op",
+      ...timing,
+      url: url || undefined,
+      status: "open",
+      confidence: "exact",
+      review: "auto",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      meta: { workTerm, cycle: cycle || undefined },
+    };
+    items.push(item);
+  };
+
+  (entries || []).forEach((e, i) => {
+    if (!keep(e)) return; // holidays, classes, exams — not co-op items
+    const workTerm = coopWorkTerm(e);
+    const category = coopCategory(e.text);
+    if (category === "interviews") {
+      const runKey = `${workTerm}|${e.cycle || "general"}`;
+      if (runFirst.get(i) !== runKey) return; // folded into the range item
+      const run = /** @type {{min: string, max: string}} */ (runs.get(runKey));
+      const [sy, sm, sd] = parseYMD(run.min);
+      const [ey, em, ed] = parseYMD(nextDay(run.max));
+      push({
+        cycle: e.cycle,
+        workTerm,
+        category,
+        text: coopTextWithoutTime(e.text) || "Interviews",
+        timing: {
+          startAt: zonedIso(sy, sm, sd),
+          endAt: zonedIso(ey, em, ed), // exclusive midnight (textdates)
+          allDay: true,
+        },
+      });
+      return;
+    }
+    const [y, m, d] = parseYMD(e.date);
+    /** @type {Record<string, unknown>} */
+    let timing;
+    if (e.endOfDay) {
+      timing = { dueAt: zonedIso(y, m, d, 23, 59) };
+    } else if (e.time) {
+      const [h, mi] = parseHHMM(e.time);
+      timing = { dueAt: zonedIso(y, m, d, h, mi) };
+    } else {
+      timing = { startAt: zonedIso(y, m, d), allDay: true };
+    }
+    push({
+      cycle: e.cycle,
+      workTerm,
+      category,
+      text: coopTextWithoutTime(e.text) || e.text,
+      timing,
+    });
+  });
+  return items;
 }
 
 /**

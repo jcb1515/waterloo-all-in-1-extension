@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { applyPublish, buildCalendar, feedGroupOf, serializeState } from "../src/worker.js";
+import worker, {
+  applyPublish,
+  buildCalendar,
+  feedGroupOf,
+  foldIcsLine,
+  serializeState,
+  stableHash
+} from "../src/worker.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const T1 = new Date("2026-09-01T12:00:00Z");
@@ -162,6 +169,41 @@ test("all-day events use VALUE=DATE with an exclusive DTEND", () => {
       "DTEND;VALUE=DATE:20261009"
     ]
   );
+});
+
+test("all-day endAt at local midnight is exclusive; non-midnight stays inclusive", () => {
+  const events = [
+    // Oct 10 00:00 -> Oct 19 00:00 Toronto (textdates convention): the
+    // midnight endAt is already exclusive, so DTEND is Oct 19 verbatim.
+    ev({ id: "excl", allDay: true, title: "Excl", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-19T04:00:00.000Z" }),
+    // A non-midnight timestamp is an inclusive last day: Oct 19 -> +1.
+    ev({ id: "incl", allDay: true, title: "Incl", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-19T15:00:00.000Z" }),
+    // No endAt: single day, DTEND is start + 1.
+    ev({ id: "one", allDay: true, title: "One", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z" })
+  ];
+  const ics = buildCalendar(applyPublish(null, payload(events), T1).state);
+  const excl = blockFor(ics, "excl@waterloo-all-in-1");
+  assert.equal(prop(excl, "DTSTART"), "DTSTART;VALUE=DATE:20261010");
+  assert.equal(prop(excl, "DTEND"), "DTEND;VALUE=DATE:20261019");
+  const incl = blockFor(ics, "incl@waterloo-all-in-1");
+  assert.equal(prop(incl, "DTEND"), "DTEND;VALUE=DATE:20261020");
+  const one = blockFor(ics, "one@waterloo-all-in-1");
+  assert.equal(prop(one, "DTEND"), "DTEND;VALUE=DATE:20261011");
+});
+
+test("an exclusive endAt equal to startAt still yields DTEND > DTSTART", () => {
+  const ics = buildCalendar(
+    applyPublish(null, payload([
+      ev({ id: "zero", allDay: true, title: "Zero", dueAt: undefined,
+        startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-10T04:00:00.000Z" })
+    ]), T1).state
+  );
+  const block = blockFor(ics, "zero@waterloo-all-in-1");
+  assert.equal(prop(block, "DTSTART"), "DTSTART;VALUE=DATE:20261010");
+  assert.equal(prop(block, "DTEND"), "DTEND;VALUE=DATE:20261011");
 });
 
 test("timed events: due-only has no DTEND, start-only gets +60m, start+end respected", () => {
@@ -640,4 +682,242 @@ test("scheduled cleanup removes expired feeds and orphan aliases", async () => {
   await Promise.all(ctx.pending);
   assert.equal(db.feeds.size, 0);
   assert.equal(db.aliases.size, 0);
+});
+
+// --- rendered-feed cache ----------------------------------------------------
+
+test("GET serves the stored render, byte-identical to buildCalendar(state)", async () => {
+  const db = fakeD1();
+  const events = [
+    ev({ id: "quiz", type: "quiz", title: "Quiz", org: "ECE 105" }),
+    ev({ id: "lec", type: "class", title: "Lecture", dueAt: undefined,
+      startAt: "2026-10-01T14:30:00Z" }),
+    ev({ id: "ww", type: "meeting", title: "Interview", source: "waterlooworks",
+      dueAt: undefined, startAt: "2026-10-03T14:30:00Z" })
+  ];
+  const created = await call(req("POST", "/v1/calendars", payload(events)), db);
+  const body = await created.json();
+  const state = JSON.parse(db.feeds.get(body.feedId).calendar_json);
+
+  const main = await call(req("GET", new URL(body.feedUrl).pathname), db);
+  assert.equal(await main.text(), buildCalendar(state));
+  // One render row per public feed id: main + 5 group aliases.
+  assert.equal(db.renders.size, 6);
+  for (const group of Object.values(body.groupFeeds)) {
+    const res = await call(req("GET", new URL(group.feedUrl).pathname), db);
+    const expected = buildCalendar(state, {
+      group: db.aliases.get(group.feedId).feed_group
+    });
+    assert.equal(await res.text(), expected);
+  }
+});
+
+test("a normal GET prepares exactly one SELECT statement", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl, groupFeeds } = await created.json();
+  db.prepares.length = 0;
+  await call(req("GET", new URL(feedUrl).pathname), db);
+  assert.equal(db.prepares.length, 1);
+  assert.match(db.prepares[0], /^SELECT ics, etag, expires_at FROM calendar_renders/);
+  db.prepares.length = 0;
+  await call(req("GET", new URL(groupFeeds.coop.feedUrl).pathname), db);
+  assert.equal(db.prepares.length, 1);
+});
+
+test("ETag + If-None-Match: 304 keeps ETag and Cache-Control, no body", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl } = await created.json();
+  const path = new URL(feedUrl).pathname;
+  const first = await call(req("GET", path), db);
+  assert.equal(first.headers.get("cache-control"), "private, max-age=900");
+  const etag = first.headers.get("etag");
+  assert.match(etag, /^"[0-9a-f]{64}"$/);
+
+  const second = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": etag }
+    }),
+    db
+  );
+  assert.equal(second.status, 304);
+  assert.equal(second.headers.get("etag"), etag);
+  assert.equal(second.headers.get("cache-control"), "private, max-age=900");
+  assert.equal(await second.text(), "");
+
+  // A stale etag doesn't match; wildcard does.
+  const stale = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": '"deadbeef"' }
+    }),
+    db
+  );
+  assert.equal(stale.status, 200);
+  const wild = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": "*" }
+    }),
+    db
+  );
+  assert.equal(wild.status, 304);
+});
+
+test("PUT re-renders: alias GET serves the new content and a new etag", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const body = await created.json();
+  const feedPath = new URL(body.feedUrl).pathname;
+  const classesPath = new URL(body.groupFeeds.classes.feedUrl).pathname;
+  const etagBefore = (await call(req("GET", feedPath), db)).headers.get("etag");
+
+  await call(
+    req("PUT", feedPath, payload([
+      ev({ id: "cls", type: "class", title: "Lecture", dueAt: undefined,
+        startAt: "2026-10-01T14:30:00Z" })
+    ]), body.updateToken),
+    db
+  );
+  const aliasRes = await call(req("GET", classesPath), db);
+  assert.ok((await aliasRes.text()).includes("UID:cls@waterloo-all-in-1"));
+  const mainRes = await call(req("GET", feedPath), db);
+  assert.notEqual(mainRes.headers.get("etag"), etagBefore);
+  assert.ok(!(await mainRes.text()).includes("UID:learn:a1@")); // replaced
+});
+
+test("lazy backfill: a pre-migration feed renders once, stores, then reads", async () => {
+  const db = fakeD1();
+  const ctx = { pending: [], waitUntil(p) { this.pending.push(p); } };
+  const { state } = applyPublish(null, payload([ev()]), T1);
+  const feedId = "f".repeat(24);
+  db.feeds.set(feedId, {
+    update_token_hash: "x",
+    calendar_json: serializeState(state).json,
+    expires_at: Date.now() + 60_000,
+    updated_at: Date.parse("2026-09-01T12:00:00Z")
+  });
+  // No render row — this is a feed created before migration 0003.
+  const res = await call(req("GET", `/v1/calendars/${feedId}.ics`), db, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), buildCalendar(state));
+  await Promise.all(ctx.pending); // the render row write is a waitUntil
+  assert.equal(db.renders.size, 1);
+  assert.equal(db.renders.get(feedId).calendar_id, feedId);
+
+  db.prepares.length = 0;
+  const cached = await call(req("GET", `/v1/calendars/${feedId}.ics`), db);
+  assert.equal(cached.status, 200);
+  assert.equal(db.prepares.length, 1); // now served straight from the render
+});
+
+test("lazy backfill for a group alias renders only that group", async () => {
+  const db = fakeD1();
+  const ctx = { pending: [], waitUntil(p) { this.pending.push(p); } };
+  const { state } = applyPublish(null, payload([
+    ev({ id: "quiz", type: "quiz", title: "Quiz" }),
+    ev({ id: "lec", type: "class", title: "Lecture", dueAt: undefined,
+      startAt: "2026-10-01T14:30:00Z" })
+  ]), T1);
+  const feedId = "f".repeat(24);
+  const aliasId = "9".repeat(24);
+  db.feeds.set(feedId, {
+    update_token_hash: "x",
+    calendar_json: serializeState(state).json,
+    expires_at: Date.now() + 60_000,
+    updated_at: Date.parse("2026-09-01T12:00:00Z")
+  });
+  db.aliases.set(aliasId, { feed_id: feedId, feed_group: "classes" });
+  const res = await call(req("GET", `/v1/calendars/${aliasId}.ics`), db, ctx);
+  const ics = await res.text();
+  assert.ok(ics.includes("UID:lec@waterloo-all-in-1"));
+  assert.ok(!ics.includes("UID:quiz@"));
+  await Promise.all(ctx.pending);
+  assert.ok(db.renders.has(aliasId)); // stored under the public alias id
+});
+
+test("DELETE clears the calendar's render rows", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const body = await created.json();
+  assert.equal(db.renders.size, 6);
+  await call(
+    req("DELETE", new URL(body.feedUrl).pathname, undefined, body.updateToken),
+    db
+  );
+  assert.equal(db.renders.size, 0);
+});
+
+// --- optimized internals: equivalence with the previous implementations -----
+
+// Pre-optimization foldIcsLine: TextEncoder per character.
+const enc = new TextEncoder();
+function foldIcsLineRef(line) {
+  const chunks = [];
+  let chunk = "";
+  let bytes = 0;
+  for (const character of line) {
+    const characterBytes = enc.encode(character).length;
+    const limit = chunks.length ? 74 : 75;
+    if (chunk && bytes + characterBytes > limit) {
+      chunks.push(chunk);
+      chunk = character;
+      bytes = characterBytes;
+    } else {
+      chunk += character;
+      bytes += characterBytes;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map((v, i) => (i ? ` ${v}` : v)).join("\r\n");
+}
+
+// Pre-optimization stableHash: BigInt FNV-1a per byte.
+function stableHashRef(text) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of enc.encode(text)) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+test("foldIcsLine matches the per-char-encode implementation", () => {
+  const cases = [
+    "",
+    "short",
+    "a".repeat(75),
+    "a".repeat(76),
+    "x".repeat(300),
+    // 2-byte chars (é), 3-byte CJK, 4-byte emoji
+    "café ".repeat(30),
+    "日本語のテキスト".repeat(10),
+    "🎉".repeat(40),
+    // 4-byte char straddling the 75-octet boundary: 74 ASCII + emoji
+    "a".repeat(74) + "🎉" + "b".repeat(10),
+    // 3-byte char straddling the 75-octet boundary
+    "a".repeat(74) + "中" + "b".repeat(10),
+    // straddling the 74-octet continuation limit
+    "a".repeat(75) + "中" + "b".repeat(72) + "é" + "z".repeat(40),
+    "SUMMARY:Class — E5 3101 (☃)",
+  ];
+  for (const line of cases) assert.equal(foldIcsLine(line), foldIcsLineRef(line));
+});
+
+test("stableHash matches the BigInt FNV-1a implementation", () => {
+  const cases = ["", "a", "learn:1:2@waterloo-all-in-1", "café 日本語 🎉 \x00\xff"];
+  // Deterministic pseudo-random strings, biased toward non-ASCII.
+  let seed = 42;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+  for (let i = 0; i < 200; i++) {
+    let s = "";
+    const len = rand() % 60;
+    for (let j = 0; j < len; j++) {
+      const r = rand();
+      s += String.fromCodePoint(
+        r % 5 === 0 ? 0x10000 + (r % 0x10000) : r % 0x3000
+      );
+    }
+    cases.push(s);
+  }
+  for (const text of cases) assert.equal(stableHash(text), stableHashRef(text));
 });

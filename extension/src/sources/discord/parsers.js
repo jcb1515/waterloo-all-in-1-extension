@@ -1,3 +1,4 @@
 // @ts-check
-// discord parsers stub — owned by Window 3 (stream/coop). Replace at will.
+// discord parsers — none needed: DOM reads run in content.js (bundled) and
+// REST bodies are plain JSON; nothing goes through the offscreen document.
 export {};

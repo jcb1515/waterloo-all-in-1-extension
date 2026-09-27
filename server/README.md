@@ -13,7 +13,7 @@ Based on gurshh-rain/uwlearn_assignment_extension `calendar-service`
 |---|---|---|---|
 | `POST` | `/v1/calendars` | — | Create a feed. 201 → `{feedId, updateToken, feedUrl, groupFeeds, expiresAt, accepted, skipped}` |
 | `PUT` | `/v1/calendars/<feedId>.ics` | `Authorization: Bearer <updateToken>` | Republish. Same response minus `updateToken`; refreshes expiry and backfills group aliases |
-| `GET` | `/v1/calendars/<feedId>.ics` | URL itself | `text/calendar` feed (main id or a group alias id) |
+| `GET` | `/v1/calendars/<feedId>.ics` | URL itself | `text/calendar` feed (main id or a group alias id); `ETag` + `If-None-Match` → 304; `Cache-Control: private, max-age=900` |
 | `DELETE` | `/v1/calendars/<feedId>.ics` | `Authorization: Bearer <updateToken>` | Delete feed + aliases → 204 |
 | `GET` | `/health` | — | `{ok: true, feeds: <live feed count>}` |
 
@@ -121,8 +121,12 @@ filtered. An event lands in: its valid `feedGroup`, else `waterlooworks` →
   `startAt`) implies `allDay` — as an instant it would land on UTC midnight,
   i.e. the previous evening in local time.
 - `allDay` → `DTSTART;VALUE=DATE` is the local (feed timezone) date of
-  `startAt || dueAt`; `DTEND` is the local date of `endAt` + 1 day (inclusive
-  end) or start + 1 day.
+  `startAt || dueAt`. `DTEND` follows the extension's exclusive-end
+  convention: a full timestamp `endAt` at exactly local midnight already
+  means "the day after the last day" and is used verbatim; a date-only
+  `YYYY-MM-DD` `endAt` or any non-midnight timestamp is an inclusive last
+  day, so `DTEND` is that local date + 1 day. `DTEND` is always after
+  `DTSTART` (a zero-length range becomes start + 1 day).
 - `startAt` present → `DTEND` = `endAt` if later, else `dueAt` if later, else
   start + 60 minutes.
 - `dueAt` only → `DTSTART` at the due time with no `DTEND` (a deadline, not a
@@ -135,6 +139,64 @@ weeks); invalid entries are dropped. Per-event `alarms` overrides the type
 list for that event — `[]` disables alarms for it. No alarms are emitted
 unless the payload asks. Note: **Google Calendar ignores VALARM in subscribed
 feeds**; Apple Calendar and Outlook honour them.
+
+## Rendered-feed cache (free-tier efficiency)
+
+The expensive work (JSON parse → `applyPublish` → ICS render) happens **once at
+PUT/POST time**, not on every read. Publish stores state in
+`calendar_feeds` plus one pre-rendered ICS row per public feed id in
+`calendar_renders` (migration `0003_rendered_feeds.sql`) — six rows per feed:
+the main id and the five group aliases. A normal `GET` is then a single D1
+primary-key lookup of stored text with an `ETag`; a matching
+`If-None-Match` returns `304` with no body. Feeds created before 0003 lazily
+backfill their render row on first `GET`.
+
+### Measured CPU (Node 24, median of 7 runs — `test/bench.test.js`)
+
+Each publish renders every VEVENT once and reuses the block across all six
+feeds (`renderAllFeeds`), so the render phase is O(events), not O(events ×
+feeds). `foldIcsLine`/`stableHash`/`formatIcsDate` are allocation-free fast
+paths (byte-identical output, pinned by equivalence tests) and
+`Intl.DateTimeFormat` instances are cached per timeZone.
+
+| Feed size | Payload | JSON.parse | applyPublish | render all 6 feeds | serializeState | Total |
+|---|---|---|---|---|---|---|
+| 400 events | 151 KiB | 0.7 ms | 6.4 ms | 7.1 ms | 1.3 ms | **~15 ms** |
+| 3000 events | 1.1 MiB | 2.9 ms | 33.4 ms | 32.5 ms | 8.5 ms | **~77 ms** |
+
+**A 3000-event PUT still does not fit the free tier's 10 ms CPU limit** —
+Node is a proxy, but ~8× over holds order-of-magnitude. The largest publish
+that completes the full PUT path (parse + applyPublish + render + serialize)
+in under ~8 ms is **≈300 events** (~7.9 ms); ~350 events already measures
+~10 ms. Realistic student feeds (a few hundred items) sit right at the edge.
+Options, without changing the client protocol:
+
+- **Workers Paid plan** (~$5/month): the "standard" CPU model allows 30 s —
+  headroom for the 3000-event ceiling. The realistic choice for heavy users.
+- **Free tier only**: lower `MAX_EVENTS` (~300) in `worker.js` so oversized
+  publishes get 413 instead of silently exceeding CPU — or rely on the
+  lazy-backfill path to move render cost onto the first GET (a single-feed
+  render of 3000 events is ~15 ms, still over 10 ms, so the cap is what
+  makes it fit).
+- **Queue/cron rendering**: enqueue a render job at PUT — but Queues are
+  paid-plan only too.
+
+### Free-tier capacity estimate
+
+Limits (per day): 100k requests, 10 ms CPU each, 5M D1 rows read, 100k rows
+written, 5 GB storage.
+
+- **GETs are cheap**: 1 row read, ~1 ms CPU, `304` for unchanged feeds.
+  Google Calendar polls each subscribed feed about every 8–12 h → ~2–3 GETs
+  per feed per day. With all six feeds subscribed that's ~18 reads/user/day,
+  so the 5M D1 rows-read limit supports ~275k users and isn't binding. The
+  100k requests/day cap binds first: **~5.5k users** with all six feeds
+  subscribed (proportionally more when users subscribe to fewer feeds; a 304
+  still counts as a request but only 1 row).
+- **PUTs**: 7 row writes each (1 state + 6 renders) → `100k / 7 ≈ 14k PUTs/day`.
+  The extension PUTs only on change — a few/day/user → not the bottleneck.
+  CPU, not writes, limits PUT size (above).
+- **Storage**: 5 GB ÷ ~1 MB/feed (state + renders) ≈ 5k+ feeds.
 
 ## Privacy
 
@@ -153,7 +215,7 @@ feeds**; Apple Calendar and Outlook honour them.
 npx --yes wrangler@4.129.0 login
 npx --yes wrangler@4.129.0 d1 create waterloo-all-in-1-feed
 # paste the returned database_id into wrangler.jsonc
-npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote   # 0001 + 0002
+npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote   # 0001 + 0002 + 0003
 npx --yes wrangler@4.129.0 deploy
 ```
 

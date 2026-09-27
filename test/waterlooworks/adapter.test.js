@@ -7,7 +7,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parseHTML } from "linkedom";
+import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
+import { messageKey } from "../../extension/src/sources/waterlooworks/map.js";
+import { applyResult } from "../../extension/src/core/merge.js";
 import adapter from "../../extension/src/sources/waterlooworks/index.js";
 
 const FIXTURES = path.resolve(
@@ -23,15 +26,17 @@ const AT = NOW.toISOString();
 const fixture = (name) => readFileSync(path.join(FIXTURES, name), "utf8");
 
 /** Fake SyncContext whose parseHtml invokes the real parser exports. */
-function makeCtx(state = {}) {
+function makeCtx(state = {}, extras = {}) {
   return {
     state,
     now: NOW,
-    settings: {},
+    settings: extras.settings || {},
+    fetch: extras.fetch,
     async parseHtml(html, name, opts) {
       const exportName = name.split("/")[1];
       return parsers[exportName](parseHTML(html).document, opts);
     },
+    textDates: extractDates,
     log() {},
   };
 }
@@ -41,6 +46,13 @@ const payload = (name, url, kind = "dom") => ({
   kind,
   url,
   body: fixture(name),
+  at: AT,
+});
+const rawPayload = (body, url, kind = "dom") => ({
+  source: "waterlooworks",
+  kind,
+  url,
+  body,
   at: AT,
 });
 
@@ -68,7 +80,8 @@ test("first applications read stores applications and emits no updates", async (
   assert.equal(result.state.applications.length, 3);
   assert.equal(result.state.applications[0].status, "applied");
   assert.equal(result.state.applications[1].status, "not-selected");
-  assert.deepEqual(result.state.lastUpdates, []);
+  assert.deepEqual(result.updates, []);
+  assert.equal(result.state.lastUpdates, undefined);
   assert.equal(result.items.length, 0); // the grid produces no Items
 });
 
@@ -92,14 +105,17 @@ test("second read with a status change emits a status update + history", async (
     },
     makeCtx(first.state)
   );
-  const updates = second.state.lastUpdates;
+  const updates = second.updates;
   assert.equal(updates.length, 1);
   assert.equal(updates[0].kind, "status");
+  assert.equal(updates[0].id, "waterlooworks:488135:selected-for-interview");
   assert.equal(
     updates[0].text,
     "Interview invite: Globex · Analog/Mixed-Signal Engineering Co-op"
   );
   assert.equal(updates[0].refId, "waterlooworks:488135");
+  // Updates ride on SyncResult.updates — nothing persisted in state.
+  assert.equal(second.state.lastUpdates, undefined);
   const app = second.state.applications[0];
   assert.equal(app.status, "selected-for-interview");
   assert.deepEqual(
@@ -129,7 +145,7 @@ test("unknown status preserves the previous status", async () => {
     makeCtx(first.state)
   );
   assert.equal(second.state.applications[0].status, "applied");
-  assert.equal(second.state.lastUpdates.length, 0);
+  assert.equal(second.updates.length, 0);
 });
 
 test("logged-out payload preserves items and marks the session", async () => {
@@ -402,7 +418,139 @@ test("rankings state persists without items", async () => {
   assert.equal(result.items.length, 0);
 });
 
-test("sync returns the cached picture with complete:false", async () => {
+test("message detail body yields a pending item; the body is never persisted", async () => {
+  const ctx = makeCtx();
+  const result = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  const derived = result.items.filter((i) => i.meta?.messageKey);
+  // The past reference ("mentioned on September 10") is dropped — one item.
+  assert.equal(derived.length, 1);
+  const item = derived[0];
+  assert.equal(item.type, "cycle-date"); // "Cycle 1 …" subject wins first
+  assert.equal(item.review, "pending");
+  assert.equal(item.status, "open");
+  assert.equal(item.confidence, "tentative");
+  // Friday, October 2 4:00 PM Toronto (EDT) -> 20:00Z
+  assert.equal(item.dueAt, "2026-10-02T20:00:00.000Z");
+  assert.ok(item.evidence.snippet.length <= 300);
+  assert.match(item.evidence.snippet, /October 2/);
+  assert.equal(item.evidence.method, "text");
+  // Only the matched sentence is stored — the rest of the body is not.
+  const stateJson = JSON.stringify(result.state);
+  assert.ok(!stateJson.includes("WatIAM passphrase"));
+  assert.ok(!stateJson.includes("spaces are limited"));
+  // messageDetails holds metadata only — no bodyText.
+  assert.equal(result.state.messageDetails[0].bodyText, undefined);
+});
+
+test("message-date item ids are identical on re-parse", async () => {
+  const ctx = makeCtx();
+  const first = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  const second = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    makeCtx(first.state)
+  );
+  const ids = (res) => res.items.filter((i) => i.meta?.messageKey).map((i) => i.id);
+  assert.deepEqual(ids(second), ids(first));
+});
+
+test("list-row receivedAt and detail createdAt hash to one message key", () => {
+  const subject = "Cycle 1 applications due on WaterlooWorks";
+  // The inbox row and the detail page report the same instant; a bare
+  // calendar day lands on it too.
+  const detail = messageKey(subject, "2026-09-25T16:01:00.000Z", NOW);
+  assert.equal(detail, messageKey(subject, "2026-09-25", NOW));
+  // Late-UTC instants still land on the same Toronto day.
+  assert.equal(detail, messageKey(subject, "2026-09-25T23:30:00.000Z", NOW));
+});
+
+test("a later inbox read keeps that message's detail-derived items", async () => {
+  const ctx = makeCtx();
+  const detail = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  assert.equal(detail.items.filter((i) => i.meta?.messageKey).length, 1);
+  // The inbox row for the same message (same subject/day -> same key) has no
+  // date in its subject: a list read only replaces list-origin items, so the
+  // body-derived item survives untouched.
+  const list = await adapter.observe.parse(
+    payload("messages.html", "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm", "net"),
+    makeCtx(detail.state)
+  );
+  const kept = list.items.filter((i) => i.meta?.messageKey);
+  assert.deepEqual(
+    kept.map((i) => i.id),
+    detail.items.filter((i) => i.meta?.messageKey).map((i) => i.id)
+  );
+  assert.equal(kept[0].meta.messageOrigin, "detail");
+});
+
+// Same message read as a dated inbox row vs. its detail page — a detail read
+// replaces ALL items for the key (list items included), a list read never
+// reintroduces an id a detail item already owns.
+const datedSubject = "Interview moved to October 5";
+const datedListHtml = fixture("messages.html").replace(
+  "Cycle 1 applications due on WaterlooWorks",
+  datedSubject
+);
+const datedDetailHtml = fixture("message-detail-dates.html").replace(
+  "Cycle 1 applications due on WaterlooWorks",
+  datedSubject
+);
+const inboxUrl = "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm";
+
+test("detail read first, then the inbox row: detail items survive, no dup ids", async () => {
+  const detail = await adapter.observe.parse(
+    rawPayload(datedDetailHtml, `${WW}/messages.htm`, "net"),
+    makeCtx()
+  );
+  const detailMsg = detail.items.filter((i) => i.meta?.messageKey);
+  // Subject date (Oct 5) + body deadline (Oct 2): two detail-origin items.
+  assert.equal(detailMsg.length, 2);
+  assert.ok(detailMsg.every((i) => i.meta.messageOrigin === "detail"));
+
+  const list = await adapter.observe.parse(
+    rawPayload(datedListHtml, inboxUrl, "net"),
+    makeCtx(detail.state)
+  );
+  const afterList = list.items.filter((i) => i.meta?.messageKey);
+  // The row's subject-only item would collide with the detail's Oct 5 item —
+  // detail wins; nothing is added or lost.
+  assert.deepEqual(
+    afterList.map((i) => i.id).sort(),
+    detailMsg.map((i) => i.id).sort()
+  );
+  assert.equal(new Set(afterList.map((i) => i.id)).size, afterList.length);
+});
+
+test("inbox row first, then the detail page: list items are replaced", async () => {
+  const list = await adapter.observe.parse(
+    rawPayload(datedListHtml, inboxUrl, "net"),
+    makeCtx()
+  );
+  const listMsg = list.items.filter((i) => i.meta?.messageKey);
+  assert.equal(listMsg.length, 1); // subject date only
+  assert.equal(listMsg[0].meta.messageOrigin, "list");
+
+  const detail = await adapter.observe.parse(
+    rawPayload(datedDetailHtml, `${WW}/messages.htm`, "net"),
+    makeCtx(list.state)
+  );
+  const detailMsg = detail.items.filter((i) => i.meta?.messageKey);
+  assert.equal(detailMsg.length, 2);
+  assert.ok(detailMsg.every((i) => i.meta.messageOrigin === "detail"));
+  // The body-derived item (Oct 2 4 PM) appears; the row's stale list item
+  // is gone. Subject says "Interview" so both items type as interview.
+  assert.ok(detailMsg.some((i) => i.startAt === "2026-10-02T20:00:00.000Z"));
+});
+
+test("sync returns the cached picture, no fetch without a fetch impl", async () => {
   const ctx = makeCtx();
   const first = await adapter.observe.parse(
     payload("interviews.html", `${WW}/interviews.htm`, "net"),
@@ -412,7 +560,7 @@ test("sync returns the cached picture with complete:false", async () => {
   assert.equal(synced.complete, false);
   assert.equal(synced.session, "no-tab");
   assert.equal(synced.items.length, 3);
-  assert.equal(synced.state, first.state); // state unchanged
+  assert.deepEqual(synced.state, first.state); // contents unchanged
 });
 
 test("always records lastSeenAt", async () => {
@@ -422,4 +570,136 @@ test("always records lastSeenAt", async () => {
     ctx
   );
   assert.equal(result.state.lastSeenAt, AT);
+});
+
+/* --- co-op important-dates daily sync ------------------------------------ */
+
+const COOP_URL = "https://uwaterloo.ca/co-operative-education/important-dates";
+
+/**
+ * SyncContext with a counting ctx.fetch; fetchText is the response body,
+ * or a non-2xx {status} / "throw" for failure paths.
+ */
+function syncCtx(state, { fetchText, fetchStatus = 200, settings = {} } = {}) {
+  const calls = [];
+  const ctx = makeCtx(state, {
+    settings,
+    fetch: async (url) => {
+      calls.push(url);
+      if (fetchStatus === "throw") throw new Error("network down");
+      return {
+        status: fetchStatus,
+        url,
+        text: fetchText === undefined ? fixture("coop-important-dates.html") : fetchText,
+      };
+    },
+  });
+  return { ctx, calls };
+}
+
+test("sync fetches the co-op page once per 24 h", async () => {
+  const { ctx, calls } = syncCtx({});
+  const first = await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], COOP_URL);
+  assert.equal(first.complete, true); // authoritative read
+  assert.equal(first.session, "no-tab");
+  const coop = first.items.filter((i) => i.type === "cycle-date");
+  assert.ok(coop.length > 0, "expected cycle-date items");
+  assert.ok(coop.every((i) => i.org === "Co-op" && i.review === "auto"));
+  assert.equal(first.state.lastGood["coop-dates"].items.length, coop.length);
+
+  // Within 24 h the fetch is throttled and the result is not authoritative.
+  const second = await adapter.sync(syncCtx(first.state).ctx);
+  assert.equal(calls.length, 1, "still one fetch total");
+  assert.equal(second.complete, false);
+  assert.equal(second.items.length, first.items.length);
+});
+
+test("sync refetches after 24 h and honours coopDatesUrl override", async () => {
+  const old = { coopDates: { fetchedAt: "2026-09-19T00:00:00.000Z" } };
+  const { ctx, calls } = syncCtx(old, {
+    settings: { coopDatesUrl: "https://example.test/dates" },
+  });
+  await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], "https://example.test/dates");
+});
+
+test("settings.coopDates === false disables the fetch", async () => {
+  const { ctx, calls } = syncCtx({}, { settings: { coopDates: false } });
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 0);
+  assert.equal(res.complete, false);
+});
+
+test("a failed fetch keeps last-good co-op items and does not throw", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  assert.ok(seeded.state.lastGood["coop-dates"].items.length > 0);
+  const expired = {
+    ...seeded.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const { ctx, calls } = syncCtx(expired, { fetchStatus: 503 });
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(res.complete, false);
+  assert.equal(res.session, "no-tab");
+  assert.deepEqual(
+    res.items.filter((i) => i.type === "cycle-date").map((i) => i.id),
+    seeded.items.filter((i) => i.type === "cycle-date").map((i) => i.id)
+  );
+});
+
+test("a thrown fetch keeps last good; a 2xx page with no tables flags needsUpdate", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  const expired = {
+    ...seeded.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const thrown = await adapter.sync(syncCtx(expired, { fetchStatus: "throw" }).ctx);
+  assert.equal(thrown.complete, false);
+  assert.ok(thrown.items.some((i) => i.type === "cycle-date"));
+
+  // 2xx but the parser finds no calendar tables -> needsUpdate, cache kept.
+  const res = await adapter.sync(
+    syncCtx(expired, { fetchText: "<html><body>we moved!</body></html>" }).ctx
+  );
+  assert.equal(res.complete, false);
+  assert.equal(res.state.needsUpdate["coop-dates"], true);
+  assert.ok(res.items.some((i) => i.type === "cycle-date"), "last good kept");
+});
+
+test("sync through real applyResult: success is authoritative, failure keeps cache", async () => {
+  const closeId = "waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-close";
+  const r1 = await adapter.sync(syncCtx({}).ctx);
+  const raw = applyResult(null, r1, { mode: "sync" });
+  assert.ok(raw.items.some((i) => i.id === closeId));
+
+  // The postings-close cell disappears from the page; after 24 h the
+  // refetch is complete -> the dropped date disappears from the store.
+  const page2 = fixture("coop-important-dates.html").replace(
+    "Job postings close 9 a.m. (ET) </p>",
+    "Deadline moved</p>"
+  );
+  const later = {
+    ...r1.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const r2 = await adapter.sync(syncCtx(later, { fetchText: page2 }).ctx);
+  assert.equal(r2.complete, true);
+  const raw2 = applyResult(raw, r2, { mode: "sync" });
+  assert.ok(!raw2.items.some((i) => i.id === closeId), "removed date drops out");
+  assert.ok(
+    raw2.items.some(
+      (i) => i.id === "waterlooworks:cycle:winter-2027:cycle-1:interviews"
+    ),
+    "other cycle items survive"
+  );
+
+  // A failed refetch keeps every cached item.
+  const r3 = await adapter.sync(syncCtx(later, { fetchStatus: 0 }).ctx);
+  assert.equal(r3.complete, false);
+  const raw3 = applyResult(raw, r3, { mode: "sync" });
+  assert.ok(raw3.items.some((i) => i.id === closeId), "failure keeps cache");
 });

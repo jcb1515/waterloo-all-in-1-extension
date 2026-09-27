@@ -75,6 +75,21 @@ export const SQL = Object.freeze({
   deleteFeedAliases: "DELETE FROM calendar_feed_aliases WHERE feed_id = ?",
   deleteOrphanAliases:
     "DELETE FROM calendar_feed_aliases WHERE feed_id NOT IN (SELECT id FROM calendar_feeds)",
+  // Rendered ICS cache: one row per public feed id (main id + each group
+  // alias id), written at publish time so GET is a single row read.
+  selectRender:
+    "SELECT ics, etag, expires_at FROM calendar_renders WHERE feed_id = ?",
+  upsertRender:
+    "INSERT INTO calendar_renders (feed_id, calendar_id, ics, etag, expires_at, updated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(feed_id) DO UPDATE SET " +
+    "ics = excluded.ics, etag = excluded.etag, expires_at = excluded.expires_at, " +
+    "updated_at = excluded.updated_at",
+  deleteCalendarRenders:
+    "DELETE FROM calendar_renders WHERE calendar_id = ?",
+  deleteStaleRenders:
+    "DELETE FROM calendar_renders WHERE calendar_id = ? AND feed_id != ? " +
+    "AND feed_id NOT IN (SELECT id FROM calendar_feed_aliases WHERE feed_id = ?)",
+  deleteExpiredRenders: "DELETE FROM calendar_renders WHERE expires_at <= ?",
 });
 
 export default {
@@ -89,6 +104,10 @@ export default {
     context.waitUntil((async () => {
       await env.DB.prepare(SQL.deleteExpiredFeeds).bind(Date.now()).run();
       await env.DB.prepare(SQL.deleteOrphanAliases).bind().run();
+      await env.DB
+        .prepare(SQL.deleteExpiredRenders)
+        .bind(new Date().toISOString())
+        .run();
     })());
   }
 };
@@ -107,7 +126,7 @@ async function routeRequest(request, env, context) {
   const match = url.pathname.match(/^\/v1\/calendars\/([A-Za-z0-9_-]{20,})\.ics$/);
   if (!match) return jsonResponse({ error: "Not found." }, 404);
   const feedId = match[1];
-  if (request.method === "GET") return readFeed(feedId, env, context);
+  if (request.method === "GET") return readFeed(request, feedId, env, context);
   if (request.method === "PUT") return updateFeed(request, feedId, env, url.origin);
   if (request.method === "DELETE") return deleteFeed(request, feedId, env);
   return jsonResponse({ error: "Method not allowed." }, 405);
@@ -130,6 +149,7 @@ async function createFeed(request, env, origin) {
   await env.DB.prepare(SQL.insertFeed)
     .bind(feedId, updateTokenHash, stored.json, expiresAt, now).run();
   const aliases = await ensureAliases(env, feedId);
+  await storeRenders(env, feedId, state, expiresAt);
 
   return jsonResponse({
     feedId,
@@ -162,6 +182,7 @@ async function updateFeed(request, feedId, env, origin) {
   await env.DB.prepare(SQL.updateFeed)
     .bind(stored.json, expiresAt, now, feedId).run();
   const aliases = await ensureAliases(env, feedId);
+  await storeRenders(env, feedId, state, expiresAt);
 
   return jsonResponse({
     feedId,
@@ -173,7 +194,20 @@ async function updateFeed(request, feedId, env, origin) {
   });
 }
 
-async function readFeed(feedId, env, context) {
+async function readFeed(request, feedId, env, context) {
+  // Normal path: one prepared SELECT over the rendered-feed table — no
+  // JSON parse, no rendering. Renders are written at publish time.
+  const render = await env.DB.prepare(SQL.selectRender).bind(feedId).first();
+  if (render) {
+    if (Date.parse(render.expires_at) <= Date.now()) {
+      return jsonResponse({ error: "Calendar feed expired." }, 410);
+    }
+    return icsResponse(request, render.ics, render.etag);
+  }
+
+  // Lazy backfill: feeds created before the renders migration have no
+  // render row. Resolve the feed (or alias), render once, store, serve.
+  const requestedId = feedId;
   let group;
   let record = await env.DB.prepare(SQL.selectFeedForRead).bind(feedId).first();
   if (!record) {
@@ -188,20 +222,88 @@ async function readFeed(feedId, env, context) {
     context?.waitUntil((async () => {
       await env.DB.prepare(SQL.deleteFeed).bind(feedId).run();
       await env.DB.prepare(SQL.deleteFeedAliases).bind(feedId).run();
+      await env.DB.prepare(SQL.deleteCalendarRenders).bind(feedId).run();
     })());
     return jsonResponse({ error: "Calendar feed expired." }, 410);
   }
 
   const state = stateFromStored(safeJsonParse(record.calendar_json), record.updated_at);
   const calendar = buildCalendar(state, group ? { group } : {});
-  return new Response(calendar, {
-    headers: {
-      "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": "inline; filename=waterloo-all-in-1.ics",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff"
+  const etag = await etagOf(calendar);
+  const renderStmt = env.DB.prepare(SQL.upsertRender).bind(
+    requestedId,
+    feedId,
+    calendar,
+    etag,
+    new Date(record.expires_at).toISOString(),
+    new Date().toISOString()
+  );
+  if (context?.waitUntil) context.waitUntil(renderStmt.run());
+  else await renderStmt.run();
+  return icsResponse(request, calendar, etag);
+}
+
+/** Strong quoted ETag over the ICS bytes: "sha256hex". */
+async function etagOf(ics) {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(ics));
+  const hex = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `"${hex}"`;
+}
+
+/** Serve a stored ICS render, honouring If-None-Match. */
+function icsResponse(request, ics, etag) {
+  const headers = {
+    "Content-Type": "text/calendar; charset=utf-8",
+    "Content-Disposition": "inline; filename=waterloo-all-in-1.ics",
+    "Cache-Control": "private, max-age=900",
+    ETag: etag,
+    "X-Content-Type-Options": "nosniff"
+  };
+  const inm = request.headers.get("if-none-match");
+  if (inm) {
+    const tags = inm.split(",").map((t) => t.trim());
+    if (tags.includes("*") || tags.includes(etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          "Cache-Control": headers["Cache-Control"]
+        }
+      });
     }
-  });
+  }
+  return new Response(ics, { headers });
+}
+
+/**
+ * Render the main feed plus every group alias and upsert one
+ * calendar_renders row per public feed id (D1 batch), then delete render
+ * rows for ids no longer published.
+ */
+async function storeRenders(env, feedId, state, expiresAtMs) {
+  const aliases =
+    (await env.DB.prepare(SQL.selectFeedAliases).bind(feedId).all()).results || [];
+  const expiresIso = new Date(expiresAtMs).toISOString();
+  const updatedIso = new Date().toISOString();
+  const rendered = renderAllFeeds(state, aliases.map((a) => a.feed_group));
+  const rows = [[feedId, rendered.get("")]];
+  for (const alias of aliases) {
+    rows.push([alias.id, rendered.get(alias.feed_group)]);
+  }
+  const statements = [];
+  for (const [publicId, ics] of rows) {
+    statements.push(
+      env.DB
+        .prepare(SQL.upsertRender)
+        .bind(publicId, feedId, ics, await etagOf(ics), expiresIso, updatedIso)
+    );
+  }
+  statements.push(
+    env.DB.prepare(SQL.deleteStaleRenders).bind(feedId, feedId, feedId)
+  );
+  await env.DB.batch(statements);
 }
 
 async function deleteFeed(request, feedId, env) {
@@ -212,6 +314,7 @@ async function deleteFeed(request, feedId, env) {
   }
   await env.DB.prepare(SQL.deleteFeed).bind(feedId).run();
   await env.DB.prepare(SQL.deleteFeedAliases).bind(feedId).run();
+  await env.DB.prepare(SQL.deleteCalendarRenders).bind(feedId).run();
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
@@ -505,7 +608,7 @@ export function feedGroupOf(event) {
   return Object.hasOwn(TYPE_GROUPS, event?.type) ? TYPE_GROUPS[event.type] : "other";
 }
 
-export function buildCalendar(state, { group } = {}) {
+export function buildCalendar(state, { group } = {}, blocks) {
   const stored = state && typeof state === "object" ? state : {};
   const baseName = clampText(stored.calendarName, 100) || DEFAULT_CALENDAR_NAME;
   const timeZone = validTimeZone(stored.timeZone) || DEFAULT_TIME_ZONE;
@@ -524,12 +627,55 @@ export function buildCalendar(state, { group } = {}) {
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
     "X-PUBLISHED-TTL:PT1H"
   ];
+  const parts = lines.map(foldIcsLine);
   for (const event of Array.isArray(stored.events) ? stored.events : []) {
     if (group && event.feedGroup !== group) continue;
-    pushEvent(lines, event, stored.seqs?.[event.uid], timeZone);
+    parts.push(
+      blocks?.get(event.uid) ??
+        renderEventBlock(event, stored.seqs?.[event.uid], timeZone)
+    );
   }
-  lines.push("END:VCALENDAR", "");
+  parts.push("END:VCALENDAR", "");
+  return parts.join("\r\n");
+}
+
+/** One event's folded VEVENT text — group-independent, so it can be shared
+ * across the main feed and every group feed of the same publish. */
+function renderEventBlock(event, meta, timeZone) {
+  const lines = [];
+  pushEvent(lines, event, meta, timeZone);
   return lines.map(foldIcsLine).join("\r\n");
+}
+
+/** uid -> folded VEVENT text for every event in the state. */
+function eventBlocksOf(state) {
+  const stored = state && typeof state === "object" ? state : {};
+  const timeZone = validTimeZone(stored.timeZone) || DEFAULT_TIME_ZONE;
+  const blocks = new Map();
+  for (const event of Array.isArray(stored.events) ? stored.events : []) {
+    if (!blocks.has(event.uid)) {
+      blocks.set(
+        event.uid,
+        renderEventBlock(event, stored.seqs?.[event.uid], timeZone)
+      );
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Render every public feed of a publish at once: the main feed (key "")
+ * plus one per group id. Each VEVENT is built once and reused — the main
+ * feed is all blocks; each group feed is a subset of the same strings.
+ * @returns {Map<string, string>} feed key ("" or group id) -> ICS text
+ */
+export function renderAllFeeds(state, groupIds) {
+  const blocks = eventBlocksOf(state);
+  const feeds = new Map([["", buildCalendar(state, {}, blocks)]]);
+  for (const group of groupIds) {
+    feeds.set(group, buildCalendar(state, { group }, blocks));
+  }
+  return feeds;
 }
 
 function pushEvent(lines, event, meta, timeZone) {
@@ -565,7 +711,7 @@ function pushEvent(lines, event, meta, timeZone) {
 function pushEventDates(lines, event, timeZone) {
   if (event.allDay) {
     const startDay = localDay(event.startAt || event.dueAt, timeZone);
-    let endDay = event.endAt ? addDays(localDay(event.endAt, timeZone), 1) : null;
+    let endDay = event.endAt ? allDayEndDay(event.endAt, timeZone) : null;
     if (!endDay || endDay <= startDay) endDay = addDays(startDay, 1);
     lines.push(`DTSTART;VALUE=DATE:${startDay}`, `DTEND;VALUE=DATE:${endDay}`);
     return;
@@ -627,16 +773,34 @@ function eventSources(event) {
   return sources;
 }
 
+/**
+ * All-day DTEND day (YYYYMMDD). The extension convention is an EXCLUSIVE end:
+ * a full timestamp at exactly local midnight already means "the day after the
+ * last day" and is used verbatim. Anything else — a date-only "YYYY-MM-DD" or
+ * a non-midnight timestamp — is an inclusive last day, so DTEND is day + 1.
+ */
+function allDayEndDay(endAt, timeZone) {
+  const text = String(endAt);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) && isLocalMidnight(text, timeZone)) {
+    return localDay(text, timeZone);
+  }
+  return addDays(localDay(text, timeZone), 1);
+}
+
+/** True when the timestamp's wall clock in `timeZone` reads exactly 00:00:00. */
+function isLocalMidnight(value, timeZone) {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms) || ms % 1000 !== 0) return false;
+  const parts = hmsFormatter(timeZone).formatToParts(new Date(ms));
+  const get = (type) => Number(parts.find((part) => part.type === type).value);
+  return get("hour") % 24 === 0 && get("minute") === 0 && get("second") === 0;
+}
+
 /** YYYYMMDD in the feed timezone; date-only input is taken literally. */
 function localDay(value, timeZone) {
   const text = String(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text.replace(/-/g, "");
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date(text));
+  const parts = ymdFormatter(timeZone).formatToParts(new Date(text));
   const get = (type) => parts.find((part) => part.type === type).value;
   return `${get("year")}${get("month")}${get("day")}`;
 }
@@ -680,14 +844,53 @@ function safeHttpsUrl(value) {
   }
 }
 
+const validTzCache = new Map();
+
 function validTimeZone(value) {
   if (typeof value !== "string" || !value) return null;
+  if (validTzCache.has(value)) return validTzCache.get(value);
+  let ok = null;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return value;
+    ok = value;
   } catch {
-    return null;
+    /* invalid zone */
   }
+  validTzCache.set(value, ok);
+  return ok;
+}
+
+// Intl.DateTimeFormat construction is expensive — cache one per timeZone.
+const hmsFmtCache = new Map();
+const ymdFmtCache = new Map();
+
+function hmsFormatter(timeZone) {
+  let fmt = hmsFmtCache.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    hmsFmtCache.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function ymdFormatter(timeZone) {
+  let fmt = ymdFmtCache.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    ymdFmtCache.set(timeZone, fmt);
+  }
+  return fmt;
 }
 
 function sanitizeAlarms(list) {
@@ -736,17 +939,40 @@ export function serializeState(state) {
   return { json, bytes, ok: bytes <= MAX_STATE_BYTES };
 }
 
-function stableHash(text) {
-  let hash = 0xcbf29ce484222325n;
+// Exported for tests that pin the hash to the previous BigInt version.
+export function stableHash(text) {
+  // 64-bit FNV-1a over UTF-8 bytes on 16-bit limbs (little-endian) —
+  // identical output to BigInt arithmetic without a BigInt per byte.
+  // Offset basis 0xcbf29ce484222325, prime 0x100000001b3 (limbs 0x01b3,
+  // 0x0000, 0x0100, 0x0000 — the zero limbs are folded out below).
+  let h0 = 0x2325, h1 = 0x8422, h2 = 0x9ce4, h3 = 0xcbf2;
   for (const byte of encoder.encode(text)) {
-    hash ^= BigInt(byte);
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+    h0 ^= byte;
+    const a0 = h0, a1 = h1, a2 = h2, a3 = h3;
+    let carry = a0 * 0x01b3;
+    h0 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a1 * 0x01b3;
+    h1 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a0 * 0x0100 + a2 * 0x01b3;
+    h2 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a1 * 0x0100 + a3 * 0x01b3;
+    h3 = carry & 0xffff;
   }
-  return hash.toString(16).padStart(16, "0");
+  return (
+    h3.toString(16).padStart(4, "0") +
+    h2.toString(16).padStart(4, "0") +
+    h1.toString(16).padStart(4, "0") +
+    h0.toString(16).padStart(4, "0")
+  );
 }
 
 function formatIcsDate(date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  // "YYYY-MM-DDTHH:mm:ss.sssZ" -> "YYYYMMDDTHHMMSSZ" without regex work.
+  const iso = date.toISOString();
+  return (
+    iso.slice(0, 4) + iso.slice(5, 7) + iso.slice(8, 11) +
+    iso.slice(11, 13) + iso.slice(14, 16) + iso.slice(17, 19) + "Z"
+  );
 }
 
 function escapeIcs(value) {
@@ -757,12 +983,28 @@ function escapeIcs(value) {
     .replace(/,/g, "\\,");
 }
 
-function foldIcsLine(line) {
+const ASCII_LINE_RE = /^[\x00-\x7f]*$/;
+
+// Exported for tests that pin folding to the previous implementation.
+export function foldIcsLine(line) {
+  if (ASCII_LINE_RE.test(line)) {
+    // ASCII octets are chars: fold at 75, then 74 (the continuation space
+    // makes each following line 75 octets again).
+    if (line.length <= 75) return line;
+    let out = line.slice(0, 75);
+    for (let i = 75; i < line.length; i += 74) {
+      out += "\r\n " + line.slice(i, i + 74);
+    }
+    return out;
+  }
+  // Non-ASCII: UTF-8 octet length per code point, no TextEncoder.
   const chunks = [];
   let chunk = "";
   let bytes = 0;
   for (const character of line) {
-    const characterBytes = encoder.encode(character).length;
+    const cp = character.codePointAt(0);
+    const characterBytes =
+      cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
     const limit = chunks.length ? 74 : 75;
     if (chunk && bytes + characterBytes > limit) {
       chunks.push(chunk);

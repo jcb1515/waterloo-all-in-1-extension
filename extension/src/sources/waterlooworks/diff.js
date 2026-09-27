@@ -59,6 +59,8 @@ export function diffApplications(prev, next, now) {
 }
 
 /**
+ * Ids are replay-stable (no timestamp): re-reading the same transition emits
+ * the same id, and the core's mergeUpdates dedupes by it.
  * @param {Application} app
  * @param {ApplicationStatus} status
  * @param {"new"|"status"} kind
@@ -67,7 +69,7 @@ export function diffApplications(prev, next, now) {
  */
 function makeUpdate(app, status, kind, nowIso) {
   return {
-    id: `${app.id}:${status}:${nowIso}`,
+    id: kind === "new" ? `${app.id}:new` : `${app.id}:${status}`,
     at: nowIso,
     source: "waterlooworks",
     kind,

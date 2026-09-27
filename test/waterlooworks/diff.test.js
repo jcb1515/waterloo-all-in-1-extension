@@ -47,7 +47,8 @@ test("a new application on a later read emits a 'new' update", () => {
   assert.equal(updates[0].text, "Applied: Initech · Software Intern");
   assert.equal(updates[0].refId, "waterlooworks:2");
   assert.equal(updates[0].at, T2.toISOString());
-  assert.match(updates[0].id, /^waterlooworks:2:applied:2026-09-12T12:00:00\.000Z$/);
+  // Replay-stable id: no timestamp, so a re-read dedupes against the feed.
+  assert.equal(updates[0].id, "waterlooworks:2:new");
 });
 
 test("a status change appends history and emits a 'status' update", () => {
@@ -59,6 +60,7 @@ test("a status change appends history and emits a 'status' update", () => {
   );
   assert.equal(updates.length, 1);
   assert.equal(updates[0].kind, "status");
+  assert.equal(updates[0].id, "waterlooworks:1:interview-scheduled");
   assert.equal(updates[0].text, "Interview booked: Contoso · Software Intern");
   assert.deepEqual(applications[0].history, [
     { status: "applied", at: T1.toISOString() },
