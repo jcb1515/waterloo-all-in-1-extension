@@ -1,5 +1,6 @@
 // @ts-check
-// Adapter test: ctx.fetch + ctx.parseHtml wiring, failures degrade to complete:false.
+// Adapter test: ctx.fetch + ctx.relay + ctx.parseHtml wiring, failures degrade
+// to complete:false, login shells report session state.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHTML } from "linkedom";
-import adapter from "../../extension/src/sources/outline/index.js";
+import adapter, { isLoginShell } from "../../extension/src/sources/outline/index.js";
 import { parseOutline } from "../../extension/src/sources/outline/parsers.js";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 
@@ -20,25 +21,33 @@ const ROUTES = {
   "https://outline.uwaterloo.ca/viewer/ece105": { status: 500 },
 };
 
-function makeCtx(settings) {
+const SECTIONS = { "MATH 117": ["LEC 002"], "GENE 119": ["SEM 003"], "ECE 105": ["LEC 002"] };
+
+function makeCtx(settings, { routes = ROUTES, relay = null, courses = [], terms = [], state = {} } = {}) {
   return {
     now: NOW,
     settings,
-    courses: [],
-    terms: [],
-    state: {},
+    courses,
+    terms,
+    state,
+    calls: { fetch: [], relay: [] },
     log: () => {},
     textDates: extractDates,
     async fetch(url) {
-      const r = ROUTES[url];
+      this.calls.fetch.push(url);
+      const r = routes[url];
       if (!r) return { status: 404 };
-      return { status: r.status, text: r.text };
+      return { status: r.status, text: r.text, url: r.url, loginRedirect: r.loginRedirect };
     },
-    async parseHtml(html, parser) {
+    async relay(origin, p) {
+      this.calls.relay.push([origin, p]);
+      return relay ? relay(origin, p) : { status: 0, error: "no relay" };
+    },
+    async parseHtml(docHtml, parser) {
       // Contract order is (html, "<source>/<name>"); anything else throws.
       if (!/^[\w-]+\/[\w-]+$/.test(String(parser))) throw new Error(`bad parser name: ${parser}`);
       assert.equal(parser, "outline/parseOutline");
-      return parseOutline(parseHTML(html).document);
+      return parseOutline(parseHTML(docHtml).document);
     },
   };
 }
@@ -47,7 +56,7 @@ test("adapter maps sources, keeps going past a 500, unique ids", async () => {
   const ctx = makeCtx({
     urls: Object.keys(ROUTES),
     files: [{ name: "GENE119.html", html: html("GENE119") }],
-    sections: { "MATH 117": ["LEC 002"], "GENE 119": ["SEM 003"], "ECE 105": ["LEC 002"] },
+    sections: SECTIONS,
     groups: {},
   });
   const res = await adapter.sync(ctx);
@@ -59,6 +68,7 @@ test("adapter maps sources, keeps going past a 500, unique ids", async () => {
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(res.courses.some((c) => c.code === "MATH 117"));
   assert.ok(res.items.every((i) => i.source === "outline"));
+  assert.equal(res.session, "signed-in");
 });
 
 test("adapter merges outlineUrl from ctx.courses and sections from settings+course", async () => {
@@ -73,11 +83,89 @@ test("adapter merges outlineUrl from ctx.courses and sections from settings+cour
 });
 
 test("a non-outline page keeps complete:false and readOk empty", async () => {
-  const ctx = makeCtx({ urls: ["https://outline.uwaterloo.ca/nope"] });
+  const ctx = makeCtx({ urls: ["https://example.com/nope"] });
   ctx.fetch = async () => ({ status: 200, text: "<html><body>not an outline</body></html>" });
   const res = await adapter.sync(ctx);
   assert.equal(res.complete, false);
   assert.deepEqual(res.readOk, []);
+  assert.equal(res.session, undefined); // not a login shell either
+});
+
+test("T1 login shell falls back to T2 relay on outline.uwaterloo.ca", async () => {
+  const shell = {
+    status: 200,
+    url: "https://idp.uwaterloo.ca/x",
+    loginRedirect: true,
+    text: "<html>Sign in</html>",
+  };
+  const ctx = makeCtx(
+    { urls: ["https://outline.uwaterloo.ca/viewer/view/abc"], sections: SECTIONS },
+    {
+      routes: { "https://outline.uwaterloo.ca/viewer/view/abc": shell },
+      relay: () => Promise.resolve({ status: 200, text: html("MATH117") }),
+    },
+  );
+  const res = await adapter.sync(ctx);
+  assert.deepEqual(ctx.calls.relay, [["https://outline.uwaterloo.ca", "/viewer/view/abc"]]);
+  assert.equal(res.session, "signed-in");
+  assert.ok(res.items.length > 0);
+  assert.deepEqual(res.readOk, ["MATH 117"]);
+});
+
+test("login shell + no tab -> signed-out, complete false, nothing read", async () => {
+  const shell = { status: 200, url: "https://idp.uwaterloo.ca/x", text: "<html>Sign in</html>" };
+  const ctx = makeCtx(
+    { urls: ["https://outline.uwaterloo.ca/viewer/view/abc"], sections: SECTIONS },
+    {
+      routes: { "https://outline.uwaterloo.ca/viewer/view/abc": shell },
+      relay: () => Promise.resolve({ status: 0, noTab: true }),
+    },
+  );
+  const res = await adapter.sync(ctx);
+  assert.equal(res.complete, false);
+  assert.equal(res.session, "signed-out");
+  assert.equal(res.items.length, 0);
+  assert.deepEqual(res.readOk, []);
+});
+
+test("observe.parse builds items, scope matches seenIn, seenUrls recorded", async () => {
+  const ctx = makeCtx({ sections: SECTIONS });
+  const url = "https://outline.uwaterloo.ca/viewer/view/math117";
+  const res = await adapter.observe.parse(
+    { source: "outline", kind: "dom", url, body: html("MATH117"), at: NOW.toISOString() },
+    ctx,
+  );
+  assert.ok(res.items.length > 0);
+  assert.equal(res.complete, true);
+  assert.equal(res.scope, "MATH 117");
+  assert.ok(res.items.every((i) => i.seenIn[0].scope === res.scope));
+  assert.equal(res.session, "signed-in");
+  assert.equal(res.state.seenUrls["MATH 117"], url);
+
+  // A later sync with no settings.urls still reads the observed page.
+  const ctx2 = makeCtx({ sections: SECTIONS }, { state: res.state });
+  const res2 = await adapter.sync(ctx2);
+  assert.deepEqual(ctx2.calls.fetch, [url]);
+});
+
+test("observe.parse on a non-outline body returns an empty incomplete result", async () => {
+  const ctx = makeCtx({});
+  const res = await adapter.observe.parse(
+    { source: "outline", kind: "dom", url: "https://outline.uwaterloo.ca/viewer/view/x", body: "<html><body>login</body></html>", at: NOW.toISOString() },
+    ctx,
+  );
+  assert.deepEqual(res.items, []);
+  assert.equal(res.complete, false);
+  assert.equal(res.scope, "outline:none");
+});
+
+test("isLoginShell flags SSO shells, not real pages or plain errors", () => {
+  assert.equal(isLoginShell({ status: 200, url: "https://idp.uwaterloo.ca/x", loginRedirect: true, text: "<html>Sign in</html>" }), true);
+  assert.equal(isLoginShell({ status: 200, url: "https://idp.uwaterloo.ca/x", text: "redirect" }), true);
+  assert.equal(isLoginShell({ status: 200, text: "<html><body>Sign in with Duo</body></html>" }), true);
+  assert.equal(isLoginShell({ status: 200, url: "https://outline.uwaterloo.ca/viewer/view/abc", text: html("MATH117") }), false);
+  assert.equal(isLoginShell({ status: 404, url: "https://outline.uwaterloo.ca/viewer/view/nope", text: "not found" }), false);
+  assert.equal(isLoginShell(null), false);
 });
 
 test("no fixture leaks @uwaterloo.ca", () => {

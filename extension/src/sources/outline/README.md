@@ -11,12 +11,37 @@ The adapter is a thin pipeline, same shape as `learn`:
   offscreen document; no `chrome.*`.
 - `expand.js` — pure data → items/course (`buildOutline(data, opts)`,
   `readingWeeksOf(data, opts)`, `weeksOf(data, opts)`). No DOM, no `chrome.*`.
-- `index.js` — fetches pages (`ctx.fetch`), parses them
+- `index.js` — fetches pages (T1 `ctx.fetch`, T2 `ctx.relay`), parses them
   (`ctx.parseHtml`), then expands.
-- No `content.js`: outline pages are public — no session, no scraping in-page.
+- `content.js` — passive DOM snapshotter (T3) on `/viewer/view/` pages.
 - **W1's offscreen registry must expose `parsers.js` exports as
   `"outline/<exportName>"`** (e.g. `"outline/parseOutline"` for `parseOutline`),
   like it does for `learn/*`.
+
+## Reads (tiers)
+
+outline.uwaterloo.ca sits behind UW SSO (Duo) — it is *not* public.
+
+- **T1** `ctx.fetch(url)` — works while the SSO cookie is valid.
+- **T2** `ctx.relay("https://outline.uwaterloo.ca", path)` — the generic
+  recorder answers in an open outline tab; tried only when T1 failed *and* the
+  URL's host is `outline.uwaterloo.ca`.
+- **T3** `content.js` on `/viewer/view/` pages sends the rendered
+  `documentElement.outerHTML` as a `wa1:observed` payload (at load, debounced
+  1.5 s on mutations, hash-deduped, max 5 sends, bodies over 3 MB skipped).
+  `observe.parse` runs `parseOutline` on it, expands with the same options as
+  sync, and records `state.seenUrls[code] = url` so a later sync refetches
+  pages the student actually visited.
+- **Files** (`settings.files`) — saved HTML parsed directly, no fetch.
+
+`isLoginShell(res)` recognises an SSO detour: `loginRedirect`, a final URL off
+`outline.uwaterloo.ca`, or a 2xx body matching
+`/duo|shibboleth|saml|oidc|adfs|idp\.uwaterloo|sign[ -]?in|log[ -]?in/i`.
+
+`session` in the SyncResult: `"signed-in"` when any URL read succeeded, else
+`"signed-out"` when a login shell was seen, else absent. A failed URL sets
+`complete: false` and stays out of `readOk`, so stored items from it are kept.
+`state` is always returned (`{...prev, seenUrls}`).
 
 ## Settings
 
