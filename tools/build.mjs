@@ -46,6 +46,7 @@ async function* walk(dir) {
 async function copyStaticFile(absPath) {
   const base = path.basename(absPath).toLowerCase();
   if (absPath.endsWith(".js") || absPath.endsWith(".jsx")) return;
+  if (absPath.endsWith(".d.ts")) return; // dev-time typings, not for the bundle
   if (base === "readme.md" || base === "license" || base === "license.md") return; // docs stay in the repo, not the bundle
   const dest = path.join(DIST, path.relative(SRC, absPath));
   await mkdir(path.dirname(dest), { recursive: true });
@@ -87,17 +88,22 @@ async function writeNotices() {
 
 // Optional local developer defaults (gitignored): repo-root dev-profile.json
 // is baked into the bundle as __WA1_DEV_PROFILE__ and merged over
-// DEFAULT_SETTINGS by core/store.js. Released builds get null.
+// DEFAULT_SETTINGS by core/store.js. Release builds (WA1_RELEASE=1, via
+// tools/package.mjs) ignore it entirely — a shipped bundle must never carry
+// personal defaults — and minify the JS.
+const RELEASE = process.env.WA1_RELEASE === "1";
 let devProfile = null;
-try {
-  devProfile = JSON.parse(await readFile(path.join(REPO, "dev-profile.json"), "utf8"));
-} catch {
-  /* no dev profile — blank defaults */
+if (!RELEASE) {
+  try {
+    devProfile = JSON.parse(await readFile(path.join(REPO, "dev-profile.json"), "utf8"));
+  } catch {
+    /* no dev profile — blank defaults */
+  }
 }
 
 const shared = {
   bundle: true,
-  minify: false,
+  minify: RELEASE,
   target: "chrome116",
   jsx: "automatic",
   jsxImportSource: "preact",

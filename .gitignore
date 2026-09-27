@@ -13,3 +13,4 @@ dev-profile.json
 captures/
 *.har
 coverage/
+release/
