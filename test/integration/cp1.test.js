@@ -201,14 +201,17 @@ test("adapterSettings extras: outline files and the course group fallback", () =
     outlineFiles: [
       { id: "f1", name: "a.html", kind: "html", html: "<p>x</p>", size: 10 },
       { id: "f2", name: "b.pdf", kind: "pdf", base64: "AAAA", size: 20 },
+      { id: "f3", name: "c.pdf", kind: "pdf", base64: "BBBB", text: "ENGL 192 syllabus", size: 30 },
     ],
   });
   // Course groups fill in where the profile has none; profile wins on overlap.
   assert.equal(s.groups["ECE 105"], "7");
   assert.equal(s.groups["ECE 190"], "5");
+  // PDFs become {name, text} for the syllabus parser; one without extracted
+  // text is skipped entirely.
   assert.deepEqual(s.files, [
     { name: "a.html", kind: "html", html: "<p>x</p>" },
-    { name: "b.pdf", kind: "pdf", base64: "AAAA" },
+    { name: "c.pdf", kind: "pdf", text: "ENGL 192 syllabus" },
   ]);
 
   const profWins = adapterSettings(

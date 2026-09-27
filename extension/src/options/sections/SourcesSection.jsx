@@ -1,7 +1,7 @@
 // Sources settings: per-source enable toggle, stage badge, site link — plus
 // the outline URL list and Discord watched-server editors.
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { Card, Field, Toggle } from "../bits.jsx";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { normCourseCode } from "../../core/contract.js";
@@ -9,6 +9,7 @@ import { mutateKey } from "../../core/store.js";
 import { send, IS_PREVIEW } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
 import { fileToEntry, OUTLINE_FILES_KEY } from "../outline-import.js";
+import { pdfToText, base64ToBytes } from "../pdf-text.js";
 import { ExternalLinkIcon, TrashIcon, PlusIcon, FileTextIcon } from "../../ui/icons.jsx";
 
 const STAGE_BADGE = { live: "badge-ok", soon: "badge-muted" };
@@ -148,6 +149,34 @@ function OutlineFiles({ files }) {
 
   const resync = () => send({ type: UI.SYNC, source: "outline" });
 
+  // Backfill `text` for pdf entries imported before extraction existed.
+  // A failure is remembered on the entry (textError) so the row can say so
+  // and it isn't retried every render.
+  useEffect(() => {
+    if (IS_PREVIEW) return;
+    for (const f of files) {
+      if (!f || f.kind !== "pdf" || typeof f.text === "string" || f.textError) continue;
+      void (async () => {
+        try {
+          if (!f.base64) throw new Error("no bytes stored");
+          const text = await pdfToText(base64ToBytes(f.base64));
+          await mutateKey(OUTLINE_FILES_KEY, (cur) =>
+            (Array.isArray(cur) ? cur : []).map((x) =>
+              x.id === f.id ? { ...x, text, textError: false } : x
+            )
+          );
+          resync();
+        } catch {
+          await mutateKey(OUTLINE_FILES_KEY, (cur) =>
+            (Array.isArray(cur) ? cur : []).map((x) =>
+              x.id === f.id ? { ...x, textError: true } : x
+            )
+          );
+        }
+      })();
+    }
+  }, [files]);
+
   const write = async (/** @type {(cur: any[]) => any[]} */ fn) => {
     if (IS_PREVIEW) {
       setLocal((cur) => fn(cur || files));
@@ -176,7 +205,7 @@ function OutlineFiles({ files }) {
       <span class="label">Imported files</span>
       <p class="help">
         Or save the outline page (Ctrl+S) and import it — useful when a browser fetch is
-        blocked. HTML pages are sanitized before storing; PDFs are kept for later parsing.
+        blocked. HTML pages are sanitized before storing; PDFs are read into text locally.
       </p>
       {list.length ? (
         <table class="edit-table">
@@ -189,6 +218,7 @@ function OutlineFiles({ files }) {
                 <td class="num">
                   {Math.round((f.size || 0) / 1024)} KB · {f.kind}
                   {f.addedAt ? ` · ${new Date(f.addedAt).toLocaleDateString()}` : ""}
+                  {f.textError ? <span class="status-err"> · Couldn't read this PDF</span> : null}
                 </td>
                 <td class="row-act">
                   <button

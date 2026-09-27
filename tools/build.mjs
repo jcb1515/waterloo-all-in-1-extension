@@ -56,6 +56,22 @@ async function copyStatic() {
   for await (const p of walk(SRC)) await copyStaticFile(p);
 }
 
+/**
+ * dist/vendor/pdf.worker.min.mjs — pdfjs's web worker, loaded by the options
+ * page via chrome.runtime.getURL (only options imports pdfjs; the worker file
+ * itself must ship unbundled).
+ */
+async function copyVendor() {
+  const src = path.join(REPO, "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs");
+  const dest = path.join(DIST, "vendor", "pdf.worker.min.mjs");
+  try {
+    await mkdir(path.dirname(dest), { recursive: true });
+    await copyFile(src, dest);
+  } catch {
+    console.warn("pdfjs-dist worker not found — PDF import will fall back to pdfjs's fake worker");
+  }
+}
+
 /** dist/licenses/THIRD_PARTY_NOTICES.txt — repo LICENSE + every licenses/ file. */
 async function writeNotices() {
   const parts = [await readFile(path.join(REPO, "LICENSE"), "utf8")];
@@ -104,6 +120,7 @@ const watchMode = process.argv.includes("--watch");
 await rm(DIST, { recursive: true, force: true });
 await mkdir(DIST, { recursive: true });
 await copyStatic();
+await copyVendor();
 await writeNotices();
 
 if (!watchMode) {

@@ -105,11 +105,18 @@ export function adapterSettings(adapterId, settings, extras) {
     out.urls = Object.values(out.urls).map(String).filter(Boolean);
   }
   if (adapterId === "outline" && extras && Array.isArray(extras.outlineFiles)) {
-    out.files = extras.outlineFiles.map((f) =>
-      f && f.kind === "pdf"
-        ? { name: f.name, kind: "pdf", base64: f.base64 }
-        : { name: f && f.name, kind: "html", html: f && f.html }
-    );
+    // The adapter parses {name, html} pages and {name, text} syllabi; a pdf
+    // without extracted text is skipped (its row shows "Couldn't read").
+    out.files = extras.outlineFiles
+      .map((f) => {
+        if (f && f.kind === "pdf") {
+          return typeof f.text === "string" && f.text
+            ? { name: f.name, kind: "pdf", text: f.text }
+            : null;
+        }
+        return { name: f && f.name, kind: "html", html: f && f.html };
+      })
+      .filter(Boolean);
   }
   return out;
 }

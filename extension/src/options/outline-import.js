@@ -5,9 +5,12 @@
   handed to the outline adapter at sync time.
 
   HTML is sanitized before storing: scripts, styles and event handlers are
-  stripped so nothing executable sits in storage. PDFs keep their base64 —
-  text extraction is wired in a later checkpoint.
+  stripped so nothing executable sits in storage. PDFs keep their base64 and
+  also store extracted `text` (via pdf-text.js) so the outline adapter can
+  parse them at sync time; a failed extraction flags `textError`.
 */
+
+import { pdfToText } from "./pdf-text.js";
 
 export const OUTLINE_FILES_KEY = "outlineFiles";
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -38,7 +41,7 @@ export function sanitizeOutlineHtml(doc) {
  * Turn a picked File into an outlineFiles entry.
  * @param {File} file
  * @returns {Promise<{id: string, name: string, kind: "html"|"pdf", size: number,
- *   addedAt: string, html?: string, base64?: string}>}
+ *   addedAt: string, html?: string, base64?: string, text?: string, textError?: boolean}>}
  */
 export async function fileToEntry(file) {
   if (file.size > MAX_FILE_BYTES) {
@@ -60,6 +63,11 @@ export async function fileToEntry(file) {
       bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
     }
     entry.base64 = btoa(bin);
+    try {
+      entry.text = await pdfToText(buf);
+    } catch {
+      entry.textError = true;
+    }
   } else {
     const text = await file.text();
     const doc = new DOMParser().parseFromString(text, "text/html");
