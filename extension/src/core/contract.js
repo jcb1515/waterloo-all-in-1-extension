@@ -243,6 +243,9 @@ export const SITE_BY_HOST = Object.freeze({
   "outline.uwaterloo.ca": "outline",
   "portal.uwaterloo.ca": "portal",
   "waterlooworks.uwaterloo.ca": "waterlooworks",
+  // Public co-operative-education pages WaterlooWorks sync fetches; no
+  // content script ever runs there, so this is fetch attribution only.
+  "uwaterloo.ca": "waterlooworks",
   "discord.com": "discord",
   "outlook.office.com": "outlook",
   "outlook.cloud.microsoft": "outlook",
