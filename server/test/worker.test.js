@@ -903,6 +903,114 @@ test("foldIcsLine matches the per-char-encode implementation", () => {
   for (const line of cases) assert.equal(foldIcsLine(line), foldIcsLineRef(line));
 });
 
+// --- facts -----------------------------------------------------------------
+
+const descBlock = (ics, uid) =>
+  prop(blockFor(ics, uid), "DESCRIPTION:").replace(/\\n/g, "\n");
+
+test("facts render as 'Label: value' after the details block, before Sources", () => {
+  const { state } = applyPublish(null, payload([
+    ev({
+      facts: [
+        { label: "Instructor", value: "Prof. Example" },
+        { label: "Room", value: "E5 3101" }
+      ]
+    }),
+    ev({ id: "ev2", details: "Some details", seenIn: [{ source: "outline" }],
+      facts: [{ label: "Format", value: "Virtual" }] })
+  ]), T1);
+  const ics = buildCalendar(state);
+  const desc = descBlock(ics, "learn:a1@waterloo-all-in-1");
+  const desc2 = descBlock(ics, "ev2@waterloo-all-in-1");
+  assert.ok(desc.includes("Instructor: Prof. Example\nRoom: E5 3101"));
+  // Facts sit after details, before the Sources line.
+  assert.ok(
+    desc2.indexOf("Some details") < desc2.indexOf("Format: Virtual") &&
+      desc2.indexOf("Format: Virtual") < desc2.indexOf("Sources:")
+  );
+});
+
+test("facts escape commas, semicolons and newlines in values", () => {
+  const { state } = applyPublish(null, payload([
+    ev({ facts: [{ label: "Note", value: "a, b; c\nd" }] })
+  ]), T1);
+  const raw = prop(blockFor(buildCalendar(state), "learn:a1@waterloo-all-in-1"), "DESCRIPTION:");
+  assert.ok(raw.includes("a\\, b\\; c\\nd"));
+});
+
+test("facts: clamps, 12-entry cap, duplicate labels (first wins), empties", () => {
+  const facts = [
+    { label: "  ", value: "no label" },
+    { label: "Empty", value: "   " },
+    { label: "Weight", value: "kept when no builtin weight" },
+    { label: "WEIGHT", value: "duplicate label dropped" },
+    { label: "L".repeat(60), value: "v".repeat(400) },
+    ...Array.from({ length: 15 }, (_, i) => ({ label: `F${i}`, value: `x${i}` }))
+  ];
+  const { state } = applyPublish(null, payload([ev({ facts })]), T1);
+  const kept = state.events[0].facts;
+  assert.equal(kept.length, 12);
+  assert.equal(kept[0].label, "Weight");
+  assert.equal(kept[0].value, "kept when no builtin weight"); // first wins
+  assert.equal(kept[1].label, "L".repeat(40)); // clamped
+  assert.equal(kept[1].value.length, 300);
+  // Non-string / missing fields are dropped.
+  const { state: s2 } = applyPublish(null, payload([
+    ev({ facts: [{ label: 5, value: "x" }, "junk", { value: "v" }] })
+  ]), T1);
+  assert.equal(s2.events[0].facts, undefined);
+});
+
+test("facts whose label duplicates a builtin line are skipped", () => {
+  const { state } = applyPublish(null, payload([
+    ev({
+      weight: 15, section: "LEC 002", location: "MC 4020",
+      facts: [
+        { label: "Weight", value: "30%" },
+        { label: "Section", value: "TUT 101" },
+        { label: "Where", value: "E7 1" },
+        { label: "Room", value: "E7 1" },
+        { label: "Location", value: "E7 1" },
+        { label: "Instructor", value: "Prof. Example" }
+      ]
+    })
+  ]), T1);
+  const desc = descBlock(buildCalendar(state), "learn:a1@waterloo-all-in-1");
+  assert.ok(!desc.includes("30%"));
+  assert.ok(!desc.includes("TUT 101"));
+  assert.ok(!desc.includes("E7 1"));
+  assert.ok(desc.includes("Instructor: Prof. Example"));
+
+  // Without the builtin field, the same label renders.
+  const { state: bare } = applyPublish(null, payload([
+    ev({ facts: [{ label: "Room", value: "E5 3101" }] })
+  ]), T1);
+  assert.ok(descBlock(buildCalendar(bare), "learn:a1@waterloo-all-in-1").includes("Room: E5 3101"));
+});
+
+test("a fact change bumps SEQUENCE; no-facts payloads stay byte-identical", () => {
+  const { state: a } = applyPublish(null, payload([
+    ev({ facts: [{ label: "Instructor", value: "Prof. A" }] })
+  ]), T1);
+  const { state: b } = applyPublish(a, payload([
+    ev({ facts: [{ label: "Instructor", value: "Prof. B" }] })
+  ]), T2);
+  const { state: c } = applyPublish(b, payload([
+    ev({ facts: [{ label: "Instructor", value: "Prof. B" }] })
+  ]), T3);
+  assert.equal(b.seqs["learn:a1@waterloo-all-in-1"].seq, 1); // changed -> bump
+  assert.equal(c.seqs["learn:a1@waterloo-all-in-1"].seq, 1); // same -> steady
+
+  // No facts: the normalized event carries no facts key and the hash matches
+  // a publish that never saw the field.
+  const { state: plain } = applyPublish(null, payload([ev()]), T1);
+  assert.ok(!("facts" in plain.events[0]));
+  assert.equal(
+    stableHashRef(`${JSON.stringify(plain.events[0])}\nAmerica/Toronto`),
+    plain.seqs["learn:a1@waterloo-all-in-1"].hash
+  );
+});
+
 test("stableHash matches the BigInt FNV-1a implementation", () => {
   const cases = ["", "a", "learn:1:2@waterloo-all-in-1", "café 日本語 🎉 \x00\xff"];
   // Deterministic pseudo-random strings, biased toward non-ASCII.

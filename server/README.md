@@ -71,6 +71,7 @@ Event fields (anything else is ignored):
 | `calendar.uid` | ≤200 chars; wins over `id` for the UID |
 | `calendar.seq` | int ≥0; client-side floor for SEQUENCE |
 | `alarms` | `number[]` minutes before start; overrides the type-level list (even `[]`) |
+| `facts` | `[{label, value}]` adapter-supplied details; strings only, trimmed, label ≤40 chars, value ≤300, max 12, duplicate labels dropped (first wins, case-insensitive) |
 | `feedGroup` | one of `classes deadlines coop teams other` |
 
 `events` may be empty — that publishes an empty feed (the user removed
@@ -78,6 +79,12 @@ everything). Invalid events are **skipped**, not fatal; the response carries
 `accepted: n` and `skipped: [{id, reason}]` (first 20) with reasons
 `missing id | bad type | missing title | no valid date | duplicate uid`.
 400 only when the body isn't JSON or `events` isn't an array.
+
+`facts` render in DESCRIPTION as `Label: value` lines, right after the
+details block and before `Sources:`/`Open:`; a fact whose label is Weight,
+Section, Location, Where or Room (case-insensitive) is skipped when the
+event's own field already renders that line. Facts are part of the
+event-change hash, so a fact change bumps `SEQUENCE`.
 Limits: 3000 events and 2 MiB per publish; the normalized feed state must also
 fit one D1 row (~1.9 MB serialized) — anything beyond gets 413.
 

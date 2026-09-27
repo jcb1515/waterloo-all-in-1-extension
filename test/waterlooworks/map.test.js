@@ -347,3 +347,109 @@ test("coopDateItems: endOfDay -> 23:59 Toronto dueAt", () => {
   assert.equal(items[0].startAt, undefined);
   assert.equal(items[0].title, "Cycle 1: Match results available");
 });
+
+// --- meta.facts --------------------------------------------------------------
+
+const factsOf = (item) =>
+  new Map((item.meta?.facts || []).map((f) => [f.label, f.value]));
+
+test("interview list rows carry Employer/Job/Method/Type/Where/Booking facts", () => {
+  const items = interviewItems(
+    parsers.parseInterviews(doc("interviews.html")).rows,
+    NOW
+  );
+  const f = factsOf(items[0]);
+  assert.equal(f.get("Employer"), "Globex");
+  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Method"), "On Campus");
+  assert.equal(f.get("Type"), "In-Person");
+  assert.equal(f.get("Where"), "TC 2218");
+  assert.equal(f.get("Booking"), "Booked"); // Confirmation: Confirmed
+  // Unconfirmed row: no Booking fact.
+  assert.ok(!factsOf(items[2]).has("Booking"));
+  // Only non-empty facts are emitted (no "Interviewer" on list rows).
+  for (const item of items) {
+    for (const fact of item.meta.facts || []) assert.ok(fact.label && fact.value);
+  }
+});
+
+test("interview detail facts add Interviewer/Instructions/Booking", () => {
+  const detail = parsers.parseInterviewDetail(doc("interview-detail-booked.html"));
+  const [item] = interviewDetailItems(detail, NOW);
+  const f = factsOf(item);
+  assert.equal(f.get("Employer"), "Globex");
+  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Method"), "Employer Arranged Webcam");
+  assert.equal(f.get("Type"), "Individual");
+  assert.equal(f.get("Where"), "Virtual Room 106");
+  assert.equal(f.get("Interviewer"), "Pat Example");
+  assert.equal(f.get("Booking"), "Booked");
+  assert.ok(f.get("Instructions").startsWith("Please have your ID ready"));
+});
+
+test("merged interview keeps detail facts, fills gaps from the list", () => {
+  const list = interviewItems(
+    parsers.parseInterviews(doc("interviews.html")).rows,
+    NOW
+  );
+  const detail = interviewDetailItems(
+    parsers.parseInterviewDetail(doc("interview-detail-booked.html")),
+    NOW
+  );
+  const merged = mergeInterviewScopes(list, detail).find(
+    (i) => i.id === "waterloooworks:interview:488135" || i.id === "waterlooworks:interview:488135"
+  );
+  const f = factsOf(merged);
+  assert.equal(f.get("Interviewer"), "Pat Example"); // detail adds
+  assert.equal(f.get("Where"), "Virtual Room 106"); // detail wins
+  assert.equal(f.get("Method"), "Employer Arranged Webcam"); // detail wins over "On Campus"
+});
+
+test("timeslot deadline facts: Job, Employer, Earliest slot, Rule", () => {
+  const detail = parsers.parseInterviewDetail(doc("interview-detail-unbooked.html"));
+  const [item] = interviewDetailItems(detail, NOW);
+  const f = factsOf(item);
+  assert.equal(f.get("Job"), "400001 - Hardware Co-op");
+  assert.equal(f.get("Employer"), "Globex");
+  // Oct 1 12:30 PM ET (16:30Z).
+  assert.equal(f.get("Earliest slot"), "Thu Oct 1, 12:30 PM");
+  assert.match(f.get("Rule"), /picks a slot for you/);
+});
+
+test("application-deadline facts: Job, Employer, Work term, Level, City", () => {
+  const [item] = postingItems(parsers.parsePosting(doc("posting.html")), NOW);
+  const f = factsOf(item);
+  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Employer"), "Globex");
+  assert.equal(f.get("Work term"), "2027 - Winter");
+  assert.equal(f.get("Level"), "Junior");
+  assert.equal(f.get("City"), "San Jose");
+});
+
+test("cycle-date facts: Cycle and Work term", () => {
+  const items = coopDateItems(
+    parsers.parseCoopDates(doc("coop-important-dates.html")).entries,
+    { nowIso: NOW_ISO }
+  );
+  const close = items.find((i) => i.id.includes("postings-close"));
+  const f = factsOf(close);
+  assert.equal(f.get("Cycle"), "Cycle 1 Posting A");
+  assert.equal(f.get("Work term"), "Winter 2027");
+});
+
+test("message-date facts: Category and From message (the subject)", () => {
+  const items = messageDateItems(
+    {
+      subject: "Interview scheduled for your application",
+      category: "Interviews",
+      sentAt: "2026-09-15T14:00:00.000Z",
+      text: "Your interview is on October 2, 2026 at 4:00 PM.",
+      origin: "detail",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  const f = factsOf(items[0]);
+  assert.equal(f.get("Category"), "Interviews");
+  assert.equal(f.get("From message"), "Interview scheduled for your application");
+});

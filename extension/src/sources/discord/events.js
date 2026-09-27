@@ -10,7 +10,7 @@
 import { itemId } from "../../core/contract.js";
 import { zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { parseLooseTime } from "./time.js";
-import { SOURCE, SCOPE } from "./messages.js";
+import { SOURCE, SCOPE, factsOf } from "./messages.js";
 import {
   EVENT_DATE_RE,
   EVENT_RANGE_SEP_RE,
@@ -37,9 +37,19 @@ const MON3 = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
   jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
+const MONTH3 = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 /** "Repeats every Tuesday" — weekday lookup for the captured word. */
 const REPEAT_WEEKDAY_RE =
   /\b(mon|tues?|wed|thur?s?|fri|sat|sun)[a-z]*s?\b/i;
+
+/** ISO instant -> "Oct 6" in the given zone. */
+const shortDay = (iso, tz) => {
+  const p = zonedParts(new Date(Date.parse(iso)), tz);
+  return `${MONTH3[p.m - 1]} ${p.d}`;
+};
 
 const slug = (s) =>
   String(s || "")
@@ -322,22 +332,38 @@ export function parseEventsExtract(extract, o = {}) {
       ? `https://discord.com/${String(ev.eventRef).replace(/^\/+/, "")}`
       : `https://discord.com/channels/${guildId}`;
     const dow = new Date(Date.UTC(ev.start.y, ev.start.m - 1, ev.start.d)).getUTCDay();
+    const listed = [
+      startIso,
+      ...ev.occurrences.map((oc) =>
+        zonedIso(oc.y, oc.m, oc.d, oc.h, oc.mi, tz)
+      ),
+    ]
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .sort();
     const recurrence = isSeries
       ? {
           freq: "WEEKLY",
           byDay: BYDAY[repeatWd ?? dow],
           time: `${String(ev.start.h).padStart(2, "0")}:${String(ev.start.mi).padStart(2, "0")}`,
           tz: "America/Toronto",
-          occurrences: [
-            startIso,
-            ...ev.occurrences.map((oc) =>
-              zonedIso(oc.y, oc.m, oc.d, oc.h, oc.mi, tz)
-            ),
-          ]
-            .filter((v, i, a) => a.indexOf(v) === i)
-            .slice(0, 10),
+          occurrences: listed.slice(0, 10),
         }
       : undefined;
+    const upcoming = listed.filter((i) => Date.parse(i) >= nowMs);
+    const shown = (upcoming.length ? upcoming : listed.slice(-1)).slice(0, 5);
+    // Series-level facts (Server/Repeats/Where/…) — never member names.
+    const facts = factsOf([
+      ["Server", team],
+      [
+        "Repeats",
+        ev.repeat
+          ? `Every ${ev.repeat.replace(/^./, (c) => c.toUpperCase())}`
+          : undefined,
+      ],
+      ["Where", ev.location],
+      ["Series", isSeries ? shown.map((i) => shortDay(i, tz)).join(", ") : undefined],
+      ["Interested", interested === true ? "Yes" : undefined],
+    ]);
 
     const base = {
       source: SOURCE,
@@ -361,6 +387,7 @@ export function parseEventsExtract(extract, o = {}) {
         interested: interested ?? undefined,
         eventRef: ev.eventRef || undefined,
         recurrence,
+        facts,
       },
     };
 
@@ -393,12 +420,6 @@ export function parseEventsExtract(extract, o = {}) {
     if (interested === true) {
       // Listed occurrences (exact) + generated weekly continuations
       // (tentative) up to 6 weeks past now.
-      const listed = [
-        startIso,
-        ...ev.occurrences.map((oc) => zonedIso(oc.y, oc.m, oc.d, oc.h, oc.mi, tz)),
-      ]
-        .filter((v, i, a) => a.indexOf(v) === i)
-        .sort();
       for (const iso of listed) items.push(makeItem(iso, false));
       // Weekly continuations step in WALL time (a DST switch must not move
       // the local clock time): last listed day + 7, rendered at the
@@ -424,11 +445,9 @@ export function parseEventsExtract(extract, o = {}) {
     } else {
       // Not interested (or unknown): ONE pending item — the next upcoming
       // occurrence — so Review isn't flooded by a series.
-      const all = [
-        startIso,
-        ...ev.occurrences.map((oc) => zonedIso(oc.y, oc.m, oc.d, oc.h, oc.mi, tz)),
-      ].sort();
-      const next = all.find((iso) => Date.parse(iso) >= nowMs) || all[all.length - 1];
+      const next =
+        listed.find((iso) => Date.parse(iso) >= nowMs) ||
+        listed[listed.length - 1];
       items.push(makeItem(next, false));
     }
   }

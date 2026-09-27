@@ -184,6 +184,28 @@ test("list extract: interested series -> listed + generated occurrences", () => 
   );
 });
 
+test("list extract: items carry meta.facts", () => {
+  const items = parseEventsExtract(listExtract, {
+    now: NOW,
+    nowIso: AT,
+    team: "Robotics Club",
+  });
+  const fmap = (it) =>
+    Object.fromEntries((it.meta.facts || []).map((f) => [f.label, f.value]));
+  const rover = fmap(items.find((i) => i.title === "Rover Autonomy Sync"));
+  assert.equal(rover.Server, "Robotics Club");
+  assert.equal(rover.Repeats, "Every Tuesday");
+  assert.equal(rover.Where, "E7-5344");
+  assert.equal(rover.Series, "Sep 29, Oct 6, Oct 13, Oct 20");
+  assert.equal(rover.Interested, "Yes");
+  const wat = fmap(items.find((i) => i.title === "WATcloud Weekly Sync"));
+  assert.equal(wat.Server, "Robotics Club");
+  assert.equal(wat.Repeats, "Every Wednesday");
+  assert.equal(wat.Series, "Sep 30");
+  assert.equal(wat.Interested, undefined); // "Yes" only when true
+  assert.equal(wat.Where, undefined);
+});
+
 test("list extract: not-interested series -> one pending item only", () => {
   const items = parseEventsExtract(listExtract, {
     now: NOW,

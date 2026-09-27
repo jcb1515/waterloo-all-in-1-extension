@@ -27,6 +27,18 @@ import {
 
 export const SOURCE = "discord";
 export const SCOPE = "discord";
+
+/** meta.facts builder: keeps only non-empty values, in order. */
+export function factsOf(pairs) {
+  const out = [];
+  for (const pair of pairs) {
+    if (!pair) continue;
+    const [label, value] = pair;
+    const v = value == null ? "" : String(value).trim();
+    if (v) out.push({ label, value: v });
+  }
+  return out.length ? out : undefined;
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TITLE_MAX = 100;
 const SNIPPET_MAX = 300;
@@ -423,6 +435,15 @@ export function candidatesForMessage(msg, o) {
       via: o.via === "dom" ? "dom" : "rest",
       undated: undated || undefined,
       weekdayMismatch: hit?.weekdayMismatch || undefined,
+      // Never names or message bodies — just where/how it reached the user.
+      facts: factsOf([
+        ["Server", o.team],
+        ["Channel", o.channelName ? `#${o.channelName}` : undefined],
+        ["Assigned to you", assignedToMe ? "Yes" : undefined],
+        undated
+          ? ["Due", "No date given (follow-up in 7 days)"]
+          : undefined,
+      ]),
     },
   };
   if (undated) {
