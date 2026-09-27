@@ -6,9 +6,10 @@ import { buildAgenda } from "../model/agenda.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../components/ItemRow.jsx";
+import { GroupHeader } from "../components/GroupHeader.jsx";
 import { normCourseCode } from "../../core/contract.js";
 import { orgStyle } from "../../ui/colors.js";
-import { ChevronRightIcon, SearchIcon, ExternalLinkIcon, AlertTriangleIcon } from "../../ui/icons.jsx";
+import { SearchIcon, ExternalLinkIcon, AlertTriangleIcon } from "../../ui/icons.jsx";
 
 const FILTERS = [
   ["all", "All"],
@@ -211,7 +212,9 @@ export function Agenda({ state, actions, now, onGoSources }) {
       {agenda.groups.map((g) => (
         <section class="agenda-group" key={g.id} aria-label={g.label}>
           <GroupHeader
-            group={g}
+            label={g.label}
+            count={g.count}
+            tone={g.tone}
             collapsed={collapsed[g.id] ?? g.collapsedByDefault}
             onToggle={() => setCollapsed((c) => ({ ...c, [g.id]: !(c[g.id] ?? g.collapsedByDefault) }))}
           />
@@ -257,24 +260,6 @@ function query0(name) {
   } catch {
     return null;
   }
-}
-
-/** @param {{group: any, collapsed: boolean, onToggle: () => void}} p */
-function GroupHeader({ group, collapsed, onToggle }) {
-  return (
-    <button
-      type="button"
-      class={`group-head${group.tone ? ` tone-${group.tone}` : ""}`}
-      aria-expanded={!collapsed}
-      onClick={onToggle}
-    >
-      <span class={`chev${collapsed ? "" : " open"}`} aria-hidden="true">
-        <ChevronRightIcon size={13} />
-      </span>
-      {group.label}
-      <span class="count">{group.count}</span>
-    </button>
-  );
 }
 
 /** @param {{actions: any, onGoSources: () => void}} p */

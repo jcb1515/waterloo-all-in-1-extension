@@ -6,7 +6,8 @@ import { useMemo, useState } from "preact/hooks";
 import { extractDates } from "../../lib/textdates/index.js";
 import { fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { pendingReviewItems } from "../model/review.js";
-import { typeIcon, CheckIcon, XIcon, PencilIcon, ExternalLinkIcon, InboxIcon, ChevronRightIcon } from "../../ui/icons.jsx";
+import { GroupHeader } from "../components/GroupHeader.jsx";
+import { typeIcon, CheckIcon, XIcon, PencilIcon, ExternalLinkIcon, InboxIcon } from "../../ui/icons.jsx";
 
 const SOURCE_LABELS = {
   learn: "Learn",
@@ -180,7 +181,11 @@ function ReviewCard({ item, now, termCode, editing, onEdit, actions }) {
       <div class="review-foot">
         <span class="review-src">{SOURCE_LABELS[item.source] || item.source}</span>
         {openUrl ? (
-          <button type="button" class="linklike" onClick={() => actions.open(openUrl)}>
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            onClick={() => actions.open(openUrl)}
+          >
             Open source <ExternalLinkIcon size={11} />
           </button>
         ) : null}
@@ -258,16 +263,23 @@ export function Review({ state, actions, now }) {
 
       {past.length ? (
         <section class="agenda-group">
-          <button
-            type="button"
-            class="group-head"
-            aria-expanded={pastOpen}
-            onClick={() => setPastOpen((v) => !v)}
-          >
-            <span class={`chev${pastOpen ? " open" : ""}`} aria-hidden="true"><ChevronRightIcon size={13} /></span>
-            Past
-            <span class="count">{past.length}</span>
-          </button>
+          <GroupHeader
+            label="Past"
+            count={past.length}
+            collapsed={!pastOpen}
+            onToggle={() => setPastOpen((v) => !v)}
+          />
+          <div class="review-past-acts">
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              onClick={() => {
+                for (const it of past) actions.setUserState(it.id, { review: "dismissed" });
+              }}
+            >
+              Dismiss all past
+            </button>
+          </div>
           {pastOpen ? (
             <>
               {past.map((it) => (
@@ -281,27 +293,8 @@ export function Review({ state, actions, now }) {
                   actions={cardActions}
                 />
               ))}
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => {
-                  for (const it of past) actions.setUserState(it.id, { review: "dismissed" });
-                }}
-              >
-                Dismiss all past
-              </button>
             </>
-          ) : (
-            <button
-              type="button"
-              class="linklike"
-              onClick={() => {
-                for (const it of past) actions.setUserState(it.id, { review: "dismissed" });
-              }}
-            >
-              Dismiss all past
-            </button>
-          )}
+          ) : null}
         </section>
       ) : null}
     </div>
