@@ -33,6 +33,9 @@ const WD3 = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 /** "Tue" / "Tuesdays" / "thursday" -> 0–6 (first three letters). */
 const weekdayOf = (word) =>
   WD3[String(word || "").toLowerCase().slice(0, 3)];
+/** Non-array input (garbage extracts) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+
 const MON3 = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
   jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
@@ -180,7 +183,7 @@ function parseCard(card, nowMs, tz, guildName) {
     cur = null;
     inSeries = false;
   };
-  for (const line of card.lines || []) {
+  for (const line of arr(card?.lines)) {
     const t = String(line.text || "");
     if (!t || EVENT_CREATED_BY_RE.test(t)) continue;
     if (EVENT_SERIES_RE.test(t)) {
@@ -284,11 +287,11 @@ export function parseEventsExtract(extract, o = {}) {
   const nowIso = o.nowIso || new Date(nowMs).toISOString();
   const guildId = String(o.guildId ?? extract?.location?.guildId ?? "");
   const team = o.team ?? extract?.guildName;
-  const rsvps = new Set([...(o.rsvps || [])].map(String));
+  const rsvps = new Set(arr(o.rsvps).map(String));
 
   /** @type {any[]} */
   const segments = [];
-  for (const card of extract?.cards || []) {
+  for (const card of arr(extract?.cards)) {
     segments.push(...parseCard(card, nowMs, tz, extract?.guildName));
   }
 

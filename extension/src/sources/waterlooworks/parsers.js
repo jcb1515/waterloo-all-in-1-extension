@@ -299,9 +299,18 @@ const pathOf = (url) => {
 // ---------------------------------------------------------------------------
 // detection
 
+/** doc.title throws on a document with no documentElement (linkedom). */
+const docTitle = (doc) => {
+  try {
+    return String(doc?.title || "");
+  } catch {
+    return "";
+  }
+};
+
 const isLoggedOut = (doc, url) =>
   LOGGED_OUT_PATH_RE.test(pathOf(url)) ||
-  LOGGED_OUT_TEXT_RE.test(doc.title || "") ||
+  LOGGED_OUT_TEXT_RE.test(docTitle(doc)) ||
   Boolean(findTextElement(doc, LOGGED_OUT_TEXT_RE));
 
 const isInterviewDetail = (doc) =>

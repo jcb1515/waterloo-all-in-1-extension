@@ -121,7 +121,7 @@ export function recurringSuggestions(meetingLog, o) {
    *  durations: number[], occurrences: string[], url?: string,
    *  fromText: boolean}>} */
   const groups = new Map();
-  for (const e of meetingLog || []) {
+  for (const e of Array.isArray(meetingLog) ? meetingLog : []) {
     if (!e) continue;
     let weekday, h, mi;
     if (e.fromText) {

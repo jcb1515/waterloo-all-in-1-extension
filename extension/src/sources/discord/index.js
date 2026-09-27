@@ -50,6 +50,16 @@ const RSVP_CAP = 500;
 const EVENT_STALE_MS = DAY_MS;
 /** Items in a channel the inventory hasn't mapped yet expire quickly. */
 const UNMAPPED_AGE_DAYS = 2;
+/** Inventory caps — a flooded rail/pane can't grow state without bound. */
+const GUILD_CAP = 50;
+const GUILD_CHANNEL_CAP = 250;
+const EVENT_GUILD_CAP = 50;
+const EVENT_ITEMS_CAP = 100;
+
+/** Non-array input (garbage persisted state / extracts) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+/** Non-object input reads as an empty record. */
+const obj = (v) => (v && typeof v === "object" ? v : {});
 
 const firstLine = (s) =>
   String(s || "").split("\n")[0].replace(/\s+/g, " ").trim();
@@ -58,6 +68,19 @@ const anchorMs = (item) =>
   Date.parse(item?.endAt || item?.startAt || item?.dueAt || "");
 
 /** Snowflake range compare — Discord ids exceed 2^53, so BigInt. */
+/**
+ * Deep-copy the guilds map (nested channel records get mutated). Malformed
+ * values — non-objects, cyclic structures — normalise to an empty map.
+ */
+function copyGuilds(guilds) {
+  try {
+    const copy = JSON.parse(JSON.stringify(obj(guilds)));
+    return copy && typeof copy === "object" && !Array.isArray(copy) ? copy : {};
+  } catch {
+    return {};
+  }
+}
+
 function snowflakeGT(a, b) {
   try {
     return BigInt(a) > BigInt(b);
@@ -78,7 +101,7 @@ function snowflakeLT(a, b) {
  * @param {Record<string, any>} state @param {string} channelId
  */
 function locateChannel(state, channelId) {
-  for (const [guildId, g] of Object.entries(state.guilds || {})) {
+  for (const [guildId, g] of Object.entries(obj(state.guilds))) {
     const c = g?.channels?.[channelId];
     if (c) return { guildId, channel: c };
   }
@@ -93,7 +116,7 @@ function locateChannel(state, channelId) {
 function watchedGuilds(state, settings) {
   /** @type {Record<string, any>} */
   const out = {};
-  for (const [guildId, g] of Object.entries(state.guilds || {})) {
+  for (const [guildId, g] of Object.entries(obj(state.guilds))) {
     const cfg = watchConfig(g?.name || "", settings?.watched);
     if (cfg) out[guildId] = cfg;
   }
@@ -107,7 +130,7 @@ function watchedGuilds(state, settings) {
 function pruneMessageItems(items, state, nowMs) {
   const stale = nowMs - MSG_AGE_DAYS * DAY_MS;
   const unmapped = nowMs - UNMAPPED_AGE_DAYS * DAY_MS;
-  const kept = (items || []).filter((item) => {
+  const kept = arr(items).filter((item) => {
     const anchor = anchorMs(item);
     if (!Number.isNaN(anchor) && anchor < stale) return false;
     const seenAt = Date.parse(item?.seenIn?.[0]?.at || "") || nowMs;
@@ -136,10 +159,10 @@ function pruneMessageItems(items, state, nowMs) {
  * (the date changed, i.e. an edit). REST always wins.
  */
 function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs, via) {
-  const present = new Set((messageIds || []).filter(Boolean));
+  const present = new Set(arr(messageIds).filter(Boolean));
   /** @type {Map<string, Set<string>>} */
   const freshIdsByMsg = new Map();
-  for (const item of freshItems || []) {
+  for (const item of arr(freshItems)) {
     const mid = String(item?.meta?.messageId || "");
     const set = freshIdsByMsg.get(mid) || new Set();
     set.add(item.id);
@@ -147,12 +170,13 @@ function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs, via
   }
   // DOM reads that derive the identical ids leave REST items in place.
   const keepRest = new Set();
-  const kept = (prevItems || []).filter((item) => {
+  const prevArr = arr(prevItems);
+  const kept = prevArr.filter((item) => {
     const mid = String(item?.meta?.messageId || "");
     if (!present.has(mid)) return true;
     if (via === "dom" && item?.meta?.via === "rest") {
       const oldIds = new Set(
-        (prevItems || [])
+        prevArr
           .filter((p) => String(p?.meta?.messageId || "") === mid)
           .map((p) => p.id)
       );
@@ -169,7 +193,7 @@ function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs, via
   });
   const combined = [
     ...kept,
-    ...(freshItems || []).filter(
+    ...arr(freshItems).filter(
       (item) => !keepRest.has(String(item?.meta?.messageId || ""))
     ),
   ];
@@ -181,7 +205,7 @@ function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs, via
  * seen range, which then widens; datesFound counts produced items.
  */
 function updateChannelStats(channelRec, messages, itemCount) {
-  for (const m of messages || []) {
+  for (const m of arr(messages)) {
     const id = String(m?.id || m?.messageId || "");
     if (!/^\d+$/.test(id)) continue;
     if (
@@ -218,19 +242,19 @@ function updateChannelStats(channelRec, messages, itemCount) {
  * @param {number} nowMs @param {string} nowIso @param {string} at
  */
 function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
-  const settings = ctx.settings || {};
+  const settings = obj(ctx?.settings);
   const selfId = settings.userId || state.identity?.selfId;
   const roleIds = [
-    ...new Set([...(state.identity?.roleIds || []), ...(settings.roleIds || [])]),
+    ...new Set([...arr(state.identity?.roleIds), ...arr(settings.roleIds)]),
   ];
-  const dmSet = new Set(state.dmChannels || []);
+  const dmSet = new Set(arr(state.dmChannels));
   /** @type {any[]} */
   const fresh = [];
   const seenIds = [];
   /** @type {Map<string, {msgs: any[], items: number}>} */
   const stats = new Map();
 
-  for (const msg of messages || []) {
+  for (const msg of arr(messages)) {
     const channelId = String(msg?.channel_id || src.channelId || "");
     if (!channelId || !msg?.id) continue;
     if (dmSet.has(channelId)) continue; // DM channels: never stored
@@ -238,10 +262,10 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
 
     const loc = locateChannel(state, channelId);
     const guildId = loc?.guildId || msg?.guild_id || src.guildId;
-    const guild = guildId ? state.guilds?.[guildId] : null;
+    const guild = guildId ? obj(state.guilds)[guildId] : null;
     const srv = guild ? watchConfig(guild.name, settings.watched) : null;
     const watch = guildId ? state.watch?.[guildId] : null;
-    const watched = Boolean(watch?.channelIds?.includes(channelId));
+    const watched = arr(watch?.channelIds).includes(channelId);
 
     const items = candidatesForMessage(msg, {
       extractDates: ctx.textDates,
@@ -305,7 +329,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
   }
 
   // Purge anything ever produced from a DM channel.
-  const prevItems = (state.lastGood.messages?.items || []).filter(
+  const prevItems = arr(state.lastGood.messages?.items).filter(
     (item) => !dmSet.has(String(item?.meta?.channelId || ""))
   );
   state.lastGood.messages = {
@@ -321,7 +345,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
  */
 function pushMeetingLog(state, entry) {
   const cutoff = Date.parse(entry.at || "") - MEETING_LOG_AGE_DAYS * DAY_MS;
-  const log = (state.meetingLog || []).filter(
+  const log = arr(state.meetingLog).filter(
     (e) =>
       (!Number.isFinite(cutoff) || Date.parse(e?.at || "") >= cutoff) &&
       !(
@@ -344,7 +368,7 @@ function pushMeetingLog(state, entry) {
 function outputItems(state, settings, nowMs, nowIso) {
   const watched = watchedGuilds(state, settings);
   const items = [];
-  for (const item of state.lastGood?.messages?.items || []) {
+  for (const item of arr(state.lastGood?.messages?.items)) {
     const chanId = String(item?.meta?.channelId || "");
     const loc = locateChannel(state, chanId);
     const guildId = loc?.guildId || item?.meta?.guildId;
@@ -352,7 +376,7 @@ function outputItems(state, settings, nowMs, nowIso) {
     const srv = guildId ? watched[guildId] : null;
     if (!srv) continue; // unmapped or unwatched guild — hidden
     const watch = state.watch?.[guildId];
-    const channelWatched = Boolean(watch?.channelIds?.includes(chanId));
+    const channelWatched = arr(watch?.channelIds).includes(chanId);
     const noInventory = !guild?.lastInventoryAt;
     if (!channelWatched && !item.meta?.assignedToMe && !noInventory) continue;
     items.push({
@@ -375,10 +399,10 @@ function outputItems(state, settings, nowMs, nowIso) {
   // recurring suggestion on the same slot is suppressed (the event item
   // already covers it; same-source dupes never merge in the core).
   const eventSlots = new Set();
-  for (const [guildId, rec] of Object.entries(state.lastGood?.events || {})) {
+  for (const [guildId, rec] of Object.entries(obj(state.lastGood?.events))) {
     const srv = watched[guildId];
     if (!srv) continue;
-    for (const ev of rec.items || []) {
+    for (const ev of arr(rec?.items)) {
       const r = ev?.meta?.recurrence;
       if (r?.byDay && r?.time) {
         eventSlots.add(`${guildId}|${r.byDay}|${r.time}`);
@@ -386,7 +410,7 @@ function outputItems(state, settings, nowMs, nowIso) {
       items.push({ ...ev, org: srv.team || ev.org });
     }
   }
-  const recurring = recurringSuggestions(state.meetingLog || [], {
+  const recurring = recurringSuggestions(arr(state.meetingLog), {
     nowMs,
     nowIso,
     teamOf: (gid) => watched[gid]?.team,
@@ -404,7 +428,11 @@ function outputItems(state, settings, nowMs, nowIso) {
  * inventory (or watch-relevant settings) change.
  */
 function recomputeWatch(state, settings, nowIso) {
-  if (!state.sweep) state.sweep = { startedAt: nowIso, done: {} };
+  if (!state.sweep || typeof state.sweep !== "object") {
+    state.sweep = { startedAt: nowIso, done: {} };
+  }
+  if (!state.sweep.startedAt) state.sweep.startedAt = nowIso;
+  state.sweep.done = obj(state.sweep.done);
   const watched = watchedGuilds(state, settings);
   /** @type {any[]} */
   const queue = [];
@@ -412,9 +440,9 @@ function recomputeWatch(state, settings, nowIso) {
   const unreadWatched = [];
   /** @type {any[]} */
   const unreadGuilds = [];
-  for (const [guildId, g] of Object.entries(state.guilds || {})) {
+  for (const [guildId, g] of Object.entries(obj(state.guilds))) {
     const srv = watched[guildId];
-    if (!srv) continue;
+    if (!srv || !g || typeof g !== "object") continue;
     const watch = watchForGuild(g, srv.focus, srv.settings);
     state.watch[guildId] = watch;
     g.team = srv.team;
@@ -431,7 +459,7 @@ function recomputeWatch(state, settings, nowIso) {
           name: c.name, url, mentions: c.mentions || 0,
         });
       }
-      if (!state.sweep.done[channelId]) {
+      if (!obj(state.sweep.done)[channelId]) {
         queue.push({
           guildId, guildName: g.name, channelId,
           name: c?.name || channelId, url,
@@ -470,7 +498,7 @@ export function resetSweep(state, now) {
  */
 export function inventoryReport(state) {
   const guilds = [];
-  for (const [guildId, g] of Object.entries(state?.guilds || {})) {
+  for (const [guildId, g] of Object.entries(obj(state?.guilds))) {
     const watch = state?.watch?.[guildId];
     const focus = g?.focus || [];
     guilds.push({
@@ -483,8 +511,8 @@ export function inventoryReport(state) {
         type: c?.type,
         limited: c?.limited || false,
         score: channelScore(c || {}, focus),
-        suggested: watch?.from === "suggested" && watch.channelIds.includes(id),
-        watched: Boolean(watch?.channelIds?.includes(id)),
+        suggested: watch?.from === "suggested" && arr(watch.channelIds).includes(id),
+        watched: arr(watch?.channelIds).includes(id),
         messagesSeen: c?.messagesSeen || 0,
         datesFound: c?.datesFound || 0,
       })),
@@ -495,7 +523,7 @@ export function inventoryReport(state) {
     guilds,
     identity: {
       selfIdKnown: Boolean(state?.identity?.selfId),
-      roleCount: (state?.identity?.roleIds || []).length,
+      roleCount: arr(state?.identity?.roleIds).length,
     },
   };
 }
@@ -513,28 +541,29 @@ export default {
    * @param {import("../../core/contract.js").SyncContext} ctx
    */
   async sync(ctx) {
+    ctx = ctx && typeof ctx === "object" ? ctx : {};
     const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
     const now = ctx.now || new Date();
     const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
     const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
     const state = /** @type {any} */ ({
       ...prev,
-      guilds: JSON.parse(JSON.stringify(prev.guilds || {})),
-      lastGood: { ...prev.lastGood },
-      watch: { ...prev.watch },
+      guilds: copyGuilds(prev.guilds),
+      lastGood: { ...obj(prev.lastGood) },
+      watch: { ...obj(prev.watch) },
     });
-    if (prev.sweep) {
+    if (prev.sweep && typeof prev.sweep === "object") {
       state.sweep = {
         startedAt: prev.sweep.startedAt,
-        done: { ...(prev.sweep.done || {}) },
+        done: { ...obj(prev.sweep.done) },
       };
     }
     // Settings may have changed since the last inventory — re-resolve watch.
-    recomputeWatch(state, ctx.settings || {}, nowIso);
+    recomputeWatch(state, obj(ctx.settings), nowIso);
     const items =
       ctx.settings?.enabled === false
         ? []
-        : outputItems(state, ctx.settings || {}, nowMs, nowIso);
+        : outputItems(state, obj(ctx.settings), nowMs, nowIso);
     return { items, complete: false, session: "no-tab", state };
   },
 
@@ -546,8 +575,9 @@ export default {
      * @returns {Promise<SyncResult & {scope: string}>}
      */
     async parse(payload, ctx) {
+      ctx = ctx && typeof ctx === "object" ? ctx : {};
       const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-      const settings = ctx.settings || {};
+      const settings = obj(ctx.settings);
       const now = ctx.now || new Date();
       const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
       const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
@@ -556,14 +586,14 @@ export default {
         ...prev,
         // Nested channel records get mutated (stats, inventory merge) — the
         // guilds map needs a real copy, not a shared reference.
-        guilds: JSON.parse(JSON.stringify(prev.guilds || {})),
-        lastGood: { ...(prev.lastGood || {}) },
-        watch: { ...(prev.watch || {}) },
+        guilds: copyGuilds(prev.guilds),
+        lastGood: { ...obj(prev.lastGood) },
+        watch: { ...obj(prev.watch) },
       };
-      if (prev.sweep) {
+      if (prev.sweep && typeof prev.sweep === "object") {
         state.sweep = {
           startedAt: prev.sweep.startedAt,
-          done: { ...(prev.sweep.done || {}) },
+          done: { ...obj(prev.sweep.done) },
         };
       }
       state.lastSeenAt = payload.at;
@@ -605,13 +635,16 @@ export default {
           // The @me/scheduled-events read lists events the user marked
           // Interested — event ids only, so eventRef lookups outrank the
           // DOM Interested-button heuristic.
-          const set = new Set(state.rsvps || []);
-          for (const id of norm.eventIds || []) set.add(String(id));
+          const set = new Set(arr(state.rsvps));
+          for (const id of arr(norm.eventIds)) set.add(String(id));
           state.rsvps = [...set].slice(-RSVP_CAP);
         }
         if (norm.kind === "channel" && norm.channelId) {
           // A history read after the sweep started closes that channel.
-          if (!state.sweep) state.sweep = { startedAt: payload.at, done: {} };
+          if (!state.sweep || typeof state.sweep !== "object") {
+            state.sweep = { startedAt: payload.at, done: {} };
+          }
+          state.sweep.done = obj(state.sweep.done);
           if (
             !state.sweep.done[norm.channelId] &&
             Date.parse(payload.at || "") >= Date.parse(state.sweep.startedAt || "")
@@ -620,6 +653,15 @@ export default {
               ...state.sweep.done,
               [norm.channelId]: payload.at,
             };
+            // Cap sweep history — a long-lived install re-reads channels.
+            const doneIds = Object.keys(state.sweep.done);
+            if (doneIds.length > GUILD_CHANNEL_CAP * GUILD_CAP) {
+              state.sweep.done = Object.fromEntries(
+                doneIds
+                  .slice(-(GUILD_CHANNEL_CAP * GUILD_CAP))
+                  .map((id) => [id, state.sweep.done[id]])
+              );
+            }
             recomputeWatch(state, settings, nowIso);
           }
         }
@@ -651,34 +693,38 @@ export default {
           extract = null;
         }
         if (!extract || typeof extract !== "object") return finish();
-        const loc = extract.location || {};
+        const loc = obj(extract.location);
         // Anything seen under /channels/@me is a DM channel — purge and
         // remember it so candidates from it are never stored again.
         if (loc.guildId === "@me" && loc.channelId) {
-          const dm = new Set(state.dmChannels || []);
+          const dm = new Set(arr(state.dmChannels));
           dm.add(String(loc.channelId));
           state.dmChannels = [...dm].slice(-DM_CAP);
           state.lastGood.messages = {
-            items: (state.lastGood.messages?.items || []).filter(
+            items: arr(state.lastGood.messages?.items).filter(
               (item) => String(item?.meta?.channelId || "") !== String(loc.channelId)
             ),
             at: state.lastGood.messages?.at || payload.at,
           };
         }
         if (extract.type === "inventory") {
-          for (const g of extract.guilds || []) {
-            const rec = (state.guilds[g.guildId] ||= { channels: {} });
+          for (const g of arr(extract.guilds)) {
+            if (!g || g.guildId == null) continue;
+            const rec = { ...obj(state.guilds[g.guildId]) };
+            rec.channels = obj(rec.channels);
             rec.name = g.name || rec.name;
             rec.unread = g.unread || false;
             rec.mentions = g.mentions || 0;
+            state.guilds[g.guildId] = rec;
           }
           if (loc.guildId && loc.guildId !== "@me") {
-            const rec = (state.guilds[loc.guildId] ||= { channels: {} });
+            const rec = { ...obj(state.guilds[loc.guildId]) };
+            rec.channels = { ...obj(rec.channels) };
             rec.lastInventoryAt = payload.at;
-            rec.channels = { ...(rec.channels || {}) };
-            for (const c of extract.channels || []) {
+            state.guilds[loc.guildId] = rec;
+            for (const c of arr(extract.channels)) {
               if (!c?.channelId) continue;
-              const prev_c = rec.channels[c.channelId] || {};
+              const prev_c = obj(rec.channels[c.channelId]);
               rec.channels[c.channelId] = {
                 ...prev_c,
                 name: c.name ?? prev_c.name,
@@ -690,6 +736,22 @@ export default {
                 order: c.order ?? prev_c.order,
               };
             }
+            // Per-guild channel cap: keep the first-seen records.
+            const chanIds = Object.keys(rec.channels);
+            if (chanIds.length > GUILD_CHANNEL_CAP) {
+              rec.channels = Object.fromEntries(
+                chanIds
+                  .slice(0, GUILD_CHANNEL_CAP)
+                  .map((id) => [id, rec.channels[id]])
+              );
+            }
+          }
+          // Guild cap: keep the first-seen rail entries.
+          const guildIds = Object.keys(state.guilds);
+          if (guildIds.length > GUILD_CAP) {
+            state.guilds = Object.fromEntries(
+              guildIds.slice(0, GUILD_CAP).map((id) => [id, state.guilds[id]])
+            );
           }
           recomputeWatch(state, settings, nowIso);
         } else if (extract.type === "messages") {
@@ -698,10 +760,10 @@ export default {
           } else {
             ingestMessages(
               state,
-              (extract.messages || []).map((m) => {
+              arr(extract.messages).map((m) => {
                 const rest = domMessageToRest(
                   m,
-                  m.channelId || loc.channelId
+                  m?.channelId || loc.channelId
                 );
                 rest.guild_id = loc.guildId;
                 return rest;
@@ -720,9 +782,9 @@ export default {
           // only the series it shows.
           const guildId = String(loc.guildId || "");
           if (guildId && guildId !== "@me") {
-            const guild = state.guilds?.[guildId];
+            const guild = obj(state.guilds)[guildId];
             const cfg = watchConfig(
-              extract.guildName || guild?.name || "",
+              String(extract.guildName || guild?.name || ""),
               settings.watched
             );
             const fresh = parseEventsExtract(extract, {
@@ -730,10 +792,10 @@ export default {
               nowIso,
               guildId,
               team: cfg?.team || extract.guildName,
-              rsvps: state.rsvps || [],
+              rsvps: arr(state.rsvps),
             });
-            const evState = { ...(state.lastGood.events || {}) };
-            const prev = evState[guildId]?.items || [];
+            const evState = { ...obj(state.lastGood.events) };
+            const prev = arr(evState[guildId]?.items);
             let merged;
             if (extract.modal === "list") {
               merged = fresh; // full guild list — replace wholesale
@@ -745,13 +807,25 @@ export default {
             }
             const cutoff = nowMs - EVENT_STALE_MS;
             evState[guildId] = {
-              items: merged.filter((i) => {
-                const a = Date.parse(i?.startAt || i?.dueAt || "");
-                return !Number.isFinite(a) || a >= cutoff;
-              }),
+              items: merged
+                .filter((i) => {
+                  const a = Date.parse(i?.startAt || i?.dueAt || "");
+                  return !Number.isFinite(a) || a >= cutoff;
+                })
+                .slice(0, EVENT_ITEMS_CAP),
               at: payload.at,
             };
-            state.lastGood.events = evState;
+            // A modal can only be open for one guild, but cap anyway.
+            const evGuilds = Object.keys(evState);
+            const kept =
+              evGuilds.length > EVENT_GUILD_CAP
+                ? Object.fromEntries(
+                    evGuilds
+                      .slice(0, EVENT_GUILD_CAP)
+                      .map((id) => [id, evState[id]])
+                  )
+                : evState;
+            state.lastGood.events = kept;
           }
         }
         else if (extract.type === "location") {
