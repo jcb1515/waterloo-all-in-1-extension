@@ -10,6 +10,7 @@ import { normCourseCode } from "../../core/contract.js";
 import { effectiveItem, isVisible } from "../../core/effective.js";
 import { findClashes } from "../../core/clashes.js";
 import { priorityOf } from "../../core/priority.js";
+import { estimateSumMin } from "./itemsheet.js";
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -309,10 +310,12 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   const emit = (id, label, opts = {}) => {
     const rows = buckets.get(id) || [];
     if (!rows.length && !opts.always) return;
+    const estMin = estimateSumMin(rows, userState);
     groups.push({
       id,
       label,
       count: rows.length,
+      estMin: estMin || null,
       collapsedByDefault: !!opts.collapsed,
       tone: opts.tone || null,
       rows,
@@ -328,7 +331,15 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     const key = `day:${new Date(t).toDateString()}`;
     const rows = buckets.get(key);
     if (rows && rows.length) {
-      groups.push({ id: key, label: fmtDay(t), count: rows.length, collapsedByDefault: false, rows });
+      const estMin = estimateSumMin(rows, userState);
+      groups.push({
+        id: key,
+        label: fmtDay(t),
+        count: rows.length,
+        estMin: estMin || null,
+        collapsedByDefault: false,
+        rows,
+      });
     }
   }
 

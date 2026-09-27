@@ -468,3 +468,23 @@ kbd {
 .class-weeks {
   padding-left: var(--sp-3);
 }
+
+/* ------------------------- hidden & snoozed items -------------------------- */
+
+.hidden-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+}
+.hidden-row:first-of-type { border-top: 0; padding-top: 0; }
+.hidden-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hidden-main strong { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.hidden-acts { display: flex; gap: var(--sp-2); flex-shrink: 0; }

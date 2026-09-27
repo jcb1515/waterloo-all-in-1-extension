@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
+import { fmtEstimate } from "../model/itemsheet.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../components/ItemRow.jsx";
@@ -217,6 +218,13 @@ export function Agenda({ state, actions, now, onGoSources }) {
             tone={g.tone}
             collapsed={collapsed[g.id] ?? g.collapsedByDefault}
             onToggle={() => setCollapsed((c) => ({ ...c, [g.id]: !(c[g.id] ?? g.collapsedByDefault) }))}
+            extra={
+              g.estMin ? (
+                <span class="est-sum tabular" title="Summed estimates">
+                  ~{fmtEstimate(g.estMin)}
+                </span>
+              ) : null
+            }
           />
           {(collapsed[g.id] ?? g.collapsedByDefault) ? null : (
             <div class="card row-card" role="list">

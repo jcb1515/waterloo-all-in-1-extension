@@ -1,0 +1,120 @@
+// @ts-check
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  snoozeUntil,
+  fmtEstimate,
+  estimateSumMin,
+  primaryLink,
+  hiddenSnoozed,
+  sourceLabel,
+} from "../../extension/src/panel/model/itemsheet.js";
+import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
+
+const HOUR = 3600000;
+
+/* ------------------------------- snooze ---------------------------------- */
+
+test("snooze hour is a plain +60min shift", () => {
+  const now = new Date("2026-10-31T15:00:00.000Z"); // 11 AM EDT
+  assert.equal(
+    snoozeUntil("hour", now),
+    new Date(now.getTime() + HOUR).toISOString(),
+  );
+});
+
+test("snooze evening targets tonight 8 PM Toronto, rolling past it", () => {
+  // Sat Oct 31 2026, 11:00 EDT -> tonight 20:00 EDT = Nov 1 00:00Z.
+  const now = new Date("2026-10-31T15:00:00.000Z");
+  assert.equal(snoozeUntil("evening", now), "2026-11-01T00:00:00.000Z");
+  // 21:30 EDT -> tomorrow (Nov 1) 20:00 EST = Nov 2 01:00Z (fell back).
+  const late = new Date("2026-11-01T01:30:00.000Z");
+  assert.equal(snoozeUntil("evening", late), "2026-11-02T01:00:00.000Z");
+});
+
+test("snooze morning/monday stay at wall-clock 8 AM across the fall-back", () => {
+  // Sat Oct 31 2026, 11:00 EDT. Nov 1 is the DST fall-back day.
+  const now = new Date("2026-10-31T15:00:00.000Z");
+  // Tomorrow 8 AM: Nov 1 08:00 EST = 13:00Z (not 12:00Z — offset changed).
+  assert.equal(snoozeUntil("morning", now), "2026-11-01T13:00:00.000Z");
+  // Next Monday: Nov 2 08:00 EST = 13:00Z.
+  assert.equal(snoozeUntil("monday", now), "2026-11-02T13:00:00.000Z");
+  // On a Monday, "Monday 8 AM" means the following week.
+  const mon = new Date("2026-11-02T15:00:00.000Z"); // Mon Nov 2, 10:00 EST
+  assert.equal(snoozeUntil("monday", mon), "2026-11-09T13:00:00.000Z");
+  assert.equal(snoozeUntil("bogus", now), null);
+});
+
+/* ------------------------------ estimates ------------------------------- */
+
+test("fmtEstimate renders compact h/m", () => {
+  assert.equal(fmtEstimate(45), "45m");
+  assert.equal(fmtEstimate(120), "2h");
+  assert.equal(fmtEstimate(210), "3h 30m");
+});
+
+test("estimateSumMin totals open items' estimates only", () => {
+  const rows = [
+    { id: "a", status: "open" },
+    { id: "b", status: "open" },
+    { id: "c", status: "done" },
+    { id: "d", status: "open" },
+  ];
+  const us = { a: { estimateMin: 90 }, b: { estimateMin: 120 }, c: { estimateMin: 60 } };
+  assert.equal(estimateSumMin(rows, us), 210);
+  assert.equal(estimateSumMin(rows, {}), 0);
+});
+
+test("buildAgenda attaches the summed estimate to each group", () => {
+  const now = new Date("2026-09-27T12:00:00"); // Sunday
+  const items = {
+    i1: { id: "i1", title: "Quiz", type: "quiz", status: "open", dueAt: new Date(now.getTime() + HOUR).toISOString() },
+    i2: { id: "i2", title: "Lab report", type: "deadline", status: "open", dueAt: new Date(now.getTime() + 2 * HOUR).toISOString() },
+    i3: { id: "i3", title: "Essay", type: "deadline", status: "open", dueAt: new Date(now.getTime() + 26 * HOUR).toISOString() },
+  };
+  const userState = { i1: { estimateMin: 60 }, i2: { estimateMin: 150 }, i3: { estimateMin: 90 } };
+  const a = buildAgenda({ items, userState, settings: {}, now });
+  const today = a.groups.find((g) => g.id === "today");
+  const tomorrow = a.groups.find((g) => g.id === "tomorrow");
+  assert.equal(today.estMin, 210);
+  assert.equal(tomorrow.estMin, 90);
+});
+
+/* ------------------------------ source link ------------------------------ */
+
+test("primaryLink prefers url, then meta.listUrl, then evidence.url", () => {
+  const base = { id: "x", source: "portal" };
+  assert.equal(primaryLink(base).url, null);
+  assert.equal(primaryLink(base).label, "Portal");
+
+  const ev = { ...base, evidence: { url: "https://ev.example" } };
+  assert.equal(primaryLink(ev).url, "https://ev.example");
+
+  const list = { ...ev, meta: { listUrl: "https://list.example" } };
+  assert.equal(primaryLink(list).url, "https://list.example");
+
+  const own = { ...list, url: "https://item.example" };
+  assert.equal(primaryLink(own).url, "https://item.example");
+  assert.equal(sourceLabel("manual"), "Manual");
+});
+
+/* --------------------------- hidden / snoozed ---------------------------- */
+
+test("hiddenSnoozed lists hidden and future-snoozed items", () => {
+  const now = new Date("2026-09-27T12:00:00");
+  const items = {
+    a: { id: "a", title: "B hidden" },
+    b: { id: "b", title: "A snoozed" },
+    c: { id: "c", title: "C plain" },
+    d: { id: "d", title: "D expired snooze" },
+  };
+  const us = {
+    a: { hidden: true },
+    b: { snoozedUntil: new Date(now.getTime() + HOUR).toISOString() },
+    d: { snoozedUntil: new Date(now.getTime() - HOUR).toISOString() },
+  };
+  const out = hiddenSnoozed(items, us, now);
+  assert.deepEqual(out.map((e) => e.item.id), ["b", "a"]);
+  assert.equal(out[0].snoozedUntil !== null, true);
+  assert.equal(out[1].hidden, true);
+});

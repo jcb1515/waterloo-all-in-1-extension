@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { weekModel, monthModel, weekStartOf, dayKeyOf, shortLabel } from "../model/calendar.js";
 import { fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { orgStyle } from "../../ui/colors.js";
-import { typeIcon, ChevronRightIcon, XIcon, MapPinIcon } from "../../ui/icons.jsx";
+import { ChevronRightIcon } from "../../ui/icons.jsx";
 import { ItemRow } from "../components/ItemRow.jsx";
 
 const PX_PER_MIN = 0.8;
@@ -16,7 +16,6 @@ const MONTH_NAMES = [
   "August", "September", "October", "November", "December",
 ];
 
-const NO_CHECK = new Set(["class", "tutorial", "exam", "term-date"]);
 const HEAT_LABELS = ["0", "1–9", "10–24", "25+"];
 
 function query0(name) {
@@ -25,63 +24,6 @@ function query0(name) {
   } catch {
     return null;
   }
-}
-
-/** The small detail card shown when a block/marker is tapped. */
-function DetailPop({ item, actions, onClose }) {
-  const Icon = typeIcon(item.type);
-  const when = item.startAt
-    ? `${fmtDay(item.startAt)} · ${item.endAt ? fmtRange(item.startAt, item.endAt) : fmtTime(item.startAt)}`
-    : item.dueAt
-      ? `Due ${fmtDay(item.dueAt)} · ${item.allDay ? "All day" : fmtTime(item.dueAt)}`
-      : null;
-  const markable = !NO_CHECK.has(item.type);
-  return (
-    <div class="cal-pop card" role="dialog" aria-label="Item details">
-      <div class="cal-pop-head">
-        <span class="item-icon" aria-hidden="true" style={orgStyle(item.org)}>
-          <Icon size={16} />
-        </span>
-        <div class="cal-pop-title">
-          <strong>{item.title}</strong>
-          {when ? <span class="tabular">{when}</span> : null}
-        </div>
-        <button type="button" class="btn-icon" aria-label="Close" onClick={onClose}>
-          <XIcon size={15} />
-        </button>
-      </div>
-      <div class="cal-pop-meta">
-        {item.org ? <span class="chip chip-org" style={orgStyle(item.org)}>{item.org}</span> : null}
-        {item.location ? (
-          <span class="cal-pop-loc">
-            <MapPinIcon size={12} /> {item.location}
-          </span>
-        ) : null}
-        {typeof item.weight === "number" ? <span>{item.weight}% of grade</span> : null}
-        {item.confidence === "tentative" ? <span class="badge badge-warn">Tentative</span> : null}
-        <span class="cal-pop-src">{item.source}</span>
-      </div>
-      <div class="cal-pop-acts">
-        {item.url ? (
-          <button type="button" class="btn btn-sm" onClick={() => actions.open(item.url)}>
-            Open
-          </button>
-        ) : null}
-        {markable && item.status === "open" ? (
-          <button
-            type="button"
-            class="btn btn-sm"
-            onClick={() => {
-              actions.setUserState(item.id, { done: true, doneAt: new Date().toISOString() });
-              onClose();
-            }}
-          >
-            Mark done
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 /** One hour-tick label, e.g. "8", "12 PM". */
@@ -230,7 +172,7 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
 }
 
 /** The Month grid + selected-day rows. */
-function MonthView({ state, actions, now, cursor, selDay, onSelectDay, onPick }) {
+function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
   const model = useMemo(
     () => monthModel(state.items, state.userState, state.settings, cursor, now),
     [state.items, state.userState, state.settings, cursor, now]
@@ -310,7 +252,6 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay, onPick })
 export function CalendarView({ state, actions, now }) {
   const [mode, setMode] = useState(() => (query0("view") === "month" ? "month" : "week"));
   const [cursor, setCursor] = useState(() => now.getTime());
-  const [selItem, setSelItem] = useState(() => null);
   const [selDay, setSelDay] = useState(() => query0("day") || dayKeyOf(now.getTime()));
   const [showClasses, setShowClasses] = useState(() => query0("classes") !== "0");
 
@@ -334,7 +275,6 @@ export function CalendarView({ state, actions, now }) {
         return new Date(d.getFullYear(), d.getMonth() + dir, 1).getTime();
       });
     }
-    setSelItem(null);
   };
 
   return (
@@ -388,7 +328,7 @@ export function CalendarView({ state, actions, now }) {
           now={now}
           cursor={weekStart}
           showClasses={showClasses}
-          onPick={setSelItem}
+          onPick={(it) => actions.openItem && actions.openItem(it)}
         />
       ) : (
         <MonthView
@@ -398,7 +338,6 @@ export function CalendarView({ state, actions, now }) {
           cursor={cursor}
           selDay={selDay}
           onSelectDay={setSelDay}
-          onPick={setSelItem}
         />
       )}
 
@@ -412,9 +351,6 @@ export function CalendarView({ state, actions, now }) {
         ))}
       </div>
 
-      {selItem ? (
-        <DetailPop item={selItem} actions={actions} onClose={() => setSelItem(null)} />
-      ) : null}
     </div>
   );
 }

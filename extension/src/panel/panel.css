@@ -1308,3 +1308,82 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 .grade-verdict.danger { color: var(--danger); }
 .course-topic { margin: 0; font-size: var(--fs-sm); }
 .course-topic + .course-topic { margin-top: var(--sp-1); }
+
+/* ------------------------------- item sheet -------------------------------- */
+
+.sheet { display: flex; flex-direction: column; gap: var(--sp-3); }
+.sheet-card { display: flex; flex-direction: column; gap: var(--sp-3); }
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.sheet-head .item-icon { flex-shrink: 0; margin-top: 2px; }
+.sheet-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--w-semibold);
+  line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+}
+.sheet-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.sheet-facts dt { color: var(--text-3); font-weight: var(--w-medium); }
+.sheet-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sheet-fact { display: contents; }
+.sheet-moved { color: var(--warn); }
+.sheet-details {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sheet-h {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sheet-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.sheet-src {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.sheet-src-name { font-weight: var(--w-medium); }
+.sheet-src-at { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); }
+.sheet-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.sheet-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.sheet-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  color: var(--text-3);
+}
+.sheet-notes { resize: vertical; min-height: 56px; font-size: var(--fs-sm); }
+.sheet-est-custom { width: 64px; }
+
+/* Agenda group estimate total on the group header. */
+.group-head .est-sum {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+}

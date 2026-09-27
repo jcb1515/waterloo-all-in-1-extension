@@ -13,6 +13,7 @@ import {
 } from "../model/coop.js";
 import { STATUS_LABEL } from "../../sources/waterlooworks/status.js";
 import { ItemRow } from "../components/ItemRow.jsx";
+import { Checklist } from "../components/Checklist.jsx";
 import { fmtAgo, fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { orgStyle } from "../../ui/colors.js";
 import {
@@ -20,8 +21,6 @@ import {
   ChevronRightIcon,
   ExternalLinkIcon,
   MapPinIcon,
-  PlusIcon,
-  XIcon,
 } from "../../ui/icons.jsx";
 
 function query0(name) {
@@ -30,70 +29,6 @@ function query0(name) {
   } catch {
     return null;
   }
-}
-
-/* ------------------------------ prep checklist ------------------------------ */
-
-/** Editable checklist bound to userState[item.id].subtasks. */
-function Checklist({ item, us, actions }) {
-  const tasks = checklistFor(item, us);
-  const [draft, setDraft] = useState("");
-  const persist = (list) => actions.setUserState(item.id, { subtasks: list });
-  return (
-    <ul class="prep-check" aria-label="Prep checklist">
-      {tasks.map((t, i) => (
-        <li key={`${t.text}-${i}`}>
-          <label>
-            <input
-              type="checkbox"
-              checked={t.done}
-              onChange={() =>
-                persist(tasks.map((x, j) => (j === i ? { ...x, done: !x.done } : x)))
-              }
-            />
-            <span class={t.done ? "done" : ""}>{t.text}</span>
-          </label>
-          <button
-            type="button"
-            class="btn-icon prep-del"
-            aria-label={`Remove "${t.text}"`}
-            onClick={() => persist(tasks.filter((_, j) => j !== i))}
-          >
-            <XIcon size={12} />
-          </button>
-        </li>
-      ))}
-      <li>
-        <input
-          class="input prep-add"
-          type="text"
-          placeholder="Add a step…"
-          value={draft}
-          aria-label="Add a checklist step"
-          onInput={(e) => setDraft(/** @type {any} */ (e.target).value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && draft.trim()) {
-              persist([...tasks, { text: draft.trim(), done: false }]);
-              setDraft("");
-            }
-          }}
-        />
-        <button
-          type="button"
-          class="btn-icon"
-          aria-label="Add step"
-          onClick={() => {
-            if (draft.trim()) {
-              persist([...tasks, { text: draft.trim(), done: false }]);
-              setDraft("");
-            }
-          }}
-        >
-          <PlusIcon size={13} />
-        </button>
-      </li>
-    </ul>
-  );
 }
 
 /** One interview row + expandable prep card. */

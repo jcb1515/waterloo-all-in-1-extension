@@ -15,6 +15,7 @@ import { Courses } from "./views/Courses.jsx";
 import { Sources } from "./views/Sources.jsx";
 import { Review } from "./views/Review.jsx";
 import { Updates } from "./views/Updates.jsx";
+import { ItemSheet } from "./views/ItemSheet.jsx";
 
 const TABS = [
   ["agenda", "Agenda"],
@@ -23,7 +24,12 @@ const TABS = [
   ["courses", "Courses"],
 ];
 
-const OVERLAY_TITLES = { review: "Review", updates: "Updates", sources: "Sources" };
+const OVERLAY_TITLES = {
+  review: "Review",
+  updates: "Updates",
+  sources: "Sources",
+  item: "Item",
+};
 
 /** Items still awaiting a review verdict. */
 function pendingCount(items, userState) {
@@ -52,7 +58,9 @@ export function App() {
     const t = query.get("tab");
     return TABS.some(([id]) => id === t) ? /** @type {string} */ (t) : "agenda";
   });
+  const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [overlay, setOverlay] = useState(() => {
+    if (query.get("item")) return "item";
     const v = query.get("view");
     return v && OVERLAY_TITLES[v] ? v : null;
   });
@@ -82,6 +90,12 @@ export function App() {
         if (toastTimer.current) clearTimeout(toastTimer.current);
         setToast({ text, action });
         toastTimer.current = setTimeout(() => setToast(null), 6000);
+      },
+      /** Open the item detail sheet. */
+      openItem(item) {
+        if (!item || !item.id) return;
+        setSheetId(item.id);
+        setOverlay("item");
       },
     }),
     [state.actions]
@@ -230,6 +244,14 @@ export function App() {
         {syncing ? <span class="sr-only" role="status">Syncing sources…</span> : null}
         {overlay === "review" ? (
           <Review state={state} actions={actions} now={now} onBack={() => setOverlay(null)} />
+        ) : overlay === "item" && sheetId ? (
+          <ItemSheet
+            state={state}
+            actions={actions}
+            now={now}
+            itemId={sheetId}
+            onClose={() => setOverlay(null)}
+          />
         ) : overlay === "updates" ? (
           <Updates
             state={state}

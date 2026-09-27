@@ -45,18 +45,19 @@ export function ItemRow({ item, now, actions, done, clashes, items, priority }) 
     : "";
 
   const open = () => {
-    if (item.url) actions.open(item.url);
+    if (actions.openItem) actions.openItem(item);
+    else if (item.url) actions.open(item.url);
   };
 
   return (
     <div
-      class={`item-row${dimmed ? " dimmed" : ""}${item.url ? " linked" : ""}`}
+      class={`item-row${dimmed ? " dimmed" : ""} linked`}
       style={{ "--org": style["--org"] || "var(--border-strong)", ...style }}
-      role={item.url ? "link" : "listitem"}
-      tabIndex={item.url ? 0 : -1}
+      role="link"
+      tabIndex={0}
       onClick={open}
       onKeyDown={(e) => {
-        if (item.url && (e.key === "Enter" || e.key === " ")) {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           open();
         }
