@@ -74,7 +74,20 @@ const SHOTS_2B = [
   { name: "options-calendar-published-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
 ];
 
+const SHOTS_2C = [
+  { name: "panel-week-light", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [400, 900] },
+  { name: "panel-week-dark", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [400, 900], dark: true },
+  { name: "panel-month-light", url: "/src/panel/panel.html?preview=1&tab=calendar&view=month", size: [400, 900] },
+  { name: "panel-coop-light", url: "/src/panel/panel.html?preview=1&tab=coop&prep=waterlooworks:int-acme", size: [400, 900] },
+  { name: "panel-courses-light", url: "/src/panel/panel.html?preview=1&tab=courses", size: [400, 900] },
+  { name: "panel-course-detail-light", url: "/src/panel/panel.html?preview=1&tab=courses&course=MATH%20117", size: [400, 900] },
+  { name: "panel-sources-overlay-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-review-light", url: "/src/panel/panel.html?preview=1&view=review", size: [400, 900] },
+  { name: "panel-week-360", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [360, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "phase2c" ? SHOTS_2C :
   process.env.WA1_SHOT_DIR === "phase2b" ? SHOTS_2B :
   process.env.WA1_SHOT_DIR === "phase2a" ? SHOTS_2A : [
   { name: "panel-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
@@ -202,6 +215,11 @@ async function shots() {
           reviewCards: document.querySelectorAll(".review-card").length,
           updateRows: document.querySelectorAll(".update-row").length,
           leadRows: document.querySelectorAll(".lead-row").length,
+          calBlocks: document.querySelectorAll(".cal-block").length,
+          calCells: document.querySelectorAll(".cal-cell").length,
+          prepCards: document.querySelectorAll(".prep-card").length,
+          appCards: document.querySelectorAll(".app-card").length,
+          courseCards: document.querySelectorAll(".course-card").length,
           marks: document.querySelectorAll("mark").length,
           text: document.body.innerText.slice(0, 120)
         })`,

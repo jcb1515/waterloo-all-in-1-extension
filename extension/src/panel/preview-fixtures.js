@@ -19,6 +19,14 @@ const at = (base, h, m = 0) =>
 const dayAt = (base, dayOffset, h, m = 0) =>
   at(new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayOffset), h, m);
 
+/** Weekday `dow` (0=Sun) in the current Mon–Sun week at h:m — may be past. */
+function thisWeekday(now, dow, h, m = 0) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
+  const mon = d.getDate() - ((d.getDay() + 6) % 7);
+  d.setDate(mon + ((dow + 6) % 7));
+  return d.toISOString();
+}
+
 /** Next occurrence of weekday `dow` (0=Sun) at h:m, strictly after `now`. */
 function nextWeekday(now, dow, h, m = 0) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
@@ -150,7 +158,52 @@ export function previewState(nowD = new Date(), variants = {}) {
     startAt: dayAt(nowD, 1, 19, 0), // overlaps the WATonomous sync tomorrow
     endAt: dayAt(nowD, 1, 19, 30),
     location: "WaterlooWorks — video call",
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/interviews.htm",
+    meta: {
+      jobId: "408117",
+      prep: {
+        format: "Video call",
+        interviewer: "J. Rivera (hiring manager)",
+        jobId: "408117",
+        jobTitle: "Hardware Engineer — co-op",
+        employer: "Acme Analog",
+        instructions: "15-minute screen. Have your transcript and work-term record handy; a link arrives by email 10 minutes before.",
+        method: "video",
+      },
+    },
     seenIn: seen("waterlooworks", "int-acme", "interviews", today),
+  });
+  add("waterlooworks:int-northwind", {
+    source: "waterlooworks",
+    type: "interview",
+    title: "Northwind Optics — Photonics R&D intern interview",
+    org: "Northwind Optics",
+    category: "interview",
+    startAt: dayAt(nowD, 3, 11, 0),
+    endAt: dayAt(nowD, 3, 11, 45),
+    location: "TC 2218",
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/interviews.htm",
+    meta: {
+      jobId: "407890",
+      prep: {
+        format: "In person",
+        interviewer: "Panel (2 interviewers)",
+        jobId: "407890",
+        jobTitle: "Photonics R&D Intern",
+        employer: "Northwind Optics",
+        instructions: "Check in at the Tatham Centre desk 10 minutes early.",
+      },
+    },
+    seenIn: seen("waterlooworks", "int-northwind", "interviews", today),
+  });
+  add("waterlooworks:rank-granite", {
+    source: "waterlooworks",
+    type: "offer-deadline",
+    title: "Granite Peak Systems — rank match closes",
+    org: "Granite Peak Systems",
+    dueAt: dayAt(nowD, 4, 23, 59),
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/rankings.htm",
+    seenIn: seen("waterlooworks", "rank-granite", "applications", today),
   });
   add("discord:wato-electrical-sync", {
     source: "discord",
@@ -203,6 +256,42 @@ export function previewState(nowD = new Date(), variants = {}) {
     url: "https://learn.uwaterloo.ca/d2l/home/105",
     seenIn: seen("learn", "ece198-lab4", "dropbox", today),
   });
+
+  // A full week of LEC/TUT/LAB meetings so the Calendar views are populated.
+  // [org, kind, dow (0=Sun), start h:m, length (min), room, this week's topic]
+  /** @type {[string, string, number, number, number, number, string, string | null][]} */
+  const classes = [
+    ["MATH 117", "LEC", 1, 13, 30, 50, "MC 4021", "Integration by parts"],
+    ["MATH 117", "LEC", 3, 13, 30, 50, "MC 4021", "The substitution rule"],
+    ["MATH 117", "TUT", 2, 8, 30, 50, "MC 5479", null],
+    ["MATH 115", "LEC", 2, 10, 0, 80, "RCH 305", "Eigenvalues"],
+    ["MATH 115", "LEC", 4, 10, 0, 80, "RCH 305", "Diagonalization"],
+    ["ECE 105", "LEC", 1, 9, 30, 50, "E7 5343", "Phasor analysis"],
+    ["ECE 105", "LEC", 3, 9, 30, 50, "E7 5343", "AC power"],
+    ["ECE 105", "LEC", 5, 9, 30, 50, "E7 5343", "Magnetic circuits"],
+    ["ECE 105", "LAB", 4, 14, 30, 110, "E2 2363", null],
+    ["ECE 150", "LEC", 2, 13, 0, 80, "STC 0060", "Linked structures"],
+    ["ECE 150", "LEC", 4, 13, 0, 80, "STC 0060", "Recursion"],
+    ["ECE 150", "LAB", 3, 8, 30, 110, "E5 6008", null],
+    ["ECE 198", "LEC", 1, 10, 30, 80, "E7 2403", "Team standup"],
+    ["ENGL 192", "LEC", 5, 10, 30, 80, "HH 1102", "Memo workshop"],
+  ];
+  for (const [org, kind, dow, h, m, dur, room, topic] of classes) {
+    const type = kind === "LEC" ? "class" : kind === "TUT" ? "tutorial" : "lab";
+    const slug = `${org.replace(/\s+/g, "").toLowerCase()}-${kind.toLowerCase()}`;
+    add(`learn:${slug}-w${dow}`, {
+      source: "learn",
+      type,
+      title: `${org} ${kind}`,
+      org,
+      startAt: thisWeekday(nowD, dow, h, m),
+      endAt: thisWeekday(nowD, dow, h, m + dur),
+      location: room,
+      details: topic || undefined,
+      url: "https://learn.uwaterloo.ca/d2l/home",
+      seenIn: seen("learn", `${slug}-w${dow}`, "calendar", today),
+    });
+  }
 
   // Pending review: a Learn announcement date and a WaterlooWorks message
   // date. They wait in the Review view and stay out of the agenda.
@@ -279,13 +368,234 @@ export function previewState(nowD = new Date(), variants = {}) {
   };
 
   const courses = {
-    "MATH 117": { code: "MATH 117", name: "Calculus 1", term: 1269 },
-    "MATH 115": { code: "MATH 115", name: "Linear Algebra", term: 1269 },
-    "ECE 105": { code: "ECE 105", name: "Electrical and Computer Engineering", term: 1269 },
-    "ECE 150": { code: "ECE 150", name: "Fundamentals of Programming", term: 1269 },
-    "ECE 190": { code: "ECE 190", name: "Engineering Profession and Practice", term: 1269 },
-    "ECE 198": { code: "ECE 198", name: "Project Studio", term: 1269 },
-    "ENGL 192": { code: "ENGL 192", name: "Communication in Engineering", term: 1269 },
+    "MATH 117": {
+      code: "MATH 117",
+      name: "Calculus 1",
+      term: 1269,
+      sections: ["LEC 002", "TUT 104"],
+      learnOrgUnitId: 101,
+      outlineUrl: "https://outline.uwaterloo.ca/viewer/npch7t",
+      weights: [
+        { component: "Assignments", weight: 20 },
+        { component: "Quizzes", weight: 10 },
+        { component: "Midterm", weight: 30 },
+        { component: "Final exam", weight: 40 },
+      ],
+      grades: [
+        { component: "Assignments", points: 17, max: 20 },
+        { component: "Quizzes", points: 8, max: 10 },
+        { component: "Midterm", points: 24, max: 30 },
+      ],
+      assessments: [
+        { component: "Assignments", weight: 20, dateText: "Weekly, Fri 11:59 PM", itemId: null, from: "table" },
+        { component: "Quizzes", weight: 10, dateText: "Alternate Fridays", itemId: null, from: "table" },
+        { component: "Midterm", weight: 30, dateText: "Thu, 4:30–6:20 PM", itemId: "outline:math117-midterm", from: "table" },
+        { component: "Final exam", weight: 40, dateText: "Dec exam window", itemId: null, from: "chart" },
+      ],
+      officeHours: "Mon/Wed 3:30–4:20 PM · MC 5417",
+    },
+    "MATH 115": {
+      code: "MATH 115",
+      name: "Linear Algebra",
+      term: 1269,
+      sections: ["LEC 005"],
+      learnOrgUnitId: 107,
+      weights: [
+        { component: "Assignments", weight: 25 },
+        { component: "Midterm", weight: 25 },
+        { component: "Final exam", weight: 50 },
+      ],
+      assessments: [
+        { component: "Assignments", weight: 25, dateText: "Weekly", itemId: null, from: "table" },
+        { component: "Midterm", weight: 25, dateText: "TBD", itemId: null, from: "table" },
+        { component: "Final exam", weight: 50, dateText: "Dec exam window", itemId: null, from: "table" },
+      ],
+    },
+    "ECE 105": {
+      code: "ECE 105",
+      name: "Electrical and Computer Engineering",
+      term: 1269,
+      sections: ["LEC 001", "LAB 211"],
+      learnOrgUnitId: 102,
+      weights: [
+        { component: "Quizzes", weight: 15 },
+        { component: "Labs", weight: 15 },
+        { component: "Midterm", weight: 25 },
+        { component: "Final exam", weight: 45 },
+      ],
+      assessments: [
+        { component: "Quizzes", weight: 15, dateText: "Biweekly, Fri 11:59 PM", itemId: "learn:ece105-quiz3", from: "table" },
+        { component: "Labs", weight: 15, dateText: "Alternate Thu", itemId: null, from: "table" },
+        { component: "Midterm", weight: 25, dateText: "TBD", itemId: null, from: "table" },
+        { component: "Final exam", weight: 45, dateText: "Dec exam window", itemId: null, from: "table" },
+      ],
+    },
+    "ECE 150": {
+      code: "ECE 150",
+      name: "Fundamentals of Programming",
+      term: 1269,
+      sections: ["LEC 001", "LAB 203"],
+      learnOrgUnitId: 103,
+      weights: [
+        { component: "Project", weight: 25 },
+        { component: "Assignments", weight: 20 },
+        { component: "Midterm", weight: 20 },
+        { component: "Final exam", weight: 35 },
+      ],
+      grades: [{ component: "Assignments", points: 44, max: 50 }],
+      gradingSchemes: [
+        {
+          name: "Standard",
+          rows: [
+            { component: "Project", weight: 25, dateText: "Milestones", location: "" },
+            { component: "Assignments", weight: 20, dateText: "Biweekly", location: "" },
+            { component: "Midterm", weight: 20, dateText: "Week 7", location: "" },
+            { component: "Final exam", weight: 35, dateText: "Dec exam window", location: "" },
+          ],
+        },
+        {
+          name: "Final-heavy",
+          rows: [
+            { component: "Project", weight: 25, dateText: "Milestones", location: "" },
+            { component: "Assignments", weight: 20, dateText: "Biweekly", location: "" },
+            { component: "Final exam", weight: 55, dateText: "Dec exam window", location: "" },
+          ],
+        },
+      ],
+      assessments: [
+        { component: "Project", weight: 25, dateText: "Milestones", itemId: "learn:ece150-project1", from: "table" },
+        { component: "Assignments", weight: 20, dateText: "Biweekly", itemId: null, from: "table" },
+        { component: "Midterm", weight: 20, dateText: "Week 7", itemId: null, from: "table" },
+        { component: "Final exam", weight: 35, dateText: "Dec exam window", itemId: null, from: "table" },
+      ],
+    },
+    "ECE 190": {
+      code: "ECE 190",
+      name: "Engineering Profession and Practice",
+      term: 1269,
+      sections: ["LEC 003"],
+      group: "5",
+      learnOrgUnitId: 104,
+      weights: [
+        { component: "Deliverables", weight: 60 },
+        { component: "Midterm test", weight: 20 },
+        { component: "Final reflection", weight: 20 },
+      ],
+      assessments: [
+        { component: "Deliverable 1", weight: 20, dateText: "Wed 11:59 PM", itemId: "learn:ece190-deliverable1", from: "table" },
+        { component: "Midterm test", weight: 20, dateText: "TBD", itemId: "outline:ece190-midterm", from: "table" },
+        { component: "Final reflection", weight: 20, dateText: "Last week", itemId: null, from: "table" },
+      ],
+    },
+    "ECE 198": {
+      code: "ECE 198",
+      name: "Project Studio",
+      term: 1269,
+      sections: ["LEC 010"],
+      learnOrgUnitId: 105,
+      syllabusUrls: [{ title: "Studio syllabus", url: "https://learn.uwaterloo.ca/d2l/home/105" }],
+      weights: [
+        { component: "Lab reports", weight: 50 },
+        { component: "Studio participation", weight: 20 },
+        { component: "Final demo", weight: 30 },
+      ],
+    },
+    "ENGL 192": {
+      code: "ENGL 192",
+      name: "Communication in Engineering",
+      term: 1269,
+      sections: ["LEC 081"],
+      learnOrgUnitId: 106,
+      weights: [
+        { component: "Worksheets", weight: 30 },
+        { component: "Memo report", weight: 30 },
+        { component: "Final portfolio", weight: 40 },
+      ],
+    },
+  };
+
+  // Six applications across every status group, each with a change history.
+  const applications = {
+    "waterlooworks:408117": {
+      id: "waterlooworks:408117",
+      employer: "Acme Analog",
+      jobTitle: "Hardware Engineer — co-op",
+      jobId: "408117",
+      cycle: "Winter 2027 main round",
+      status: "interview-scheduled",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/408117",
+      history: [
+        { status: "applied", at: iso(now - 9 * DAY) },
+        { status: "selected-for-interview", at: iso(now - 3 * DAY) },
+        { status: "interview-scheduled", at: iso(now - DAY) },
+      ],
+      itemIds: ["waterlooworks:int-acme"],
+    },
+    "waterlooworks:407890": {
+      id: "waterlooworks:407890",
+      employer: "Northwind Optics",
+      jobTitle: "Photonics R&D Intern",
+      jobId: "407890",
+      cycle: "Winter 2027 main round",
+      status: "selected-for-interview",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/407890",
+      history: [
+        { status: "applied", at: iso(now - 8 * DAY) },
+        { status: "selected-for-interview", at: iso(now - 2 * DAY) },
+      ],
+      itemIds: ["waterlooworks:int-northwind"],
+    },
+    "waterlooworks:405512": {
+      id: "waterlooworks:405512",
+      employer: "Blueleaf Robotics",
+      jobTitle: "Embedded Software Co-op",
+      jobId: "405512",
+      cycle: "Winter 2027 main round",
+      status: "applied",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/405512",
+      history: [{ status: "applied", at: iso(now - 12 * HOUR) }],
+      itemIds: [],
+    },
+    "waterlooworks:403388": {
+      id: "waterlooworks:403388",
+      employer: "Riverline Software",
+      jobTitle: "QA Analyst",
+      jobId: "403388",
+      cycle: "Winter 2027 main round",
+      status: "applied",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/403388",
+      history: [{ status: "applied", at: iso(now - 6 * DAY) }],
+      itemIds: [],
+    },
+    "waterlooworks:401771": {
+      id: "waterlooworks:401771",
+      employer: "Granite Peak Systems",
+      jobTitle: "FPGA Design Co-op",
+      jobId: "401771",
+      cycle: "Winter 2027 main round",
+      status: "ranked",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/401771",
+      history: [
+        { status: "applied", at: iso(now - 12 * DAY) },
+        { status: "interview-scheduled", at: iso(now - 5 * DAY) },
+        { status: "ranked", at: iso(now - 8 * HOUR) },
+      ],
+      itemIds: ["waterlooworks:rank-granite"],
+    },
+    "waterlooworks:399560": {
+      id: "waterlooworks:399560",
+      employer: "Heliotrope Health",
+      jobTitle: "Software Engineering Intern",
+      jobId: "399560",
+      cycle: "Winter 2027 main round",
+      status: "not-selected",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/399560",
+      history: [
+        { status: "applied", at: iso(now - 14 * DAY) },
+        { status: "not-selected", at: iso(now - 2 * DAY) },
+      ],
+      itemIds: [],
+    },
   };
 
   const published = variants.cal === "published" || variants.cal === "split" || variants.cal === "error";
@@ -427,5 +737,5 @@ export function previewState(nowD = new Date(), variants = {}) {
   ];
   const updatesSeenAt = iso(now - 4 * HOUR);
 
-  return { items, userState, sourceState, courses, applications: {}, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
+  return { items, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
 }
