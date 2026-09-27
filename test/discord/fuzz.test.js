@@ -253,3 +253,109 @@ test("growth: 1000 unique reads keep state under 1.5 MB and hold all caps", asyn
     assert.ok(Object.keys(g.channels || {}).length <= 500);
   }
 });
+
+/** One inventory extract payload. */
+const invPayload = (guildId, channelId, rail, channels, at = AT) => ({
+  source: "discord",
+  kind: "dom",
+  url: `https://discord.com/channels/${guildId}/${channelId}`,
+  body: JSON.stringify({
+    v: 1,
+    type: "inventory",
+    location: { guildId, channelId },
+    guilds: rail,
+    channels,
+  }),
+  at,
+});
+
+test("caps: guild eviction never drops watched guilds", async () => {
+  const watchedIds = [];
+  const watched = {};
+  for (let i = 0; i < 5; i++) {
+    watched[`Team ${i}`] = { focus: [] };
+    watchedIds.push(`w${i}`);
+  }
+  // 60-guild rail with the watched guilds LAST — a first-seen cap would
+  // drop exactly those.
+  const rail = [];
+  for (let i = 0; i < 55; i++) {
+    rail.push({ guildId: `g${i}`, name: `Guild ${i}` });
+  }
+  watchedIds.forEach((id, i) =>
+    rail.push({ guildId: id, name: `Team ${i}` })
+  );
+  const result = await adapter.observe.parse(
+    invPayload("g0", "c0", rail, [
+      { channelId: "c0", name: "general", type: 0, order: 0 },
+    ]),
+    { state: {}, now: NOW, settings: { watched }, textDates: extractDates, log() {} }
+  );
+  const ids = Object.keys(result.state.guilds);
+  assert.equal(ids.length, 50);
+  for (const id of watchedIds) {
+    assert.ok(result.state.guilds[id], `watched guild ${id} kept`);
+  }
+  // The oldest rail entries are the evicted ones.
+  assert.ok(!result.state.guilds.g1, "unwatched older guild evicted");
+});
+
+test("caps: empty settings keeps the 50 most recently inventoried guilds", async () => {
+  let state = {};
+  const c = {
+    state,
+    now: NOW,
+    settings: {},
+    textDates: extractDates,
+    log() {},
+  };
+  for (let i = 0; i < 55; i++) {
+    const g = `g${i}`;
+    const result = await adapter.observe.parse(
+      invPayload(
+        g,
+        `c${i}`,
+        [{ guildId: g, name: `Guild ${i}` }],
+        [{ channelId: `c${i}`, name: `ch${i}`, type: 0, order: 0 }],
+        new Date(NOW.getTime() + i * 60000).toISOString()
+      ),
+      c
+    );
+    state = result.state;
+    c.state = state;
+  }
+  const ids = Object.keys(state.guilds);
+  assert.equal(ids.length, 50);
+  assert.ok(!state.guilds.g0, "oldest-inventoried guild evicted");
+  assert.ok(!state.guilds.g4, "oldest-inventoried guild evicted");
+  assert.ok(state.guilds.g5, "50th-most-recent kept");
+  assert.ok(state.guilds.g54, "newest kept");
+});
+
+test("caps: a watched channel survives channel-cap pressure", async () => {
+  const channels = [
+    { channelId: "ch-keep", name: "keep-me", type: 0, order: 0 },
+  ];
+  for (let i = 0; i < 300; i++) {
+    channels.push({
+      channelId: `ch${i}`,
+      name: `ch${i}`,
+      type: 0,
+      order: i + 1,
+    });
+  }
+  const result = await adapter.observe.parse(
+    invPayload("g1", "ch-keep", [{ guildId: "g1", name: "Cap Guild" }], channels),
+    {
+      state: {},
+      now: NOW,
+      settings: { watched: { "Cap Guild": { channels: ["ch-keep"] } } },
+      textDates: extractDates,
+      log() {},
+    }
+  );
+  const rec = result.state.guilds.g1;
+  assert.equal(Object.keys(rec.channels).length, 250);
+  assert.ok(rec.channels["ch-keep"], "watched channel kept");
+  assert.ok(!rec.channels.ch0, "oldest-seen channel evicted");
+});

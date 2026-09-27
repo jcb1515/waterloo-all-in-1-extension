@@ -427,6 +427,62 @@ function outputItems(state, settings, nowMs, nowIso) {
  * Recompute watch lists, sweep queue and unread summaries after an
  * inventory (or watch-relevant settings) change.
  */
+/**
+ * Evict guilds over GUILD_CAP. Watched guilds are never evicted — with an
+ * explicit settings.watched list that's the matches; with an empty list
+ * (everything watched) it reduces to guilds holding live items, then the
+ * 50 most recently seen by lastInventoryAt, then rail-presence recency
+ * (insertion order — rail sightings re-insert keys).
+ */
+function evictGuilds(state, settings) {
+  const guilds = obj(state.guilds);
+  const ids = Object.keys(guilds);
+  const hasList = Object.keys(obj(settings?.watched)).length > 0;
+  // Guilds whose channels/series currently back a stored item.
+  const chanGuild = new Map();
+  for (const [gid, g] of Object.entries(guilds)) {
+    for (const cid of Object.keys(obj(g?.channels))) chanGuild.set(cid, gid);
+  }
+  const itemGuilds = new Set();
+  for (const item of arr(state.lastGood?.messages?.items)) {
+    const gid =
+      item?.meta?.guildId ||
+      chanGuild.get(String(item?.meta?.channelId || ""));
+    if (gid && guilds[gid]) itemGuilds.add(String(gid));
+  }
+  for (const gid of Object.keys(obj(state.lastGood?.events))) {
+    if (guilds[gid]) itemGuilds.add(String(gid));
+  }
+  const pinned = new Set();
+  for (const id of ids) {
+    const cfg = watchConfig(guilds[id]?.name || "", settings?.watched);
+    if (!cfg) continue; // not watched under the current settings
+    if (hasList || itemGuilds.has(id)) pinned.add(id);
+  }
+  const invMs = (id) => Date.parse(guilds[id]?.lastInventoryAt || "") || 0;
+  const order = new Map(ids.map((id, i) => [id, i]));
+  const rest = ids
+    .filter((id) => !pinned.has(id))
+    .sort(
+      (a, b) => invMs(b) - invMs(a) || (order.get(b) ?? 0) - (order.get(a) ?? 0)
+    );
+  const keep = new Set([
+    ...pinned,
+    ...rest.slice(0, Math.max(0, GUILD_CAP - pinned.size)),
+  ]);
+  const out = {};
+  for (const id of ids) if (keep.has(id)) out[id] = guilds[id];
+  // Watch/sweep entries for evicted guilds are dead weight.
+  for (const wid of Object.keys(obj(state.watch))) {
+    if (!out[wid]) delete state.watch[wid];
+  }
+  for (const did of Object.keys(obj(state.sweep?.done))) {
+    const gid = chanGuild.get(did);
+    if (gid && !out[gid]) delete state.sweep.done[did];
+  }
+  return out;
+}
+
 function recomputeWatch(state, settings, nowIso) {
   if (!state.sweep || typeof state.sweep !== "object") {
     state.sweep = { startedAt: nowIso, done: {} };
@@ -713,16 +769,21 @@ export default {
             rec.name = g.name || rec.name;
             rec.unread = g.unread || false;
             rec.mentions = g.mentions || 0;
+            // Re-insert: insertion order doubles as rail-presence recency
+            // for the guild cap's eviction ranking.
+            delete state.guilds[g.guildId];
             state.guilds[g.guildId] = rec;
           }
           if (loc.guildId && loc.guildId !== "@me") {
             const rec = { ...obj(state.guilds[loc.guildId]) };
             rec.channels = { ...obj(rec.channels) };
             rec.lastInventoryAt = payload.at;
-            state.guilds[loc.guildId] = rec;
             for (const c of arr(extract.channels)) {
               if (!c?.channelId) continue;
               const prev_c = obj(rec.channels[c.channelId]);
+              // Re-insert: insertion order is the last-seen order the
+              // channel cap evicts by.
+              delete rec.channels[c.channelId];
               rec.channels[c.channelId] = {
                 ...prev_c,
                 name: c.name ?? prev_c.name,
@@ -734,22 +795,38 @@ export default {
                 order: c.order ?? prev_c.order,
               };
             }
-            // Per-guild channel cap: keep the first-seen records.
+            // Per-guild channel cap: watched channels are never evicted,
+            // then latest-inventory channels, then the rest by last-seen.
             const chanIds = Object.keys(rec.channels);
             if (chanIds.length > GUILD_CHANNEL_CAP) {
+              const gid = String(loc.guildId);
+              const cfg = watchConfig(rec.name || "", settings.watched);
+              const pin = new Set(
+                [
+                  ...arr(state.watch?.[gid]?.channelIds),
+                  ...(cfg
+                    ? watchForGuild(rec, cfg.focus, cfg.settings).channelIds
+                    : []),
+                ].map(String)
+              );
+              const restIds = chanIds.filter((id) => !pin.has(id));
+              const keep = new Set([
+                ...chanIds.filter((id) => pin.has(id)),
+                ...restIds.slice(-Math.max(0, GUILD_CHANNEL_CAP - pin.size)),
+              ]);
               rec.channels = Object.fromEntries(
                 chanIds
-                  .slice(0, GUILD_CHANNEL_CAP)
+                  .filter((id) => keep.has(id))
                   .map((id) => [id, rec.channels[id]])
               );
             }
+            delete state.guilds[loc.guildId];
+            state.guilds[loc.guildId] = rec;
           }
-          // Guild cap: keep the first-seen rail entries.
-          const guildIds = Object.keys(state.guilds);
-          if (guildIds.length > GUILD_CAP) {
-            state.guilds = Object.fromEntries(
-              guildIds.slice(0, GUILD_CAP).map((id) => [id, state.guilds[id]])
-            );
+          // Guild cap: watched guilds and guilds with live items are
+          // never evicted; the rest go by recency.
+          if (Object.keys(state.guilds).length > GUILD_CAP) {
+            state.guilds = evictGuilds(state, settings);
           }
           recomputeWatch(state, settings, nowIso);
         } else if (extract.type === "messages") {
@@ -804,6 +881,7 @@ export default {
                 : prev; // unparsable detail modal leaves prior state alone
             }
             const cutoff = nowMs - EVENT_STALE_MS;
+            delete evState[guildId]; // re-insert: freshest touch is last
             evState[guildId] = {
               items: merged
                 .filter((i) => {
@@ -813,16 +891,25 @@ export default {
                 .slice(0, EVENT_ITEMS_CAP),
               at: payload.at,
             };
-            // A modal can only be open for one guild, but cap anyway.
+            // A modal can only be open for one guild, but cap anyway:
+            // watched guilds keep their event sets, the rest go oldest-first.
             const evGuilds = Object.keys(evState);
-            const kept =
-              evGuilds.length > EVENT_GUILD_CAP
-                ? Object.fromEntries(
-                    evGuilds
-                      .slice(0, EVENT_GUILD_CAP)
-                      .map((id) => [id, evState[id]])
-                  )
-                : evState;
+            let kept = evState;
+            if (evGuilds.length > EVENT_GUILD_CAP) {
+              const pin = new Set(Object.keys(watchedGuilds(state, settings)));
+              const restIds = evGuilds.filter((id) => !pin.has(id));
+              const keep = new Set([
+                ...evGuilds.filter((id) => pin.has(id)),
+                ...restIds.slice(
+                  -Math.max(0, EVENT_GUILD_CAP - pin.size)
+                ),
+              ]);
+              kept = Object.fromEntries(
+                evGuilds
+                  .filter((id) => keep.has(id))
+                  .map((id) => [id, evState[id]])
+              );
+            }
             state.lastGood.events = kept;
           }
         }
