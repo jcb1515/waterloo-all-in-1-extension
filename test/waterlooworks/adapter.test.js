@@ -48,6 +48,13 @@ const payload = (name, url, kind = "dom") => ({
   body: fixture(name),
   at: AT,
 });
+const rawPayload = (body, url, kind = "dom") => ({
+  source: "waterlooworks",
+  kind,
+  url,
+  body,
+  at: AT,
+});
 
 test("urlPatterns cover the settled WW paths", () => {
   const compiled = adapter.observe.urlPatterns.map((p) => new RegExp(p));
@@ -462,20 +469,85 @@ test("list-row receivedAt and detail createdAt hash to one message key", () => {
   assert.equal(detail, messageKey(subject, "2026-09-25T23:30:00.000Z", NOW));
 });
 
-test("a later inbox read replaces that message's derived items", async () => {
+test("a later inbox read keeps that message's detail-derived items", async () => {
   const ctx = makeCtx();
   const detail = await adapter.observe.parse(
     payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
     ctx
   );
   assert.equal(detail.items.filter((i) => i.meta?.messageKey).length, 1);
-  // The inbox row for the same message (same subject/day -> same key)
-  // carries no body: its items are replaced with subject-only extraction.
+  // The inbox row for the same message (same subject/day -> same key) has no
+  // date in its subject: a list read only replaces list-origin items, so the
+  // body-derived item survives untouched.
   const list = await adapter.observe.parse(
     payload("messages.html", "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm", "net"),
     makeCtx(detail.state)
   );
-  assert.equal(list.items.filter((i) => i.meta?.messageKey).length, 0);
+  const kept = list.items.filter((i) => i.meta?.messageKey);
+  assert.deepEqual(
+    kept.map((i) => i.id),
+    detail.items.filter((i) => i.meta?.messageKey).map((i) => i.id)
+  );
+  assert.equal(kept[0].meta.messageOrigin, "detail");
+});
+
+// Same message read as a dated inbox row vs. its detail page — a detail read
+// replaces ALL items for the key (list items included), a list read never
+// reintroduces an id a detail item already owns.
+const datedSubject = "Interview moved to October 5";
+const datedListHtml = fixture("messages.html").replace(
+  "Cycle 1 applications due on WaterlooWorks",
+  datedSubject
+);
+const datedDetailHtml = fixture("message-detail-dates.html").replace(
+  "Cycle 1 applications due on WaterlooWorks",
+  datedSubject
+);
+const inboxUrl = "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm";
+
+test("detail read first, then the inbox row: detail items survive, no dup ids", async () => {
+  const detail = await adapter.observe.parse(
+    rawPayload(datedDetailHtml, `${WW}/messages.htm`, "net"),
+    makeCtx()
+  );
+  const detailMsg = detail.items.filter((i) => i.meta?.messageKey);
+  // Subject date (Oct 5) + body deadline (Oct 2): two detail-origin items.
+  assert.equal(detailMsg.length, 2);
+  assert.ok(detailMsg.every((i) => i.meta.messageOrigin === "detail"));
+
+  const list = await adapter.observe.parse(
+    rawPayload(datedListHtml, inboxUrl, "net"),
+    makeCtx(detail.state)
+  );
+  const afterList = list.items.filter((i) => i.meta?.messageKey);
+  // The row's subject-only item would collide with the detail's Oct 5 item —
+  // detail wins; nothing is added or lost.
+  assert.deepEqual(
+    afterList.map((i) => i.id).sort(),
+    detailMsg.map((i) => i.id).sort()
+  );
+  assert.equal(new Set(afterList.map((i) => i.id)).size, afterList.length);
+});
+
+test("inbox row first, then the detail page: list items are replaced", async () => {
+  const list = await adapter.observe.parse(
+    rawPayload(datedListHtml, inboxUrl, "net"),
+    makeCtx()
+  );
+  const listMsg = list.items.filter((i) => i.meta?.messageKey);
+  assert.equal(listMsg.length, 1); // subject date only
+  assert.equal(listMsg[0].meta.messageOrigin, "list");
+
+  const detail = await adapter.observe.parse(
+    rawPayload(datedDetailHtml, `${WW}/messages.htm`, "net"),
+    makeCtx(list.state)
+  );
+  const detailMsg = detail.items.filter((i) => i.meta?.messageKey);
+  assert.equal(detailMsg.length, 2);
+  assert.ok(detailMsg.every((i) => i.meta.messageOrigin === "detail"));
+  // The body-derived item (Oct 2 4 PM) appears; the row's stale list item
+  // is gone. Subject says "Interview" so both items type as interview.
+  assert.ok(detailMsg.some((i) => i.startAt === "2026-10-02T20:00:00.000Z"));
 });
 
 test("sync returns the cached picture, no fetch without a fetch impl", async () => {

@@ -81,17 +81,50 @@ function anchorMs(item) {
  */
 function accumulateKeyedItems(prevItems, freshItems, keys, keyOf, nowMs, maxAgeDays, cap) {
   const present = new Set((keys || []).filter(Boolean));
-  const cutoff = nowMs - maxAgeDays * DAY_MS;
   const combined = [
     ...(prevItems || []).filter((item) => !present.has(keyOf(item))),
     ...(freshItems || []),
   ];
-  const kept = combined.filter((item) => {
+  return pruneItems(combined, nowMs, maxAgeDays, cap);
+}
+
+/**
+ * message-dates accumulate keyed on meta.messageKey. A detail read replaces
+ * ALL of that message's items; a list read replaces only the list-origin
+ * items and never reintroduces an id a detail item already has — the body
+ * read is richer, so detail wins.
+ * @param {any[]} prevItems @param {any[]} freshItems @param {any[]} keys
+ * @param {"list"|"detail"} origin @param {number} nowMs
+ */
+function accumulateMessageItems(prevItems, freshItems, keys, origin, nowMs) {
+  const present = new Set((keys || []).filter(Boolean));
+  const kept = (prevItems || []).filter((item) => {
+    if (!present.has(item?.meta?.messageKey)) return true;
+    if (origin === "detail") return false;
+    return item?.meta?.messageOrigin === "detail";
+  });
+  const keptIds = new Set(kept.map((item) => item.id));
+  const combined = [
+    ...kept,
+    ...(freshItems || []).filter(
+      (item) => origin !== "list" || !keptIds.has(item.id)
+    ),
+  ];
+  return pruneItems(combined, nowMs, MESSAGE_SCOPE_AGE_DAYS, MESSAGE_SCOPE_CAP);
+}
+
+/**
+ * Drop items whose anchor date is older than maxAgeDays, then cap by dropping
+ * the oldest-anchored items first (survivors keep their order).
+ * @param {any[]} items @param {number} nowMs @param {number} maxAgeDays @param {number} cap
+ */
+function pruneItems(items, nowMs, maxAgeDays, cap) {
+  const cutoff = nowMs - maxAgeDays * DAY_MS;
+  const kept = items.filter((item) => {
     const anchor = anchorMs(item);
     return Number.isNaN(anchor) || anchor >= cutoff;
   });
   if (kept.length <= cap) return kept;
-  // Drop the oldest by anchor date, preserving the order of survivors.
   const ranked = kept
     .map((item, i) => ({ item, i, anchor: anchorMs(item) }))
     .sort((a, b) => a.anchor - b.anchor || a.i - b.i);
@@ -114,30 +147,31 @@ function accumulateJobItems(prevItems, freshItems, jobIds, nowMs, maxAgeDays) {
 
 /**
  * Run message-date extraction over a batch of messages and fold the items
- * into lastGood["message-dates"], keyed per message: a re-read message
- * replaces its own items (or drops them when none parse) while other
- * messages' items survive.
+ * into lastGood["message-dates"], keyed per message. A detail read replaces
+ * that message's items outright; a list read only replaces list-origin items
+ * (the body read is richer, so detail wins).
  * @param {Record<string, any>} state
  * @param {any[]} msgs
+ * @param {"list"|"detail"} origin
  * @param {any} extractDates  ctx.textDates
  * @param {Date} now
  * @param {string} at
  */
-function deriveMessageDates(state, msgs, extractDates, now, at) {
+function deriveMessageDates(state, msgs, origin, extractDates, now, at) {
   if (typeof extractDates !== "function") return;
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
   const keys = msgs.map((msg) => messageKey(msg.subject, msg.sentAt, now));
-  const fresh = msgs.flatMap((msg) => messageDateItems(msg, extractDates, nowIso));
+  const fresh = msgs.flatMap((msg) =>
+    messageDateItems({ ...msg, origin }, extractDates, nowIso)
+  );
   state.lastGood["message-dates"] = {
-    items: accumulateKeyedItems(
+    items: accumulateMessageItems(
       state.lastGood["message-dates"]?.items,
       fresh,
       keys,
-      (item) => item?.meta?.messageKey,
-      nowMs,
-      MESSAGE_SCOPE_AGE_DAYS,
-      MESSAGE_SCOPE_CAP
+      origin,
+      nowMs
     ),
     at,
   };
@@ -402,6 +436,7 @@ export default {
             text: row.subject,
             url: payload.url,
           })),
+          "list",
           ctx.textDates,
           now,
           payload.at
@@ -445,6 +480,7 @@ export default {
               employer,
             },
           ],
+          "detail",
           ctx.textDates,
           now,
           payload.at
