@@ -18,6 +18,61 @@ const DETAILS_LIMIT = 300;
 
 const CLASS_TYPES = new Set(["class", "tutorial", "lab"]);
 
+const MAX_FACTS = 12;
+const FACT_LABEL_MAX = 40;
+const FACT_VALUE_MAX = 300;
+
+/** Derived "Type" fact — plain Deadline/Class add nothing. */
+const TYPE_FACT = {
+  quiz: "Quiz",
+  presentation: "Presentation",
+  tutorial: "Tutorial",
+  lab: "Lab",
+  meeting: "Meeting",
+  interview: "Interview",
+  "application-deadline": "Application deadline",
+  "offer-deadline": "Offer deadline",
+  "cycle-date": "Cycle date",
+  task: "Task",
+  event: "Event",
+  "term-date": "Term date",
+};
+function typeFact(it) {
+  if (it.type === "exam") {
+    if (it.category === "midterm") return "Midterm";
+    if (it.category === "final") return "Final exam";
+    if (it.category === "make-up") return "Make-up exam";
+    return "Exam";
+  }
+  return TYPE_FACT[it.type] || null;
+}
+
+/**
+ * meta.facts first (the source's own labels win), then generic derived facts —
+ * clamped to the server's limits and deduped by label, case-insensitive.
+ */
+function eventFacts(it) {
+  /** @type {{label: string, value: string}[]} */
+  const out = [];
+  const seen = new Set();
+  const push = (label, value) => {
+    const l = String(label == null ? "" : label).trim().slice(0, FACT_LABEL_MAX);
+    const v = String(value == null ? "" : value).trim().slice(0, FACT_VALUE_MAX);
+    if (!l || !v || out.length >= MAX_FACTS) return;
+    const key = l.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ label: l, value: v });
+  };
+  for (const f of (it.meta && it.meta.facts) || []) {
+    push(f && f.label, f && f.value);
+  }
+  const tf = typeFact(it);
+  if (tf) push("Type", tf);
+  if (it.group != null && it.group !== "") push("Group", it.group);
+  return out.length ? out : undefined;
+}
+
 const TYPE_ALARMS = {
   deadline: [1440, 60],
   quiz: [1440, 60],
@@ -56,6 +111,16 @@ function toEvent(it, us, cal, nowMs) {
   if (anchor === -Infinity) return null; // no dueAt/startAt at all
   if (anchor < nowMs - PAST_WINDOW) return null;
 
+  // Classes publish only inside a rolling window: a week back, classWeeks
+  // ahead. This keeps a full course load publishable within the feed
+  // server's per-publish CPU budget; uids are stable, so items enter the
+  // feed as the window slides.
+  if (CLASS_TYPES.has(it.type) && !Number.isNaN(start0)) {
+    const w = Number(inc.classWeeks);
+    const ahead = (Number.isFinite(w) && w > 0 ? w : 8) * 7 * DAY;
+    if (start0 < nowMs - 7 * DAY || start0 > nowMs + ahead) return null;
+  }
+
   const ev = {
     id: String(it.id),
     type: it.type,
@@ -92,6 +157,8 @@ function toEvent(it, us, cal, nowMs) {
   if (it.calendar && it.calendar.uid) {
     ev.calendar = { uid: it.calendar.uid, seq: it.calendar.seq || 0 };
   }
+  const facts = eventFacts(it);
+  if (facts) ev.facts = facts;
   return ev;
 }
 

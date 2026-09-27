@@ -460,3 +460,11 @@ kbd {
 .time-input {
   width: 110px;
 }
+.inline-row .num-input {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 76px;
+}
+.class-weeks {
+  padding-left: var(--sp-3);
+}

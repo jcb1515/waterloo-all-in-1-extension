@@ -243,6 +243,23 @@ export function CalendarSection({ settings, save, state }) {
             <Field label="Include">
               <div class="toggle-col">
                 <Toggle label="Classes, tutorials and labs" checked={cal.include?.classes !== false} onChange={(v) => patch({ include: { ...(cal.include || {}), classes: v } })} />
+                {cal.include?.classes !== false ? (
+                  <div class="inline-row class-weeks">
+                    <span class="help">Weeks of classes ahead</span>
+                    <input
+                      class="input num-input"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={cal.include?.classWeeks ?? 8}
+                      onChange={(e) => {
+                        const n = Math.round(Number(/** @type {any} */ (e.target).value));
+                        if (!Number.isFinite(n)) return;
+                        patch({ include: { ...(cal.include || {}), classWeeks: Math.min(20, Math.max(1, n)) } });
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <Toggle label="Tentative items" checked={cal.include?.tentative !== false} onChange={(v) => patch({ include: { ...(cal.include || {}), tentative: v } })} />
                 <Toggle label="Completed items" checked={cal.include?.completed !== false} onChange={(v) => patch({ include: { ...(cal.include || {}), completed: v } })} />
                 <Toggle label="Term dates" checked={cal.include?.termDates !== false} onChange={(v) => patch({ include: { ...(cal.include || {}), termDates: v } })} />

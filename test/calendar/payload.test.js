@@ -164,6 +164,86 @@ test("oversized payloads: details truncated, then farthest dropped", () => {
   assert.ok(kept.has("e0") && !kept.has("e2999"));
 });
 
+test("events carry facts: meta.facts pass through, Type/Group derived", () => {
+  const { payload } = build({
+    a: mk("a", {
+      type: "exam",
+      category: "final",
+      dueAt: undefined,
+      startAt: iso(NOW.getTime() + DAY),
+      group: "5",
+      meta: {
+        facts: [
+          { label: "Room", value: "PAC 1-12" },
+          { label: "Instructions", value: "Bring WatCard" },
+        ],
+      },
+    }),
+    b: mk("b", { type: "tutorial", startAt: iso(NOW.getTime() + 3600e3), dueAt: undefined }),
+    c: mk("c"), // a plain deadline — no Type fact
+  });
+  const ev = (id) => payload.events.find((e) => e.id === id);
+  assert.deepEqual(ev("a").facts, [
+    { label: "Room", value: "PAC 1-12" },
+    { label: "Instructions", value: "Bring WatCard" },
+    { label: "Type", value: "Final exam" },
+    { label: "Group", value: "5" },
+  ]);
+  assert.deepEqual(ev("b").facts, [{ label: "Type", value: "Tutorial" }]);
+  assert.equal(ev("c").facts, undefined);
+});
+
+test("facts dedupe by label case-insensitively, clamp, and cap at 12", () => {
+  const facts = [
+    { label: "Type", value: "Technical interview" }, // the source's own Type wins
+    { label: "room", value: "MC 2035" },
+    { label: "Room", value: "duplicate" },
+    { label: "L".repeat(60), value: "v".repeat(400) },
+    ...Array.from({ length: 14 }, (_, i) => ({ label: `F${i}`, value: "v" })),
+  ];
+  const { payload } = build({ a: mk("a", { type: "interview", meta: { facts } }) });
+  const ev = payload.events[0];
+  assert.equal(ev.facts.length, 12);
+  assert.equal(ev.facts[0].value, "Technical interview");
+  assert.ok(!ev.facts.some((f) => /duplicate/.test(f.value)));
+  assert.ok(ev.facts.every((f) => f.label.length <= 40 && f.value.length <= 300));
+});
+
+test("classes publish only inside [now − 7d, now + classWeeks]", () => {
+  const cls = (id, days) =>
+    mk(id, { type: "class", startAt: iso(NOW.getTime() + days * DAY), dueAt: undefined });
+  const items = {
+    pastEdge: cls("pastEdge", -7), // exactly a week back — inside
+    past8: cls("past8", -8),
+    in8w: cls("in8w", 55),
+    edge: cls("edge", 56), // exactly 8 weeks — inside
+    out8w: cls("out8w", 57),
+    far: mk("far", { dueAt: iso(NOW.getTime() + 200 * DAY) }), // not a class: no cap
+  };
+  const ids = (cal) =>
+    build(items, {}, cal).payload.events.map((e) => e.id).sort();
+  assert.deepEqual(ids(CAL), ["edge", "far", "in8w", "pastEdge"]);
+  const cal4 = { ...CAL, include: { ...CAL.include, classWeeks: 4 } };
+  assert.deepEqual(ids(cal4), ["far", "pastEdge"]);
+  // include.classes: false still drops all of them.
+  const off = { ...CAL, include: { ...CAL.include, classes: false } };
+  assert.deepEqual(ids(off), ["far"]);
+});
+
+test("class uids stay stable as the window slides", () => {
+  const it = mk("c", {
+    type: "class",
+    startAt: iso(NOW.getTime() + 50 * DAY),
+    dueAt: undefined,
+    calendar: { uid: "c@wa1", seq: 0 },
+  });
+  const before = build({ c: it });
+  assert.equal(before.payload.events[0].calendar.uid, "c@wa1");
+  // Seven weeks on, the same class is one day ahead — same uid.
+  const later = build({ c: it }, {}, CAL, new Date(NOW.getTime() + 49 * DAY));
+  assert.equal(later.payload.events[0].calendar.uid, "c@wa1");
+});
+
 test("stableHash is key-order independent", () => {
   const a = { version: 2, events: [{ id: "x", title: "T" }], timeZone: "America/Toronto" };
   const b = { timeZone: "America/Toronto", events: [{ title: "T", id: "x" }], version: 2 };

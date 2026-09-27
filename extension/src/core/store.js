@@ -89,7 +89,7 @@ export const DEFAULT_SETTINGS = {
     enabled: false,
     serviceUrl: "",
     split: false,
-    include: { classes: true, tentative: true, completed: true, termDates: true },
+    include: { classes: true, tentative: true, completed: true, termDates: true, classWeeks: 8 },
     alarms: false,
   },
 };
