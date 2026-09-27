@@ -26,7 +26,10 @@ export function sourceStatus(adapter, st, stage, now) {
     }
     return { key: "error", label: "Error", tone: "danger", detail: String(err.message || err.code || "Sync failed") };
   }
-  if (st && st.complete === false) {
+  // Passive adapters (intervalMinutes 0) read only while you browse — their
+  // sync() deliberately returns complete:false carrying the cached union, so
+  // `complete` can't flag staleness. Age of lastOkAt is the only signal.
+  if (adapter.intervalMinutes > 0 && st && st.complete === false) {
     return { key: "stale", label: "Stale · open site to refresh", tone: "warn" };
   }
   const lastOk = st && st.lastOkAt ? Date.parse(st.lastOkAt) : NaN;

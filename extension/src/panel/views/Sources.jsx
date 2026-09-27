@@ -82,7 +82,7 @@ export function Sources({ state, actions, now }) {
             <span class={`badge ${TONE_BADGE[status.tone]}`}>{status.label}</span>
           </div>
           {status.detail ? <p class="source-detail">{status.detail}</p> : null}
-          {!(adapter.intervalMinutes > 0) ? (
+          {stage === "live" && !(adapter.intervalMinutes > 0) ? (
             <p class="source-detail">Updates while you browse {adapter.label}.</p>
           ) : null}
           {adapter.id === "discord" ? <DiscordControls st={st} /> : null}
