@@ -49,8 +49,7 @@
     "https://outlook.office.com/*",
     "https://outlook.cloud.microsoft/*",
     "https://outlook.live.com/*",
-    "https://mail.google.com/*",
-    "https://uwlearn-calendar-feed.gurshaan1124.workers.dev/*"
+    "https://mail.google.com/*"
   ],
   "content_scripts": [
     {

@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS = {
       "MATH 117": ["LEC 002"],
       "MATH 115": ["LEC 002"],
       "ECE 105": ["LEC 002"],
+      "ECE 150": ["LEC 002"],
       "ECE 190": ["LEC 002"],
       "ECE 198": ["LEC 002"],
       "ENGL 192": ["LEC 008"],
@@ -48,7 +49,22 @@ export const DEFAULT_SETTINGS = {
     },
     groups: { "ECE 190": "5" },
   },
-  sources: {},
+  sources: {
+    outline: {
+      enabled: true,
+      urls: { "ECE 150": "https://outline.uwaterloo.ca/viewer/view/npch7t" },
+    },
+    discord: {
+      enabled: true,
+      watched: {
+        UWASIC: { focus: [], channels: [] },
+        UWHPC: { focus: [], channels: [] },
+        WATonomous: { focus: ["electrical"], channels: [] },
+        "Waterloo Aerial Robotics Group": { focus: ["electrical"], channels: [] },
+        "ECE Waterloo '31": { focus: [], channels: [] },
+      },
+    },
+  },
   agenda: { showClasses: "today" },
 };
 
