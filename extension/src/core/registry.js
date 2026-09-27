@@ -20,10 +20,10 @@ export const ADAPTERS = [learn, outline, portal, email, waterlooworks, discord];
 export const SOURCE_STAGE = Object.freeze({
   learn: "live",
   outline: "live",
-  portal: "soon",
+  portal: "live",
   outlook: "soon",
   waterlooworks: "live",
-  discord: "soon",
+  discord: "live",
 });
 
 /**
