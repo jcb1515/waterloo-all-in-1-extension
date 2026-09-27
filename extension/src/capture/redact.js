@@ -118,6 +118,23 @@ const URLISH_RE = /^https?:\/\//i;
 const TIME_HINT_RE = /\d{1,2}:\d{2}/;
 const DATE_HINT_RE = /\d{4}-\d{2}-\d{2}/;
 
+// Table column headers whose cell values are safe to keep (redacted) in samples.
+const STATUS_HEADER_RE = /status|type|state|format|round|cycle|term|result|decision|stage/i;
+
+/**
+ * Whether a short string looks like a date/time: a month or weekday name, an
+ * hh:mm time, or a yyyy-mm-dd date. Same test shapeOf uses.
+ * @param {string} s
+ */
+export function isDateLike(s) {
+  return MONTH_RE.test(s) || WEEKDAY_RE.test(s) || TIME_HINT_RE.test(s) || DATE_HINT_RE.test(s);
+}
+
+/** @param {unknown} t @returns {string} whitespace-collapsed, trimmed text */
+function collapseText(t) {
+  return String(t ?? "").replace(/\s+/g, " ").trim();
+}
+
 const MONTH_RE =
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
 const WEEKDAY_RE =
@@ -193,7 +210,7 @@ export function shapeOf(value, key = "", depth = 0, extraWords = []) {
   }
   if (ISO_RE.test(s)) return "<iso-datetime>";
   if (URLISH_RE.test(s)) return `<url ${normalizePath(s)}>`;
-  if (s.length <= 60 && (MONTH_RE.test(s) || WEEKDAY_RE.test(s) || TIME_HINT_RE.test(s) || DATE_HINT_RE.test(s))) {
+  if (s.length <= 60 && isDateLike(s)) {
     return datePattern(s);
   }
   return `<string ${s.length}>`;
@@ -219,16 +236,58 @@ const COUNTED = {
 
 const attr = (el, name) => (el && el.getAttribute ? el.getAttribute(name) : null);
 
+const STRUCTURAL_NAV = 'nav, [role="tree"]';
+
 /**
- * The landmarks of a page or HTML response: headings, table headers, forms,
- * iframes, nav text, common classes/data attributes, <time> values and
- * structural element counts. Text runs through redactText first.
+ * One sampled table body cell: first class name plus a text value that is the
+ * redacted text for label-ish columns, a date pattern for date-like text, or
+ * just a length.
+ * @typedef {{cls: string, text: string}} TableSampleCell
  */
-export function htmlOutline(doc, extraWords = []) {
+
+/**
+ * A sampled table: its header texts, body row count and (full textMode only)
+ * up to two body rows of cells.
+ * @typedef {{headers: string[], rows: number, sample: TableSampleCell[][]}} TableOutline
+ */
+
+/**
+ * @typedef {object} OutlineOptions
+ * @property {string[]} [extraWords] extra words to redact
+ * @property {"full"|"structural"} [textMode] "full" records redacted texts and
+ *   table cell samples; "structural" records text lengths only, keeps table
+ *   headers, and collects nav text only from navSelectors.
+ * @property {string[]} [excludeSelectors] elements matching any of these are
+ *   skipped for headings, nav texts, table samples and time samples (counts,
+ *   classes and data-attrs still include them).
+ * @property {string} [navSelectors] structural mode only: containers nav text
+ *   is collected from; defaults to `nav, [role="tree"]`. Pass "" for none.
+ */
+
+/**
+ * The landmarks of a page or HTML response: headings, tables, forms, iframes,
+ * nav text, common classes/data attributes, <time> values and structural
+ * element counts. Text runs through redactText first; in structural textMode
+ * only lengths and column labels survive.
+ * @param {Document|any} doc
+ * @param {OutlineOptions} [opts]
+ */
+export function htmlOutline(doc, opts = {}) {
+  const {
+    extraWords = [],
+    textMode = "full",
+    excludeSelectors = [],
+    navSelectors,
+  } = opts || {};
+  const structural = textMode === "structural";
+  const exSel = excludeSelectors.length ? excludeSelectors.join(",") : null;
+  /** @param {any} el */
+  const isExcluded = (el) => Boolean(exSel && el && el.closest && el.closest(exSel));
+  const navSel = structural ? (navSelectors === undefined ? STRUCTURAL_NAV : navSelectors) : NAV_CONTAINERS;
   /** @param {any} t @param {number} n */
   const redact = (t, n) => redactText(t, extraWords).slice(0, n);
   /** @type {{
-    headings: string[], tables: string[][], forms: {action: string, fields: string[]}[],
+    headings: string[], tables: TableOutline[], forms: {action: string, fields: string[]}[],
     iframes: string[], nav: string[], classes: string[], dataAttrs: string[],
     timeSamples: string[], counts: Record<string, number>,
   }} */
@@ -247,13 +306,43 @@ export function htmlOutline(doc, extraWords = []) {
 
   for (const h of doc.querySelectorAll("h1,h2,h3,h4")) {
     if (out.headings.length >= 60) break;
-    const t = redact(h.textContent, 80);
-    if (t) out.headings.push(`${String(h.tagName).toLowerCase()}: ${t}`);
+    if (isExcluded(h)) continue;
+    const tag = String(h.tagName).toLowerCase();
+    if (structural) {
+      out.headings.push(`${tag}: <text ${collapseText(h.textContent).length}>`);
+    } else {
+      const t = redact(h.textContent, 80);
+      if (t) out.headings.push(`${tag}: ${t}`);
+    }
   }
 
   for (const table of doc.querySelectorAll("table")) {
     if (out.tables.length >= 30) break;
-    out.tables.push([...table.querySelectorAll("th")].slice(0, 40).map((th) => redact(th.textContent, 80)));
+    if (isExcluded(table)) continue;
+    const headers = [...table.querySelectorAll("th")]
+      .slice(0, 40)
+      .map((th) => (isExcluded(th) ? "<excluded>" : redact(th.textContent, 80)));
+    const dataRows = [...table.querySelectorAll("tr")].filter((tr) => tr.querySelector("td"));
+    /** @type {TableOutline} */
+    const entry = { headers, rows: dataRows.length, sample: [] };
+    if (!structural) {
+      for (const tr of dataRows.slice(0, 2)) {
+        if (isExcluded(tr)) continue;
+        entry.sample.push(
+          [...tr.querySelectorAll("td")].map((td, ci) => {
+            const cls = (String(attr(td, "class") || "").split(/\s+/)[0] || "");
+            const raw = collapseText(td.textContent);
+            let text;
+            if (isExcluded(td)) text = "<excluded>";
+            else if (STATUS_HEADER_RE.test(headers[ci] || "") && raw.length <= 30) text = redactText(raw, extraWords);
+            else if (raw.length <= 60 && isDateLike(raw)) text = datePattern(raw);
+            else text = `<text ${raw.length}>`;
+            return { cls, text };
+          })
+        );
+      }
+    }
+    out.tables.push(entry);
   }
 
   for (const form of doc.querySelectorAll("form")) {
@@ -274,15 +363,19 @@ export function htmlOutline(doc, extraWords = []) {
     if (src) out.iframes.push(normalizePath(src));
   }
 
-  const navText = new Set();
-  for (const box of doc.querySelectorAll(NAV_CONTAINERS)) {
-    for (const item of box.querySelectorAll(NAV_ITEMS)) {
-      if (navText.size >= 200) break;
-      const t = redact(item.textContent, 60);
-      if (t) navText.add(t);
+  if (navSel) {
+    const navText = new Set();
+    for (const box of doc.querySelectorAll(navSel)) {
+      if (isExcluded(box)) continue;
+      for (const item of box.querySelectorAll(NAV_ITEMS)) {
+        if (navText.size >= 200) break;
+        if (isExcluded(item)) continue;
+        const t = redact(item.textContent, 60);
+        if (t) navText.add(t);
+      }
     }
+    out.nav = [...navText];
   }
-  out.nav = [...navText];
 
   const classFreq = new Map();
   const dataAttrs = new Map();
@@ -312,6 +405,7 @@ export function htmlOutline(doc, extraWords = []) {
 
   for (const t of doc.querySelectorAll("time[datetime]")) {
     if (out.timeSamples.length >= 20) break;
+    if (isExcluded(t)) continue;
     const dt = attr(t, "datetime");
     if (dt) out.timeSamples.push(datePattern(dt.slice(0, 60)));
   }

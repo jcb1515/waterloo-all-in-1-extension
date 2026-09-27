@@ -32,7 +32,7 @@ let out;
 if (/\.json$/i.test(input)) {
   out = shapeOf(JSON.parse(text), "", 0, words);
 } else if (/\.html?$/i.test(input)) {
-  out = htmlOutline(parseHTML(text).document, words);
+  out = htmlOutline(parseHTML(text).document, { extraWords: words });
 } else {
   console.error(`unknown input type: ${input} (want .json or .html)`);
   process.exit(1);

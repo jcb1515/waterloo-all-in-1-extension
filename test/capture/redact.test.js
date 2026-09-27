@@ -103,7 +103,18 @@ test("htmlOutline collects headers, headings, classes and counts", () => {
     <div data-testid="panel" data-track="click"></div>
   </body></html>`);
   const out = htmlOutline(document);
-  assert.deepEqual(out.tables, [["Job", "Status"]]);
+  assert.deepEqual(out.tables, [
+    {
+      headers: ["Job", "Status"],
+      rows: 1,
+      sample: [
+        [
+          { cls: "", text: "<text 1>" }, // "Job" is not a label column
+          { cls: "", text: "y" },        // "Status" is
+        ],
+      ],
+    },
+  ]);
   assert.ok(out.headings.includes("h1: Applications"));
   assert.ok(out.headings.includes("h2: Fall 2026"));
   assert.deepEqual(out.forms[0], { action: "/apply/{id}", fields: ["title", "resume"] });
@@ -117,4 +128,84 @@ test("htmlOutline collects headers, headings, classes and counts", () => {
   assert.equal(out.counts.tr, 2);
   assert.equal(out.counts.li, 3);
   assert.equal(out.counts.form, 1);
+});
+
+// The policy recorder.content.js applies on discord.com.
+const DISCORD_POLICY = {
+  textMode: "structural",
+  excludeSelectors: ["aside", '[class*="members"]', '[data-list-id="chat-messages"]'],
+};
+
+test("htmlOutline structural mode leaks no usernames (Discord-like page)", () => {
+  const { document } = parseHTML(`<!doctype html><html><body>
+    <nav class="channel-nav"><a>general</a><a>ece-105-help</a></nav>
+    <aside><ul><li class="member">Alice Wonder</li><li class="member">Bob User</li></ul></aside>
+    <ol data-list-id="chat-messages">
+      <li><h3>Alice Wonder</h3><div>hello world</div></li>
+      <li><h3>Bob User</h3><div>see you Tuesday</div></li>
+    </ol>
+    <h3>3 Text Channels</h3>
+    <table><tr><th>Member</th><th>Role</th></tr><tr><td>Alice Wonder</td><td>Admin</td></tr></table>
+  </body></html>`);
+  const out = htmlOutline(document, DISCORD_POLICY);
+  const json = JSON.stringify(out);
+  assert.ok(!json.includes("Alice"), `username leaked: ${json}`);
+  assert.ok(!json.includes("Bob"), `username leaked: ${json}`);
+  // Channel names inside a real <nav> are structural and survive.
+  assert.ok(out.nav.includes("general"));
+  assert.ok(out.nav.includes("ece-105-help"));
+  // Headings outside excluded regions are tag + length only.
+  assert.ok(out.headings.length > 0);
+  assert.ok(out.headings.every((h) => /^h\d: <text \d+>$/.test(h)));
+  assert.ok(out.headings.includes(`h3: <text ${"3 Text Channels".length}>`));
+  // Table headers are kept; excluded tables are skipped entirely.
+  assert.equal(out.tables.length, 1);
+  assert.deepEqual(out.tables[0].headers, ["Member", "Role"]);
+  assert.deepEqual(out.tables[0].sample, []);
+  // Counts still cover everything, including excluded subtrees.
+  assert.equal(out.counts.li, 4);
+});
+
+test("htmlOutline structural mode can suppress nav entirely (Discord DM list)", () => {
+  const { document } = parseHTML(`<!doctype html><html><body>
+    <nav><a>Alice Wonder</a><a>Bob User</a></nav>
+    <h2>Direct Messages</h2>
+  </body></html>`);
+  const out = htmlOutline(document, { ...DISCORD_POLICY, navSelectors: "" });
+  assert.deepEqual(out.nav, []);
+  const json = JSON.stringify(out);
+  assert.ok(!json.includes("Alice") && !json.includes("Bob"));
+});
+
+test("htmlOutline structural mode keeps aside out of nav", () => {
+  const { document } = parseHTML(`<!doctype html><html><body>
+    <aside><a>should not appear</a></aside>
+    <div role="tree"><div role="treeitem">channel-one</div></div>
+  </body></html>`);
+  const out = htmlOutline(document, { textMode: "structural" });
+  assert.deepEqual(out.nav, ["channel-one"]);
+});
+
+test("htmlOutline full mode samples table cells (WaterlooWorks-like)", () => {
+  const { document } = parseHTML(`<!doctype html><html><body>
+    <table>
+      <tr><th>Job Title</th><th>Status</th><th>Applied On</th></tr>
+      <tr><td class="cell job">Software Developer, Contoso Ltd</td><td class="cell">Not Selected</td><td class="cell">Oct 5, 2026</td></tr>
+      <tr><td class="cell job">Data Analyst, Initech Corp</td><td class="cell">Selected</td><td class="cell">Sep 29, 2026</td></tr>
+      <tr><td class="cell">QA Tester</td><td class="cell">Applied</td><td class="cell">Sep 20, 2026</td></tr>
+    </table>
+  </body></html>`);
+  const out = htmlOutline(document, { textMode: "full" });
+  assert.equal(out.tables.length, 1);
+  const t = out.tables[0];
+  assert.deepEqual(t.headers, ["Job Title", "Status", "Applied On"]);
+  assert.equal(t.rows, 3);
+  assert.equal(t.sample.length, 2); // only the first 2 body rows
+  // Company names are lengths only; status values survive; dates are patterns.
+  assert.deepEqual(t.sample[0][0], { cls: "cell", text: `<text ${"Software Developer, Contoso Ltd".length}>` });
+  assert.deepEqual(t.sample[0][1], { cls: "cell", text: "Not Selected" });
+  assert.deepEqual(t.sample[0][2], { cls: "cell", text: "Oct 9, 9999" });
+  assert.equal(t.sample[1][1].text, "Selected");
+  const json = JSON.stringify(out);
+  assert.ok(!json.includes("Contoso") && !json.includes("Initech"));
 });
