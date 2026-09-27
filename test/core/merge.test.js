@@ -107,6 +107,96 @@ test("'Quiz 3' and 'Quiz 4' a week apart do not merge", () => {
   assert.equal(Object.keys(r.items).length, 2);
 });
 
+test("a tentative all-day outline window swallows an exact hit inside it", () => {
+  // MATH 117 outline: "Final exam Dec 10-24" (a window, not a date).
+  const win = raw("outline", "math117-final", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "tentative",
+    allDay: true,
+    startAt: "2025-12-10",
+    endAt: "2025-12-25",
+  });
+  const exact = raw("portal", "exam:1", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "exact",
+    startAt: "2025-12-18T19:00:00.000Z",
+    endAt: "2025-12-18T21:30:00.000Z",
+    location: "PAC",
+  });
+  const r = recompute({ raws: raws(["outline", [win]], ["portal", [exact]]), now: NOW });
+  assert.equal(Object.keys(r.items).length, 1, "window + exact hit merge");
+  const it = Object.values(r.items)[0];
+  assert.equal(it.startAt, exact.startAt, "the exact side's date wins");
+  assert.equal(it.location, "PAC");
+});
+
+test("window containment does not merge anchors outside the window", () => {
+  const win = raw("outline", "math117-final", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "tentative",
+    allDay: true,
+    startAt: "2025-12-10",
+    endAt: "2025-12-25",
+  });
+  const outside = raw("portal", "exam:2", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "exact",
+    startAt: "2026-01-06T19:00:00.000Z",
+  });
+  const r = recompute({ raws: raws(["outline", [win]], ["portal", [outside]]), now: NOW });
+  assert.equal(Object.keys(r.items).length, 2);
+});
+
+test("window containment still requires the same org", () => {
+  const win = raw("outline", "math117-final", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "tentative",
+    allDay: true,
+    startAt: "2025-12-10",
+    endAt: "2025-12-25",
+  });
+  const otherOrg = raw("portal", "exam:3", {
+    type: "exam",
+    title: "ECE 105 Final Exam",
+    org: "ECE 105",
+    confidence: "exact",
+    startAt: "2025-12-18T19:00:00.000Z",
+  });
+  const r = recompute({ raws: raws(["outline", [win]], ["portal", [otherOrg]]), now: NOW });
+  assert.equal(Object.keys(r.items).length, 2);
+});
+
+test("a midterm title does not merge with a final-exam window", () => {
+  const win = raw("outline", "math117-final", {
+    type: "exam",
+    title: "MATH 117 Final Exam",
+    org: "MATH 117",
+    confidence: "tentative",
+    allDay: true,
+    startAt: "2025-12-10",
+    endAt: "2025-12-25",
+  });
+  const midterm = raw("portal", "exam:4", {
+    type: "exam",
+    title: "MATH 117 Midterm",
+    org: "MATH 117",
+    confidence: "exact",
+    startAt: "2025-12-18T19:00:00.000Z",
+  });
+  const r = recompute({ raws: raws(["outline", [win]], ["portal", [midterm]]), now: NOW });
+  assert.equal(Object.keys(r.items).length, 2);
+});
+
 test("same-source duplicates never merge", () => {
   const a = raw("learn", "a", { title: "Assignment 1", org: "ECE 105", dueAt: "2025-09-21T03:59:00.000Z", confidence: "exact" });
   const b = raw("learn", "b", { title: "Asst 1", org: "ECE 105", dueAt: "2025-09-21T03:59:00.000Z", confidence: "exact" });

@@ -227,8 +227,28 @@ function memberMatch(c, m) {
     return { sim, delta };
   }
   // At least one side is tentative.
-  if (delta > 7 * DAY_MS || sim < 0.8) return null;
+  if (delta > 7 * DAY_MS || sim < 0.8) {
+    // Containment: a tentative all-day window (an outline's "Final exam
+    // Dec 10–24") swallows an exact hit inside [startAt, endAt).
+    if (sim >= 0.6 && (windowContains(c, m) || windowContains(m, c))) {
+      return { sim, delta };
+    }
+    return null;
+  }
   return { sim, delta };
+}
+
+/**
+ * Is `win` a tentative all-day window whose [startAt, endAt) holds `other`'s
+ * anchor? Used by memberMatch's containment rule (outline exam windows).
+ */
+function windowContains(win, other) {
+  if (!win || win.confidence !== "tentative" || !win.allDay) return false;
+  if (!win.startAt || !win.endAt) return false;
+  const a = anchorOf(other);
+  if (!a) return false;
+  const t = Date.parse(a);
+  return t >= Date.parse(win.startAt) && t < Date.parse(win.endAt);
 }
 
 /** Best member score for a candidate against a cluster, or null. */
