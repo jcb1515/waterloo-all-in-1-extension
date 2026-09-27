@@ -16,7 +16,13 @@
       load while in LIVE mode, so a panel stuck on "Sign in to Learn first"
       can try again after the student signs in.
   See src/sources/learn/live-source.js.
+
+  The contract relay (MSG.RELAY_FETCH) answers FetchResult objects for the
+  scheduler's ctx.relay; the older "live:fetch" handler above stays for the
+  current background.
 */
+import { MSG } from "../../core/contract.js";
+
 (() => {
   const isMock = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
@@ -47,6 +53,44 @@
           }
         }
         sendResponse(out);
+      } catch (e) {
+        sendResponse({ status: 0, error: String(e && e.message ? e.message : e) });
+      }
+    })();
+    return true;
+  });
+
+  // Contract relay (T2): background asks an open Learn tab to run a GET with
+  // the page's own session cookie and answer a contract FetchResult.
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
+    const path = String(msg.path || "");
+    const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
+    if (method !== "GET" || !path.startsWith("/d2l/api/") || path.includes("..")) {
+      sendResponse({ status: 0, error: "path not allowed" });
+      return false;
+    }
+    (async () => {
+      try {
+        const res = await fetch(location.origin + path, {
+          method: "GET",
+          credentials: "same-origin",
+          headers: (msg.init && msg.init.headers) || { Accept: "application/json" },
+          signal: AbortSignal.timeout(20000),
+        });
+        let text = "";
+        try {
+          text = await res.text();
+        } catch {
+          /* no body */
+        }
+        sendResponse({
+          status: res.status,
+          url: res.url,
+          contentType: res.headers.get("content-type") || "",
+          text,
+          loginRedirect: /\/d2l\/login/i.test(res.url || ""),
+        });
       } catch (e) {
         sendResponse({ status: 0, error: String(e && e.message ? e.message : e) });
       }
