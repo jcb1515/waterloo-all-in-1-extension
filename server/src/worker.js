@@ -587,6 +587,8 @@ function normalizeEvent(raw, typeAlarms, seenUids) {
   if (details) event.details = details;
   const seenIn = normalizeSeenIn(source.seenIn);
   if (seenIn) event.seenIn = seenIn;
+  const facts = normalizeFacts(source.facts);
+  if (facts) event.facts = facts;
   event.alarms = resolveAlarms(source, typeAlarms);
   event.feedGroup = feedGroupOf(source);
 
@@ -755,6 +757,20 @@ function descriptionLines(event) {
   if (event.location) lines.push(`Location: ${event.location}`);
   if (STATUS_LABELS[event.status]) lines.push(`Status: ${STATUS_LABELS[event.status]}`);
   if (event.confidence === "tentative") lines.push("Date is tentative");
+  // Adapter-supplied facts render as "Label: value" — except a fact whose
+  // label duplicates a line the event's own fields already render.
+  const builtin = new Set();
+  if (typeof event.weight === "number") builtin.add("weight");
+  if (event.section) builtin.add("section");
+  if (event.location) {
+    builtin.add("location");
+    builtin.add("where");
+    builtin.add("room");
+  }
+  for (const fact of Array.isArray(event.facts) ? event.facts : []) {
+    if (!fact || builtin.has(String(fact.label || "").toLowerCase())) continue;
+    lines.push(`${fact.label}: ${fact.value}`);
+  }
   const sources = eventSources(event);
   if (sources.length) lines.push(`Sources: ${sources.join(", ")}`);
   if (event.url) lines.push(`Open: ${event.url}`);
@@ -928,6 +944,28 @@ function normalizeSeenIn(seenIn) {
       seen.add(source);
       out.push({ source });
     }
+  }
+  return out.length ? out : undefined;
+}
+
+const MAX_FACTS = 12;
+
+/** [{label, value}] — trimmed, clamped, deduped by label (first wins). */
+function normalizeFacts(facts) {
+  if (!Array.isArray(facts)) return undefined;
+  const seen = new Set();
+  const out = [];
+  for (const entry of facts) {
+    if (out.length >= MAX_FACTS) break;
+    const raw = entry && typeof entry === "object" ? entry : {};
+    if (typeof raw.label !== "string" || typeof raw.value !== "string") continue;
+    const label = clampText(raw.label, 40);
+    const value = clampText(raw.value, 300);
+    if (!label || !value) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ label, value });
   }
   return out.length ? out : undefined;
 }
