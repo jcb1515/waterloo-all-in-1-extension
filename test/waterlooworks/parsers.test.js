@@ -259,3 +259,61 @@ test("a snapshot containing the same table twice yields no duplicates", () => {
   );
   assert.equal(apps.applications.rows.length, 3); // not 6
 });
+
+// --- co-op important-dates page ------------------------------------------
+
+test("parseCoopDates reads month calendars into dated entries", () => {
+  const res = parsers.parseCoopDates(doc("coop-important-dates.html"));
+  assert.equal(res.ok, true);
+  assert.equal(res.entries.length, 31);
+
+  const find = (date, text) =>
+    res.entries.find((e) => e.date === date && e.text.includes(text));
+
+  // Timed posting open/close carry the cycle label and a 24 h time.
+  assert.deepEqual(find("2026-09-05", "Jobs posted"), {
+    date: "2026-09-05",
+    cycle: "Cycle 1 Posting A", // <strong> spans a <br>
+    text: "Jobs posted 9 a.m. (ET)",
+    time: "09:00",
+    endOfDay: false,
+  });
+  assert.deepEqual(find("2026-09-17", "Job postings close"), {
+    date: "2026-09-17",
+    cycle: "Cycle 1 Posting A",
+    text: "Job postings close 9 a.m. (ET)",
+    time: "09:00",
+    endOfDay: false,
+  });
+
+  // Bare-text day cells and <p>-wrapped days both work; interviews get the
+  // plain "Cycle 1" label, and the label survives a second event paragraph.
+  const sep22 = res.entries.filter((e) => e.date === "2026-09-22");
+  assert.deepEqual(
+    sep22.map((e) => `${e.cycle}: ${e.text}`),
+    ["Cycle 1 Posting B: Job postings close 9 a.m. (ET)", "Cycle 1: Interviews"]
+  );
+
+  // "Application limit" lines inside event paragraphs are skipped.
+  assert.ok(!res.entries.some((e) => /application limit/i.test(e.text)));
+
+  // Non-co-op lines are still entries (the mapper excludes them).
+  assert.ok(find("2026-09-07", "Holiday - university closed"));
+  assert.ok(find("2026-09-09", "Start of classes"));
+  assert.equal(find("2026-09-07", "Holiday").cycle, null);
+
+  // Second month table: work-term start and the January interview run.
+  assert.ok(find("2027-01-11", "Winter 2027 co-op work term starts"));
+  assert.equal(
+    res.entries.filter((e) => e.text === "Interviews" && e.date.startsWith("2027-01")).length,
+    6
+  );
+});
+
+test("parseCoopDates reports ok:false when no month tables exist", () => {
+  const res = parsers.parseCoopDates(
+    parseHTML("<html><body><h2>Important dates</h2></body></html>").document
+  );
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.entries, []);
+});

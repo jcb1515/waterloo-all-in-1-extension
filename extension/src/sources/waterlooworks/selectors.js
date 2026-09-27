@@ -123,6 +123,47 @@ export const OBSERVE_PATTERNS = Object.freeze([
   "^https://waterlooworks\\.uwaterloo\\.ca/notLoggedIn\\.htm",
 ]);
 
+/* --- Public co-op important-dates page (uwaterloo.ca) --------------------- */
+
+/** Default URL for the daily co-op cycle-dates fetch (public page). */
+export const COOP_DATES_URL =
+  "https://uwaterloo.ca/co-operative-education/important-dates";
+
+/** Month-calendar blocks: <details><summary><h2>September 2026 calendar of dates</h2>. */
+export const COOP_DETAILS_SELECTOR = "details";
+export const COOP_SUMMARY_SELECTOR = "summary";
+export const COOP_MONTH_HEADING_RE = /^([a-z]+)\s+(\d{4})\s+calendar of dates/i;
+export const COOP_MONTHS = Object.freeze({
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+});
+
+/** "Application limit: 50 apps" lines inside event paragraphs are skipped. */
+export const COOP_APP_LIMIT_RE = /application\s+limit/i;
+/** "Match results available by end of day" -> 23:59 Toronto. */
+export const COOP_END_OF_DAY_RE = /\bby end of day\b/i;
+/** First time phrase: "9 a.m." | "2:30 p.m." | "12 p.m." | "noon" | "midnight". */
+export const COOP_TIME_RE =
+  /(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?|\bnoon\b|\bmidnight\b/i;
+/** Trailing zone noise "(ET)" / "ET" stripped when building titles. */
+export const COOP_ZONE_RE = /\s*\(?(?:ET|EST|EDT)\)?\s*/gi;
+
+/** A calendar line is co-op content when its text or cycle label matches. */
+export const COOP_KEEP_RE =
+  /cycle|co-op work term|work term|direct offers|ranking|match/i;
+
+/** First match wins: event text -> cycle-date category. */
+export const COOP_CATEGORIES = Object.freeze([
+  Object.freeze([/job\s+postings?\s+open|jobs posted/i, "postings-open"]),
+  Object.freeze([/job\s+postings?\s+close|postings close/i, "postings-close"]),
+  Object.freeze([/interviews?/i, "interviews"]),
+  Object.freeze([/employer rankings?/i, "rankings-open"]),
+  Object.freeze([/student rankings?|rankings?\s+(due|close)/i, "rankings-due"]),
+  Object.freeze([/match results/i, "match-results"]),
+  Object.freeze([/direct offers/i, "direct-offers"]),
+  Object.freeze([/work term/i, "work-term"]),
+]);
+
 /**
  * URL path -> scopes that page is expected to produce. Used only for
  * needsUpdate flags: a POST to interviews.htm that yields neither the list

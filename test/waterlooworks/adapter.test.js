@@ -10,6 +10,7 @@ import { parseHTML } from "linkedom";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
 import { messageKey } from "../../extension/src/sources/waterlooworks/map.js";
+import { applyResult } from "../../extension/src/core/merge.js";
 import adapter from "../../extension/src/sources/waterlooworks/index.js";
 
 const FIXTURES = path.resolve(
@@ -25,11 +26,12 @@ const AT = NOW.toISOString();
 const fixture = (name) => readFileSync(path.join(FIXTURES, name), "utf8");
 
 /** Fake SyncContext whose parseHtml invokes the real parser exports. */
-function makeCtx(state = {}) {
+function makeCtx(state = {}, extras = {}) {
   return {
     state,
     now: NOW,
-    settings: {},
+    settings: extras.settings || {},
+    fetch: extras.fetch,
     async parseHtml(html, name, opts) {
       const exportName = name.split("/")[1];
       return parsers[exportName](parseHTML(html).document, opts);
@@ -476,7 +478,7 @@ test("a later inbox read replaces that message's derived items", async () => {
   assert.equal(list.items.filter((i) => i.meta?.messageKey).length, 0);
 });
 
-test("sync returns the cached picture with complete:false", async () => {
+test("sync returns the cached picture, no fetch without a fetch impl", async () => {
   const ctx = makeCtx();
   const first = await adapter.observe.parse(
     payload("interviews.html", `${WW}/interviews.htm`, "net"),
@@ -486,7 +488,7 @@ test("sync returns the cached picture with complete:false", async () => {
   assert.equal(synced.complete, false);
   assert.equal(synced.session, "no-tab");
   assert.equal(synced.items.length, 3);
-  assert.equal(synced.state, first.state); // state unchanged
+  assert.deepEqual(synced.state, first.state); // contents unchanged
 });
 
 test("always records lastSeenAt", async () => {
@@ -496,4 +498,136 @@ test("always records lastSeenAt", async () => {
     ctx
   );
   assert.equal(result.state.lastSeenAt, AT);
+});
+
+/* --- co-op important-dates daily sync ------------------------------------ */
+
+const COOP_URL = "https://uwaterloo.ca/co-operative-education/important-dates";
+
+/**
+ * SyncContext with a counting ctx.fetch; fetchText is the response body,
+ * or a non-2xx {status} / "throw" for failure paths.
+ */
+function syncCtx(state, { fetchText, fetchStatus = 200, settings = {} } = {}) {
+  const calls = [];
+  const ctx = makeCtx(state, {
+    settings,
+    fetch: async (url) => {
+      calls.push(url);
+      if (fetchStatus === "throw") throw new Error("network down");
+      return {
+        status: fetchStatus,
+        url,
+        text: fetchText === undefined ? fixture("coop-important-dates.html") : fetchText,
+      };
+    },
+  });
+  return { ctx, calls };
+}
+
+test("sync fetches the co-op page once per 24 h", async () => {
+  const { ctx, calls } = syncCtx({});
+  const first = await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], COOP_URL);
+  assert.equal(first.complete, true); // authoritative read
+  assert.equal(first.session, "no-tab");
+  const coop = first.items.filter((i) => i.type === "cycle-date");
+  assert.ok(coop.length > 0, "expected cycle-date items");
+  assert.ok(coop.every((i) => i.org === "Co-op" && i.review === "auto"));
+  assert.equal(first.state.lastGood["coop-dates"].items.length, coop.length);
+
+  // Within 24 h the fetch is throttled and the result is not authoritative.
+  const second = await adapter.sync(syncCtx(first.state).ctx);
+  assert.equal(calls.length, 1, "still one fetch total");
+  assert.equal(second.complete, false);
+  assert.equal(second.items.length, first.items.length);
+});
+
+test("sync refetches after 24 h and honours coopDatesUrl override", async () => {
+  const old = { coopDates: { fetchedAt: "2026-09-19T00:00:00.000Z" } };
+  const { ctx, calls } = syncCtx(old, {
+    settings: { coopDatesUrl: "https://example.test/dates" },
+  });
+  await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0], "https://example.test/dates");
+});
+
+test("settings.coopDates === false disables the fetch", async () => {
+  const { ctx, calls } = syncCtx({}, { settings: { coopDates: false } });
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 0);
+  assert.equal(res.complete, false);
+});
+
+test("a failed fetch keeps last-good co-op items and does not throw", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  assert.ok(seeded.state.lastGood["coop-dates"].items.length > 0);
+  const expired = {
+    ...seeded.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const { ctx, calls } = syncCtx(expired, { fetchStatus: 503 });
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 1);
+  assert.equal(res.complete, false);
+  assert.equal(res.session, "no-tab");
+  assert.deepEqual(
+    res.items.filter((i) => i.type === "cycle-date").map((i) => i.id),
+    seeded.items.filter((i) => i.type === "cycle-date").map((i) => i.id)
+  );
+});
+
+test("a thrown fetch keeps last good; a 2xx page with no tables flags needsUpdate", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  const expired = {
+    ...seeded.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const thrown = await adapter.sync(syncCtx(expired, { fetchStatus: "throw" }).ctx);
+  assert.equal(thrown.complete, false);
+  assert.ok(thrown.items.some((i) => i.type === "cycle-date"));
+
+  // 2xx but the parser finds no calendar tables -> needsUpdate, cache kept.
+  const res = await adapter.sync(
+    syncCtx(expired, { fetchText: "<html><body>we moved!</body></html>" }).ctx
+  );
+  assert.equal(res.complete, false);
+  assert.equal(res.state.needsUpdate["coop-dates"], true);
+  assert.ok(res.items.some((i) => i.type === "cycle-date"), "last good kept");
+});
+
+test("sync through real applyResult: success is authoritative, failure keeps cache", async () => {
+  const closeId = "waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-close";
+  const r1 = await adapter.sync(syncCtx({}).ctx);
+  const raw = applyResult(null, r1, { mode: "sync" });
+  assert.ok(raw.items.some((i) => i.id === closeId));
+
+  // The postings-close cell disappears from the page; after 24 h the
+  // refetch is complete -> the dropped date disappears from the store.
+  const page2 = fixture("coop-important-dates.html").replace(
+    "Job postings close 9 a.m. (ET) </p>",
+    "Deadline moved</p>"
+  );
+  const later = {
+    ...r1.state,
+    coopDates: { fetchedAt: "2000-01-01T00:00:00.000Z" },
+  };
+  const r2 = await adapter.sync(syncCtx(later, { fetchText: page2 }).ctx);
+  assert.equal(r2.complete, true);
+  const raw2 = applyResult(raw, r2, { mode: "sync" });
+  assert.ok(!raw2.items.some((i) => i.id === closeId), "removed date drops out");
+  assert.ok(
+    raw2.items.some(
+      (i) => i.id === "waterlooworks:cycle:winter-2027:cycle-1:interviews"
+    ),
+    "other cycle items survive"
+  );
+
+  // A failed refetch keeps every cached item.
+  const r3 = await adapter.sync(syncCtx(later, { fetchStatus: 0 }).ctx);
+  assert.equal(r3.complete, false);
+  const raw3 = applyResult(raw, r3, { mode: "sync" });
+  assert.ok(raw3.items.some((i) => i.id === closeId), "failure keeps cache");
 });

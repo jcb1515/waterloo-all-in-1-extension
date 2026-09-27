@@ -7,7 +7,12 @@
 // page-network responses and content.js sends rendered-DOM snapshots; both
 // arrive here as ObservedPayloads and get parsed in the offscreen document.
 
-import { EXPECTED_SCOPES, OBSERVE_PATTERNS, SCOPE } from "./selectors.js";
+import {
+  EXPECTED_SCOPES,
+  OBSERVE_PATTERNS,
+  SCOPE,
+  COOP_DATES_URL,
+} from "./selectors.js";
 import {
   toApplications,
   interviewItems,
@@ -18,6 +23,7 @@ import {
   mergeInterviewScopes,
   messageDateItems,
   messageKey,
+  coopDateItems,
 } from "./map.js";
 import { diffApplications } from "./diff.js";
 
@@ -31,6 +37,8 @@ const JOB_SCOPE_CAP = 200;
 /** message-dates accumulates per message key; days before prune / item cap. */
 const MESSAGE_SCOPE_AGE_DAYS = 60;
 const MESSAGE_SCOPE_CAP = 300;
+/** The public co-op important-dates page is fetched at most once a day. */
+const COOP_FETCH_MS = DAY_MS;
 
 /**
  * Every cached item from state.lastGood, interview list/detail merged by id.
@@ -44,7 +52,8 @@ function cachedItems(state) {
   ).concat(
     lastGood.events?.items || [],
     lastGood.posting?.items || [],
-    lastGood["message-dates"]?.items || []
+    lastGood["message-dates"]?.items || [],
+    lastGood["coop-dates"]?.items || []
   );
 }
 
@@ -171,21 +180,70 @@ export default {
   id: "waterlooworks",
   label: "WaterlooWorks",
   origins: ["https://waterlooworks.uwaterloo.ca"],
-  intervalMinutes: 0,
+  intervalMinutes: 1440, // daily: the co-op important-dates fetch below
   syncOnTabOpen: false,
 
   /**
-   * T1/T2 cannot replay WW requests, so sync just returns the cached picture;
-   * the core surfaces "open WaterlooWorks to refresh" via session: "no-tab".
+   * T1/T2 cannot replay WW requests, so sync returns the cached picture and
+   * additionally refreshes the PUBLIC co-op important-dates page (plain GET,
+   * no session) at most once per 24 h. session: "no-tab" — the core surfaces
+   * "open WaterlooWorks to refresh" for the observed parts.
    * @param {import("../../core/contract.js").SyncContext} ctx
    * @returns {Promise<SyncResult>}
    */
   async sync(ctx) {
-    const state = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
+    const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
+    /** @type {Record<string, any>} */
+    const state = {
+      ...prev,
+      lastGood: { ...prev.lastGood },
+      needsUpdate: { ...prev.needsUpdate },
+    };
+    const now = ctx.now || new Date();
+    const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+    const settings = ctx.settings || {};
+    let fetchedOk = false;
+
+    if (settings.coopDates !== false && typeof ctx.fetch === "function") {
+      const url = settings.coopDatesUrl || COOP_DATES_URL;
+      const lastFetch = Date.parse(state.coopDates?.fetchedAt || "");
+      if (!Number.isFinite(lastFetch) || nowMs - lastFetch >= COOP_FETCH_MS) {
+        state.coopDates = { ...state.coopDates, fetchedAt: nowIso };
+        try {
+          const res = await ctx.fetch(url);
+          if (res && res.status >= 200 && res.status < 300 && res.text) {
+            const parsed = await ctx.parseHtml(
+              res.text,
+              "waterlooworks/parseCoopDates"
+            );
+            if (parsed && parsed.ok !== false) {
+              state.lastGood["coop-dates"] = {
+                items: coopDateItems(parsed.entries || [], { url, nowIso }),
+                at: nowIso,
+              };
+              delete state.needsUpdate["coop-dates"];
+              fetchedOk = true;
+            } else {
+              // 2xx but no calendar tables — the page layout changed.
+              state.needsUpdate["coop-dates"] = true;
+            }
+          }
+          // Non-2xx / empty body: keep last good, fail soft.
+        } catch {
+          // Fetch or parser threw: keep last good.
+        }
+      }
+    }
+
+    if (!Object.keys(state.needsUpdate).length) delete state.needsUpdate;
+    // complete only on a successful authoritative read: the cached union then
+    // replaces the stored picture wholesale (a co-op date that vanished from
+    // the page drops out); on failure/throttle the union merge keeps cache.
     return {
       items: cachedItems(state),
       applications: state.applications || [],
-      complete: false,
+      complete: fetchedOk,
       session: "no-tab",
       state,
     };

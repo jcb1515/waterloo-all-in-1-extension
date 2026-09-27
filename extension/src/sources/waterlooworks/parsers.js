@@ -20,6 +20,13 @@ import {
   RANKINGS_CLOSED_RE,
   LOGGED_OUT_PATH_RE,
   LOGGED_OUT_TEXT_RE,
+  COOP_DETAILS_SELECTOR,
+  COOP_SUMMARY_SELECTOR,
+  COOP_MONTH_HEADING_RE,
+  COOP_MONTHS,
+  COOP_APP_LIMIT_RE,
+  COOP_END_OF_DAY_RE,
+  COOP_TIME_RE,
 } from "./selectors.js";
 
 // ---------------------------------------------------------------------------
@@ -654,6 +661,153 @@ export function parseRankings(doc) {
     open: !closed,
     note: closed ? cleanText(closed) : undefined,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Public co-op important-dates page (uwaterloo.ca). Not a WaterlooWorks page:
+// fetched once a day by sync() and parsed via "waterlooworks/parseCoopDates".
+
+/**
+ * Text of a node list with <br> and block breaks turned into spaces.
+ * @param {any[]} nodes
+ */
+function nodesText(nodes) {
+  let out = "";
+  const walk = (node) => {
+    if (node.nodeType === 3) {
+      out += node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    if (node.matches && node.matches(ICON_SELECTOR)) return;
+    if (node.tagName === "BR") {
+      out += " ";
+      return;
+    }
+    for (const child of node.childNodes || []) walk(child);
+  };
+  for (const node of nodes) walk(node);
+  return out.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A calendar day's cell is a stream of "lines" split on <br> runs and <p>
+ * boundaries; the day number itself is the first line, e.g.
+ * "17" | strong "Cycle 1 Posting A" | "Job postings close 9 a.m. (ET)".
+ * Each line reports its leading <strong> (the cycle label) separately.
+ * @param {any} td
+ * @returns {{text: string, strong: string|null}[]}
+ */
+function coopCellLines(td) {
+  /** @type {{text: string, strong: string|null}[]} */
+  const lines = [];
+  /** @param {any[]} nodes */
+  const push = (nodes) => {
+    const text = nodesText(nodes);
+    if (!text) return;
+    const strongEl = nodes.find(
+      (n) => n.nodeType === 1 && (n.tagName === "STRONG" || n.tagName === "B")
+    );
+    lines.push({ text, strong: strongEl ? nodesText([strongEl]) : null });
+  };
+  /** @param {any} nodeList */
+  const emit = (nodeList) => {
+    /** @type {any[]} */
+    let cur = [];
+    for (const node of nodeList || []) {
+      if (node.nodeType === 1) {
+        if (node.tagName === "BR") {
+          push(cur);
+          cur = [];
+          continue;
+        }
+        // A <p>/<div> boundary always starts a fresh line, then its own
+        // contents are line-split on internal <br>s (a <p> can carry the day
+        // number, a cycle label and the event text all at once).
+        if (node.tagName === "P" || node.tagName === "DIV") {
+          push(cur);
+          cur = [];
+          emit(node.childNodes);
+          continue;
+        }
+      }
+      cur.push(node);
+    }
+    push(cur);
+  };
+  emit(td.childNodes);
+  return lines;
+}
+
+/** "9 a.m." | "2:30 p.m." | "noon" -> "HH:MM" (24 h). */
+function coopTime(text) {
+  const m = COOP_TIME_RE.exec(text);
+  if (!m) return null;
+  if (!m[1]) return /midnight/i.test(m[0]) ? "00:00" : "12:00";
+  let h = +m[1] % 12;
+  if (m[3]?.toLowerCase() === "p") h += 12;
+  return `${String(h).padStart(2, "0")}:${String(m[2] ? +m[2] : 0).padStart(2, "0")}`;
+}
+
+/**
+ * Month-calendar tables on the co-op important-dates page. Returns one entry
+ * per event line: {date: "YYYY-MM-DD", cycle, text, time: "HH:MM"|null,
+ * endOfDay}. A strong-only line is the cycle label for the lines that follow.
+ * @param {any} doc
+ */
+export function parseCoopDates(doc) {
+  /** @type {any[]} */
+  const entries = [];
+  let tables = 0;
+  for (const details of doc.querySelectorAll(COOP_DETAILS_SELECTOR)) {
+    const summary = details.querySelector(COOP_SUMMARY_SELECTOR);
+    const heading = summary && COOP_MONTH_HEADING_RE.exec(cleanText(summary));
+    if (!heading) continue;
+    const month = COOP_MONTHS[/** @type {keyof typeof COOP_MONTHS} */ (heading[1].toLowerCase())];
+    const year = +heading[2];
+    if (!month || !year) continue;
+    const table = details.querySelector("table");
+    if (!table) continue;
+    tables++;
+    for (const td of table.querySelectorAll("td")) {
+      const lines = coopCellLines(td);
+      if (!lines.length) continue;
+      const dayMatch = /^(\d{1,2})\b/.exec(lines[0].text);
+      if (!dayMatch) continue;
+      const day = +dayMatch[1];
+      const rest = lines[0].text.slice(dayMatch[0].length).trim();
+      if (rest) lines[0] = { text: rest, strong: lines[0].strong };
+      else lines.shift();
+      const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      /** @type {string|null} */
+      let cycle = null;
+      for (const line of lines) {
+        let text = line.text;
+        if (COOP_APP_LIMIT_RE.test(text)) continue;
+        if (line.strong && text === line.strong) {
+          cycle = line.strong; // context for the lines that follow
+          continue;
+        }
+        let lineCycle = cycle;
+        if (line.strong && text.startsWith(line.strong)) {
+          lineCycle = line.strong;
+          text = text.slice(line.strong.length).trim();
+          if (!text) {
+            cycle = lineCycle;
+            continue;
+          }
+        }
+        entries.push({
+          date,
+          cycle: lineCycle,
+          text,
+          time: coopTime(text),
+          endOfDay: COOP_END_OF_DAY_RE.test(text),
+        });
+      }
+    }
+  }
+  return tables ? { ok: true, entries } : { ok: false, entries };
 }
 
 // ---------------------------------------------------------------------------

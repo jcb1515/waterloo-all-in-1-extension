@@ -3,9 +3,16 @@
 
 import { itemId } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
-import { termCodeFor, zonedParts } from "../../lib/textdates/index.js";
+import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { normalizeStatus } from "./status.js";
-import { SCOPE } from "./selectors.js";
+import {
+  SCOPE,
+  COOP_KEEP_RE,
+  COOP_CATEGORIES,
+  COOP_ZONE_RE,
+  COOP_END_OF_DAY_RE,
+  COOP_TIME_RE,
+} from "./selectors.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 /** @typedef {import("../../core/contract.js").Application} Application */
@@ -422,6 +429,160 @@ export function messageDateItems(msg, extractDates, nowIso) {
     }
     items.push(item);
   }
+  return items;
+}
+
+/** Ids are slug-based and date-free so a moved date reads as "moved". */
+const slug = (text, fallback = "general") =>
+  String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || fallback;
+
+/**
+ * Recruiting in Sep–Dec year Y is for the Winter Y+1 work term; Jan–Apr for
+ * Spring Y; May–Aug for Fall Y.
+ * @param {string} date  YYYY-MM-DD
+ */
+function coopWorkTerm(date) {
+  const [y, m] = date.split("-").map(Number);
+  if (m >= 9) return `Winter ${y + 1}`;
+  if (m <= 4) return `Spring ${y}`;
+  return `Fall ${y}`;
+}
+
+/** Event text minus the time phrase / "(ET)" / "by end of day" — for titles. */
+function coopTextWithoutTime(text) {
+  let t = String(text || "").replace(COOP_END_OF_DAY_RE, "");
+  const tm = COOP_TIME_RE.exec(t);
+  if (tm) t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  t = t.replace(COOP_ZONE_RE, " ");
+  return t
+    .replace(/\s*(?:at|by)\s*$/i, "")
+    .replace(/[\s,;:–—-]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function coopCategory(text) {
+  for (const pair of COOP_CATEGORIES) {
+    const [re, category] = /** @type {[RegExp, string]} */ (pair);
+    if (re.test(text)) return category;
+  }
+  return "other";
+}
+
+/** "HH:MM" -> [h, mi]; date "YYYY-MM-DD" -> [y, m, d]. */
+const parseHHMM = (t) => t.split(":").map(Number);
+const parseYMD = (d) => d.split("-").map(Number);
+const nextDay = (d) =>
+  new Date(Date.parse(`${d}T00:00:00.000Z`) + DAY_MS).toISOString().slice(0, 10);
+
+/**
+ * Co-op important-dates entries -> cycle-date Items. The page is
+ * authoritative: review "auto", confidence "exact". Ids contain no date so a
+ * date that moves keeps its id (the core records "moved").
+ * @param {{date: string, cycle: string|null, text: string,
+ *   time: string|null, endOfDay: boolean}[]} entries  parseCoopDates output
+ * @param {{url?: string, nowIso: string}} opts
+ * @returns {Item[]}
+ */
+export function coopDateItems(entries, { url, nowIso } = {}) {
+  const keep = (e) =>
+    Boolean(e?.date) &&
+    COOP_KEEP_RE.test(`${e.cycle || ""} ${e.text || ""}`);
+
+  // "Interviews" runs collapse to one all-day range per (workTerm, cycle) —
+  // the same cycle name recurs each recruiting season, so the workTerm half
+  // of the key keeps September's and January's "Cycle 1" apart.
+  /** @type {Map<string, {first: number, min: string, max: string}>} */
+  const runs = new Map();
+  (entries || []).forEach((e, i) => {
+    if (!keep(e) || coopCategory(e.text) !== "interviews") return;
+    const key = `${coopWorkTerm(e.date)}|${e.cycle || "general"}`;
+    const run = runs.get(key);
+    if (run) {
+      run.min = e.date < run.min ? e.date : run.min;
+      run.max = e.date > run.max ? e.date : run.max;
+    } else {
+      runs.set(key, { first: i, min: e.date, max: e.date });
+    }
+  });
+  /** @type {Map<number, string>} index of each run's first entry -> run key */
+  const runFirst = new Map();
+  for (const [key, run] of runs) runFirst.set(run.first, key);
+
+  const used = new Set();
+  /** @type {Item[]} */
+  const items = [];
+  const push = ({ cycle, workTerm, category, text, timing }) => {
+    const leaf = category === "other" ? text : category;
+    const base = `cycle:${slug(workTerm)}:${slug(cycle || "general")}:${slug(leaf, "other")}`;
+    let key = base;
+    let n = 2;
+    while (used.has(key)) key = `${base}-${n++}`;
+    used.add(key);
+    /** @type {Item} */
+    const item = {
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type: "cycle-date",
+      category,
+      title: cycle ? `${cycle}: ${text}` : text,
+      org: "Co-op",
+      ...timing,
+      url: url || undefined,
+      status: "open",
+      confidence: "exact",
+      review: "auto",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      meta: { workTerm, cycle: cycle || undefined },
+    };
+    items.push(item);
+  };
+
+  (entries || []).forEach((e, i) => {
+    if (!keep(e)) return; // holidays, classes, exams — not co-op items
+    const workTerm = coopWorkTerm(e.date);
+    const category = coopCategory(e.text);
+    if (category === "interviews") {
+      const runKey = `${workTerm}|${e.cycle || "general"}`;
+      if (runFirst.get(i) !== runKey) return; // folded into the range item
+      const run = /** @type {{min: string, max: string}} */ (runs.get(runKey));
+      const [sy, sm, sd] = parseYMD(run.min);
+      const [ey, em, ed] = parseYMD(nextDay(run.max));
+      push({
+        cycle: e.cycle,
+        workTerm,
+        category,
+        text: coopTextWithoutTime(e.text) || "Interviews",
+        timing: {
+          startAt: zonedIso(sy, sm, sd),
+          endAt: zonedIso(ey, em, ed), // exclusive midnight (textdates)
+          allDay: true,
+        },
+      });
+      return;
+    }
+    const [y, m, d] = parseYMD(e.date);
+    /** @type {Record<string, unknown>} */
+    let timing;
+    if (e.endOfDay) {
+      timing = { dueAt: zonedIso(y, m, d, 23, 59) };
+    } else if (e.time) {
+      const [h, mi] = parseHHMM(e.time);
+      timing = { dueAt: zonedIso(y, m, d, h, mi) };
+    } else {
+      timing = { startAt: zonedIso(y, m, d), allDay: true };
+    }
+    push({
+      cycle: e.cycle,
+      workTerm,
+      category,
+      text: coopTextWithoutTime(e.text) || e.text,
+      timing,
+    });
+  });
   return items;
 }
 

@@ -23,11 +23,23 @@ replay (T2) can't reproduce them. This adapter is **T3 only**:
 | `co-op/full/interviews.htm` | interviews list | `Item[]` type `interview` (startAt from "Interview Date / Time"; cancelled when schedule/confirmation says so) |
 | `interviews.htm` detail view | interview detail | booked → same `interview:<jobId>` item enriched (When/Where/interviewer/method/instructions); unbooked + available slots → `timeslot:<jobId>` deadline item (earliest slot −24 h, WW's own auto-pick rule) |
 | `dashboard.htm` | event registrations | `Item[]` type `event` |
-| `dashboard.htm` | messages inbox | `state.messages` only (≤50, newest first; `{subject, receivedAt, from, priority}`) — message → Review items is Phase 2 |
+| `dashboard.htm` | messages inbox | `state.messages` (≤50, newest first; `{subject, receivedAt, from, priority}`) + pending Review items for dates in subjects |
 | `co-op/full/jobs.htm` | posting | `Item` type `application-deadline` while the deadline is in the future; `fields` keeps short label/value pairs |
-| message detail | message detail | `state.messageDetails` (≤50, deduped by subject+createdAt). **Body, To and Created By are never extracted or stored** |
+| message detail | message detail | `state.messageDetails` (≤50, deduped by subject+createdAt, metadata only) + pending Review items for dates in subject+body. `bodyText` is transient — **never persisted**; each item stores only the ≤300-char sentence with the date |
 | rankings tab | rankings | `state.rankings = {term, open, note, at}` — open-layout unknown, comment in `parsers.js` |
 | `/notLoggedIn.htm` | session | `session: "signed-out"`, cached items kept |
+| `uwaterloo.ca/co-operative-education/important-dates` (sync, daily) | coop-dates | `Item[]` type `cycle-date` (`review:"auto"`): postings open/close, interview ranges, rankings, match results, work-term dates, direct offers |
+
+**Message dates.** `messageDateItems` (map.js) runs `ctx.textDates`
+(extractDates) over `subject + "\n" + bodyText` for a detail read, or the
+subject alone for an inbox row, with `now` = the message's send time (so
+relative dates resolve from when it was sent) and `termCode` from
+`termCodeFor`. Hits below 0.6 confidence or more than a day before `sentAt`
+are dropped. Items are `review: "pending"`, `confidence: "tentative"`, keyed
+by `hashString(normalizedSubject | torontoDay(sentAt))` — the inbox row and
+the detail page hash to one key, so a later read of either replaces that
+message's items instead of duplicating. `lastGood["message-dates"]`
+accumulates per message key (60-day prune, cap 300).
 
 The detail scopes share item ids with the list scope; the adapter merges by id
 (detail wins for `startAt`/`endAt`/`location`/`meta.prep`, `details` lines are
@@ -56,8 +68,10 @@ tables → plain replace.
 {
   applications: Application[],         // after diffApplications
   // item scopes, keyed by detectPage names:
-  lastGood:    { interviews, "interview-detail", events, posting:
+  lastGood:    { interviews, "interview-detail", events, posting,
+                 "message-dates", "coop-dates":
                    { items: Item[], at: string } },
+  coopDates:   { fetchedAt },          // 24 h throttle for the public page
   needsUpdate: { [section]: true },    // expected section missing on a loaded page
   lastReadOk:  string[],               // sections that read OK on the last payload
   lastSeenAt:  string,
@@ -69,15 +83,36 @@ tables → plain replace.
 }
 ```
 
-`sync()` only returns cached items + `complete:false` + `session:"no-tab"` —
-the core surfaces "open WaterlooWorks to refresh". Application Updates ride on
+`sync()` (`intervalMinutes: 1440`) returns the cached union with
+`session: "no-tab"`. It also fetches the public co-op important-dates page
+(plain GET — the only request this adapter makes) at most once per 24 h
+(`state.coopDates.fetchedAt`), parses it via `waterlooworks/parseCoopDates`,
+and caches the mapped items in `lastGood["coop-dates"]`. A successful read
+returns `complete: true` — the union is authoritative, so a date removed from
+the page drops out; on failure/throttle `complete: false` keeps the cache.
+Application Updates ride on
 `SyncResult.updates` (never persisted): ids are replay-stable —
 `<appId>:<status>` for a status change, `<appId>:new` for a first-seen
 application — so the core's id-based dedupe makes replays free.
 
 ## Settings
 
-None yet.
+- `coopDates: false` — disables the daily important-dates fetch.
+- `coopDatesUrl` — overrides the page URL (default
+  `https://uwaterloo.ca/co-operative-education/important-dates`).
+
+## Co-op cycle dates
+
+`parseCoopDates` reads the month-calendar `<details>` blocks
+("<Month> <Year> calendar of dates"): each cell's first line is the day,
+a strong-only line is the cycle label for the events that follow,
+"Application limit" lines are skipped, and "9 a.m."/"2 p.m."/"noon"/"by end
+of day" give `time`/`endOfDay`. `coopDateItems` keeps co-op lines (holidays,
+classes and exams drop out), collapses a cycle's "Interviews" days into one
+all-day range per work term (exclusive-midnight end), and builds date-free
+ids (`waterlooworks:cycle:<workTerm>:<cycle>:<category>` + `-2` collision
+suffixes) so a moved date stays the same item. `workTerm` comes from the
+entry's month: Sep–Dec Y → Winter Y+1, Jan–Apr → Spring Y, May–Aug → Fall Y.
 
 ## Still unknown
 
