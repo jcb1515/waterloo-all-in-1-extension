@@ -288,11 +288,15 @@ export function CalendarSection({ settings, save, state }) {
                 <Toggle label="Term dates" checked={cal.include?.termDates !== false} onChange={(v) => patch({ include: { ...(cal.include || {}), termDates: v } })} />
                 <Toggle label="Reminders in the feed (Apple/Outlook only; Google ignores them)" checked={!!cal.alarms} onChange={(v) => patch({ alarms: v })} />
               </div>
+              <p class="help">
+                Gmail invitations are skipped — Google already adds them to your calendar.
+              </p>
             </Field>
 
             {feed && feed.status === "ok" ? (
               <p class="help status-ok">
                 <CheckIcon size={12} /> Published {relAgo(feed.lastPublishedAt)} · {feed.eventCount} events
+                {feed.collapsed > 0 ? ` · ${feed.collapsed} duplicates merged` : ""}
                 {feed.skipped && feed.skipped.length ? (
                   <>
                     {" "}· {feed.skipped.length} skipped{" "}

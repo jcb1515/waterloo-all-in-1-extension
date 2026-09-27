@@ -7,8 +7,9 @@
   everywhere. Pure: no storage, no chrome.*.
 */
 
-/** Fields a review edit may replace on the item. */
-export const OVERRIDE_FIELDS = ["title", "type", "dueAt", "startAt", "endAt", "allDay"];
+/** Fields a review edit may replace on the item. opensAt is the derived
+ * to-do "start showing me" date (study lead-time override). */
+export const OVERRIDE_FIELDS = ["title", "type", "dueAt", "startAt", "endAt", "allDay", "opensAt"];
 
 /**
  * Apply the user's state to a stored item. Returns a shallow copy; the

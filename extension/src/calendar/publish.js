@@ -124,7 +124,12 @@ async function publishNow(opts) {
   feed.serviceUrl = origin;
 
   const mv = await d.getMergedView();
-  const { payload, count } = buildFeedPayload(mv.items, mv.userState, cal, new Date(d.now()), {
+  // Derived to-dos publish only when the user opted in (todos.includeInCalendar).
+  const items =
+    settings.todos && settings.todos.includeInCalendar === true
+      ? { ...mv.items, ...(mv.todos || {}) }
+      : mv.items;
+  const { payload, count, collapsed } = buildFeedPayload(items, mv.userState, cal, new Date(d.now()), {
     acceptPending: !!(settings.review && settings.review.showPending),
   });
   const hash = stableHash(payload);
@@ -195,6 +200,7 @@ async function publishNow(opts) {
       lastPublishedAt: new Date(d.now()).toISOString(),
       lastPayloadHash: hash,
       eventCount: count,
+      collapsed: collapsed || 0,
       accepted: body && typeof body.accepted === "number" ? body.accepted : count,
       skipped: Array.isArray(body && body.skipped) ? body.skipped.slice(0, 20) : [],
       ...(resub ? { needsResubscribe: true } : {}),

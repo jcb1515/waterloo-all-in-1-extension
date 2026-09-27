@@ -99,6 +99,14 @@ export function ItemRow({ item, now, actions, done, clashes, items, priority }) 
             </span>
           ) : null}
           {item.weight != null ? <span class="badge badge-muted tabular">{item.weight}%</span> : null}
+          {item.meta && item.meta.onCalendar ? (
+            <span
+              class="badge badge-muted"
+              title="On your Google Calendar — the feed skips it to avoid a duplicate"
+            >
+              On your Google Calendar
+            </span>
+          ) : null}
           {item.confidence === "tentative" ? (
             <span class="badge badge-tentative">
               <CircleDashedIcon size={11} /> Tentative

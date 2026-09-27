@@ -178,6 +178,38 @@ export function titleSimilarity(titleA, orgA, titleB, orgB) {
   return inter / (A.size + B.size - inter);
 }
 
+/** A full normalised course code, "MATH 117" / "CS 246E". */
+const COURSE_CODE_RE = /^[A-Z]{2,8} \d{3}[A-Z]{0,2}$/;
+
+/** Lowercase alphanumeric-only form, for org containment ("acme" ⊂ "Acme Corp"). */
+const orgCompact = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Loose org compatibility for cross-source merging. True when:
+ *  - the normalised course codes are equal, or either org is empty;
+ *  - one side's compact form contains the other (shorter side ≥ 3 chars);
+ *  - or the orgs' token similarity is ≥ 0.5.
+ * Hard exception: two *different* real course codes never match — MATH 117
+ * and ECE 105 lectures at the same time are a clash, not a duplicate.
+ * @param {string} [a] @param {string} [b]
+ */
+export function orgsCompatible(a, b) {
+  const ta = String(a || "").trim();
+  const tb = String(b || "").trim();
+  if (!ta || !tb) return true;
+  const na = normCourseCode(ta);
+  const nb = normCourseCode(tb);
+  const aIsCode = COURSE_CODE_RE.test(na);
+  const bIsCode = COURSE_CODE_RE.test(nb);
+  if (aIsCode && bIsCode) return na === nb;
+  if (na.toLowerCase() === nb.toLowerCase()) return true;
+  const ca = orgCompact(ta);
+  const cb = orgCompact(tb);
+  const [short, long] = ca.length <= cb.length ? [ca, cb] : [cb, ca];
+  if (short.length >= 3 && long.includes(short)) return true;
+  return titleSimilarity(ta, "", tb, "") >= 0.5;
+}
+
 /* ------------------------------------------------------------------ */
 /* Dates                                                               */
 /* ------------------------------------------------------------------ */
@@ -196,18 +228,52 @@ export function sameLocalDay(a, b) {
  * (sim = title similarity, delta = |anchor difference| in ms).
  * @returns {{sim: number, delta: number} | null}
  */
-function memberMatch(c, m) {
+/**
+ * The application an item belongs to via a stored link: meta.applicationId
+ * directly, or meta.jobId resolved through the applications' jobIds.
+ */
+function linkedAppOf(item, ctx) {
+  const meta = item && item.meta;
+  if (!meta) return null;
+  if (meta.applicationId) return meta.applicationId;
+  if (meta.jobId && ctx && ctx.jobToApp) return ctx.jobToApp[meta.jobId] || null;
+  return null;
+}
+
+/**
+ * Whether candidate c may join member m's cluster, and how well
+ * (sim = title similarity, delta = |anchor difference| in ms).
+ * @param {any} c @param {any} m
+ * @param {{jobToApp?: Record<string, string>}} [ctx] jobId -> application id
+ * @returns {{sim: number, delta: number} | null}
+ */
+function memberMatch(c, m, ctx) {
   if (!typesCompatible(c.type, m.type)) return null;
+
+  // An emailed interview invite and the WaterlooWorks interview for the same
+  // application are the same event — the link alone merges them when the
+  // starts are within 15 minutes, whatever the wording.
+  if (c.type === "interview" && m.type === "interview" && c.startAt && m.startAt) {
+    const ca2 = linkedAppOf(c, ctx);
+    const ma2 = linkedAppOf(m, ctx);
+    if (ca2 && ca2 === ma2) {
+      const d = Math.abs(Date.parse(c.startAt) - Date.parse(m.startAt));
+      if (d <= 15 * 60 * 1000) return { sim: 1, delta: d };
+    }
+  }
+
   const sim = titleSimilarity(c.title, c.org, m.title, m.org);
 
-  // Org rule: both present -> same course code (or same org, case-insensitive).
-  // One missing -> the titles must be near-identical and on the same day.
+  // Org rule: both present -> loose compatibility (same course code, a
+  // containment like "Acme" vs "Acme Corp", or similar names). Two different
+  // course codes never match. One missing -> the titles must be
+  // near-identical and on the same day.
   const orgA = c.org;
   const orgB = m.org;
   const ca = anchorOf(c);
   const ma = anchorOf(m);
   if (orgA && orgB) {
-    if (normCourseCode(orgA).toLowerCase() !== normCourseCode(orgB).toLowerCase()) return null;
+    if (!orgsCompatible(orgA, orgB)) return null;
   } else if (sim < 0.85 || !ca || !ma || !sameLocalDay(ca, ma)) {
     return null;
   }
@@ -252,11 +318,11 @@ function windowContains(win, other) {
 }
 
 /** Best member score for a candidate against a cluster, or null. */
-function clusterScore(c, members) {
+function clusterScore(c, members, ctx) {
   /** @type {{sim:number, delta:number} | null} */
   let best = null;
   for (const m of members) {
-    const s = memberMatch(c, m);
+    const s = memberMatch(c, m, ctx);
     if (!s) continue;
     if (!best || s.sim > best.sim || (s.sim === best.sim && s.delta < best.delta)) best = s;
   }
@@ -335,6 +401,13 @@ function buildItem(id, members, us) {
     }
     if (facts.length) item.meta.facts = facts;
   }
+  // Links survive even when the linked member didn't win the field race:
+  // meta.applicationId (email/WaterlooWorks link) and meta.onCalendar
+  // (Gmail invite already on the user's calendar) apply cluster-wide.
+  const linked = ranked.find((m) => m.meta && m.meta.applicationId);
+  if (linked) item.meta.applicationId = linked.meta.applicationId;
+  const onCal = ranked.find((m) => m.meta && m.meta.onCalendar);
+  if (onCal) item.meta.onCalendar = onCal.meta.onCalendar;
   if (us && us.done) item.status = "done";
   else if (members.some((m) => m.status === "submitted")) item.status = "submitted";
   else if (members.every((m) => m.status === "cancelled")) item.status = "cancelled";
@@ -355,18 +428,40 @@ function buildItem(id, members, us) {
  * @param {Record<string, string>} [p.links] rawId -> canonicalId
  * @param {Record<string, {uid:string, seq:number, hash:string}>} [p.uidMap]
  * @param {Record<string, any>} [p.userState]
+ * @param {Record<string, any>} [p.applications] merged applications — email
+ *   items link to them before clustering so an emailed interview invite and
+ *   the WaterlooWorks interview for one application merge.
  * @param {Date|string} p.now
  * @returns {{items: Record<string, any>, links: Record<string, string>,
  *   uidMap: Record<string, any>, updates: any[]}}
  */
-export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, userState = {}, now }) {
+export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, userState = {}, applications = {}, now }) {
   const nowDate = now instanceof Date ? now : new Date(now);
   const nowIso = nowDate.toISOString();
+
+  /** jobId -> application id, for resolving WaterlooWorks interview links. */
+  const jobToApp = {};
+  for (const a of Object.values(applications || {})) {
+    if (a && a.id && a.jobId) jobToApp[a.jobId] = a.id;
+  }
+  const matchCtx = { jobToApp };
 
   /** @type {any[]} */
   const rawItems = [];
   for (const rec of Object.values(raws)) {
-    for (const it of (rec && rec.items) || []) if (it && it.id) rawItems.push(it);
+    for (const it of (rec && rec.items) || []) {
+      if (!it || !it.id) continue;
+      // Email items pick up meta.applicationId before clustering (the stored
+      // raw stays untouched — this is a per-item clone).
+      if (it.meta && it.meta.employer && !it.meta.applicationId) {
+        const app = matchEmailApplication(it, applications);
+        if (app) {
+          rawItems.push({ ...it, meta: { ...it.meta, applicationId: app.id } });
+          continue;
+        }
+      }
+      rawItems.push(it);
+    }
   }
   /** @type {Map<string, any[]>} */
   const clusters = new Map();
@@ -396,7 +491,7 @@ export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, 
     let bestScore = null;
     for (const [cid, members] of clusters) {
       if (members.some((m) => m.source === it.source)) continue;
-      const s = clusterScore(it, members);
+      const s = clusterScore(it, members, matchCtx);
       if (!s) continue;
       if (!bestScore || s.sim > bestScore.sim || (s.sim === bestScore.sim && s.delta < bestScore.delta)) {
         bestId = cid;
@@ -592,6 +687,10 @@ const EMAIL_TITLE_NOISE = new Set([
   "confirmation", "confirmed", "reminder", "rescheduled", "cancelled",
   "canceled", "selected", "selection", "schedule", "scheduled", "with",
   "for", "your", "you", "the", "and", "or",
+  // Subject filler — a stray "is"/"re" must not count as a job-title token.
+  "a", "an", "is", "are", "was", "it", "its", "this", "that", "to", "in",
+  "on", "at", "by", "we", "our", "us", "hi", "hello", "dear", "re", "fwd",
+  "fw", "please", "today", "tomorrow", "next",
 ]);
 
 /** Significant tokens of a title — everything except filler/date words. */
@@ -604,11 +703,34 @@ function jobTokens(title) {
 }
 
 /**
- * Links email-sourced co-op items to WaterlooWorks applications: an item
- * whose meta.employer fuzzy-matches one application's employer (title
- * similarity ≥ 0.6) and — when its title carries job-title tokens — shares
- * at least one significant token with the application's jobTitle. A link is
- * made only for a unique best match; ambiguous ties link nothing.
+ * The single WaterlooWorks application an email item belongs to, or null:
+ * the item's meta.employer fuzzy-matches one application's employer (title
+ * similarity ≥ 0.6) and — when the item's title carries job-title tokens —
+ * shares at least one significant token with the application's jobTitle.
+ * Ambiguous ties return null.
+ * @param {any} item raw or merged email item (needs meta.employer)
+ * @param {Record<string, any>} applications
+ * @returns {any | null}
+ */
+export function matchEmailApplication(item, applications = {}) {
+  if (!item || !item.meta || !item.meta.employer) return null;
+  if (!EMAIL_SOURCES_SET.has(item.source)) return null;
+  const employer = item.meta.employer;
+  const apps = Object.values(applications || {}).filter((a) => a && a.id && a.employer);
+  const tokens = jobTokens(item.title);
+  const cands = apps.filter(
+    (a) => titleSimilarity(employer, undefined, a.employer, undefined) >= 0.6
+  );
+  const matching = tokens.size
+    ? cands.filter((a) => [...jobTokens(a.jobTitle)].some((t) => tokens.has(t)))
+    : cands;
+  return matching.length === 1 ? matching[0] : null;
+}
+
+/**
+ * Links email-sourced co-op items to WaterlooWorks applications (see
+ * matchEmailApplication). A link is made only for a unique best match;
+ * ambiguous ties link nothing.
  *
  * Pure and view-level: returns new maps only when something links. The item
  * gains meta.applicationId and the application's itemIds gains the item id.
@@ -627,20 +749,13 @@ export function linkEmailItems(items = {}, applications = {}) {
   for (const item of Object.values(items || {})) {
     if (!item || !item.id) continue;
     if (!EMAIL_LINK_TYPES.has(item.type)) continue;
-    if (!EMAIL_SOURCES_SET.has(item.source)) continue;
-    const employer = item.meta && item.meta.employer;
-    if (!employer) continue;
-
-    const tokens = jobTokens(item.title);
-    const cands = apps.filter(
-      (a) => titleSimilarity(employer, undefined, a.employer, undefined) >= 0.6
-    );
-    const matching = tokens.size
-      ? cands.filter((a) => [...jobTokens(a.jobTitle)].some((t) => tokens.has(t)))
-      : cands;
-    if (matching.length !== 1) continue;
-
-    const app = matching[0];
+    // Already linked (the pre-cluster annotation) or a fresh match.
+    /** @type {any} */
+    let app = null;
+    const preLinked = item.meta && item.meta.applicationId;
+    if (preLinked) app = applications[preLinked] || null;
+    if (!app) app = matchEmailApplication(item, applications);
+    if (!app) continue;
     if (!itemsOut) {
       itemsOut = { ...items };
       appsOut = { ...applications };

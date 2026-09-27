@@ -9,6 +9,8 @@
 */
 
 import { effectiveItem } from "../core/effective.js";
+import { typesCompatible, itemRank, titleSimilarity, orgsCompatible } from "../core/merge.js";
+import { zonedParts } from "../lib/textdates/index.js";
 
 const DAY = 86400000;
 const MAX_EVENTS = 3000;
@@ -92,6 +94,9 @@ function toEvent(it, us, cal, nowMs) {
   if (it.review === "pending" || it.review === "dismissed") return null;
   if (us && us.hidden) return null;
   if (it.status === "cancelled") return null;
+  // Gmail invitations are already on the user's Google Calendar — publishing
+  // them again would duplicate the event. The panel still shows them.
+  if (it.meta && it.meta.onCalendar) return null;
 
   const done = it.status === "done" || it.status === "submitted" || !!(us && us.done);
   const inc = (cal && cal.include) || {};
@@ -169,16 +174,91 @@ function toEvent(it, us, cal, nowMs) {
  * @param {Date} [now]
  * @param {{acceptPending?: boolean}} [opts]  review.showPending — pending
  *   items publish as accepted instead of being skipped.
- * @returns {{payload: any, count: number, trimmed: boolean}}
+ * @returns {{payload: any, count: number, trimmed: boolean, collapsed: number}}
  */
+/**
+ * The publish-time duplicate guard — a pair that the merge engine missed is
+ * collapsed when all of these hold: compatible types, the same start (timed:
+ * within 5 minutes; all-day: the same Toronto date), title similarity ≥ 0.6,
+ * and compatible orgs. The higher itemRank wins; ties keep the first.
+ * @param {{ev: any, it: any, anchor: number}[]} picked
+ * @returns {{kept: {ev: any, it: any, anchor: number}[], collapsed: number}}
+ */
+function collapseDuplicates(picked) {
+  const evAnchor = (/** @type {any} */ ev) => {
+    const s = ev.startAt || ev.dueAt;
+    const ms = s ? Date.parse(s) : NaN;
+    return Number.isNaN(ms) ? null : ms;
+  };
+  const isDup = (/** @type {any} */ a, /** @type {any} */ b) =>
+    typesCompatible(a.type, b.type) &&
+    titleSimilarity(a.title, a.org, b.title, b.org) >= 0.6 &&
+    orgsCompatible(a.org, b.org);
+  const loser = (/** @type {any} */ a, /** @type {any} */ b) =>
+    itemRank(b.it) > itemRank(a.it) ? a : b;
+
+  const removed = new Set();
+  let collapsed = 0;
+
+  // Timed items: sorted sweep, comparing only entries within 5 minutes.
+  const timed = picked
+    .filter((p) => !p.ev.allDay)
+    .map((p) => ({ p, ms: evAnchor(p.ev) }))
+    .filter((p) => p.ms != null)
+    .sort((a, b) => /** @type {number} */ (a.ms) - /** @type {number} */ (b.ms));
+  for (let i = 0; i < timed.length; i++) {
+    const a = timed[i];
+    if (removed.has(a.p)) continue;
+    for (let j = i + 1; j < timed.length; j++) {
+      const b = timed[j];
+      if (removed.has(b.p)) continue;
+      if (/** @type {number} */ (b.ms) - /** @type {number} */ (a.ms) > 5 * 60 * 1000) break;
+      if (isDup(a.p.it, b.p.it)) {
+        const drop = loser(a.p, b.p);
+        removed.add(drop);
+        collapsed++;
+        if (drop === a.p) break;
+      }
+    }
+  }
+
+  // All-day items: same Toronto calendar date.
+  /** @type {Map<string, any[]>} */
+  const byDay = new Map();
+  for (const p of picked) {
+    if (!p.ev.allDay || removed.has(p)) continue;
+    const ms = evAnchor(p.ev);
+    if (ms == null) continue;
+    const z = zonedParts(new Date(ms), "America/Toronto");
+    const key = `${z.y}-${z.m}-${z.d}`;
+    const arr = byDay.get(key) || [];
+    arr.push(p);
+    byDay.set(key, arr);
+  }
+  for (const arr of byDay.values()) {
+    for (let i = 0; i < arr.length; i++) {
+      if (removed.has(arr[i])) continue;
+      for (let j = i + 1; j < arr.length; j++) {
+        if (removed.has(arr[j])) continue;
+        if (isDup(arr[i].it, arr[j].it)) {
+          removed.add(loser(arr[i], arr[j]));
+          collapsed++;
+        }
+      }
+    }
+  }
+
+  return { kept: picked.filter((p) => !removed.has(p)), collapsed };
+}
+
 export function buildFeedPayload(items, userState, calSettings, now = new Date(), opts = {}) {
   const nowMs = now.getTime();
   const us = userState || {};
   const cal = calSettings || {};
   const effOpts = { acceptPending: !!opts.acceptPending };
 
-  /** @type {{ev: any, anchor: number}[]} */
-  const picked = [];
+  /** @type {{ev: any, it: any, anchor: number}[]} */
+  const pickedRaw = [];
   for (const it of Object.values(items || {})) {
     const eff = effectiveItem(it, us[it && it.id], effOpts);
     const ev = toEvent(eff, us[it && it.id], cal, nowMs);
@@ -188,8 +268,10 @@ export function buildFeedPayload(items, userState, calSettings, now = new Date()
       ev.startAt ? Date.parse(ev.startAt) : -Infinity,
       ev.endAt ? Date.parse(ev.endAt) : -Infinity
     );
-    picked.push({ ev, anchor: a });
+    pickedRaw.push({ ev, it: eff, anchor: a });
   }
+
+  const { kept: picked, collapsed } = collapseDuplicates(pickedRaw);
 
   // Nearest to now wins under the cap: upcoming first (soonest first), then
   // the most recent past.
@@ -236,7 +318,7 @@ export function buildFeedPayload(items, userState, calSettings, now = new Date()
     trimmed = true;
   }
 
-  return { payload, count: events.length, trimmed };
+  return { payload, count: events.length, trimmed, collapsed };
 }
 
 /** Key-sorted stringify: key order and array order aside, stable bytes. */
