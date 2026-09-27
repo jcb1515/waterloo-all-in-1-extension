@@ -7,6 +7,7 @@ import {
   weekStartOf,
   heatBucket,
   dayKeyOf,
+  shortLabel,
 } from "../../extension/src/panel/model/calendar.js";
 import { zonedIso } from "../../extension/src/lib/textdates/index.js";
 
@@ -159,4 +160,17 @@ test("month: classes are counted, not marked; weights drive cell heat", () => {
   assert.equal(cell.classCount, 2);
   assert.equal(cell.markers.length, 1);
   assert.equal(cell.heat, 3); // weight 30
+});
+
+test("shortLabel splits course orgs and first-words everything else", () => {
+  assert.deepEqual(shortLabel({ org: "MATH 117" }), { sub: "MATH", main: "117" });
+  assert.deepEqual(shortLabel({ org: "ECE 105" }), { sub: "ECE", main: "105" });
+  assert.deepEqual(shortLabel({ org: "CS 136L" }), { sub: "CS", main: "136L" });
+  assert.deepEqual(shortLabel({ org: "WaterlooWorks" }), { sub: "", main: "WaterlooWorks" });
+  assert.deepEqual(shortLabel({ org: "Co-op Interview" }), { sub: "", main: "Co-op" });
+  assert.deepEqual(
+    shortLabel({ title: "Plan review" }),
+    { sub: "", main: "Plan" },
+    "falls back to the title's first word"
+  );
 });

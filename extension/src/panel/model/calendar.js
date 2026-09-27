@@ -42,6 +42,21 @@ export function heatBucket(weight) {
   return 3;
 }
 
+/**
+ * Short label for a calendar block/pill too narrow for the full org+title:
+ * course orgs split into subject + catalog ("MATH" over "117"); anything
+ * else takes the org's (or title's) first word.
+ * @param {any} item
+ * @returns {{sub: string, main: string}}
+ */
+export function shortLabel(item) {
+  const org = String((item && item.org) || "").trim();
+  const m = /^([A-Za-z]{2,6})\s*([0-9]+[A-Za-z]*)$/.exec(org);
+  if (m) return { sub: m[1].toUpperCase(), main: m[2].toUpperCase() };
+  const word = (org || String((item && item.title) || "")).trim().split(/\s+/)[0] || "";
+  return { sub: "", main: word };
+}
+
 /** Toronto "YYYY-MM-DD" for an instant. */
 export function dayKeyOf(ms) {
   const p = zonedParts(new Date(ms), TZ);

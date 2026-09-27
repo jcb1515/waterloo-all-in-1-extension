@@ -807,6 +807,14 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   text-overflow: ellipsis;
   cursor: pointer;
 }
+.cal-due-pill .cal-pill-sub {
+  font-size: 8px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  margin-right: 1px;
+}
+.cal-due-pill strong { font-weight: var(--w-bold); }
 .cal-due-more {
   font-size: 10px;
   color: var(--text-3);
@@ -899,6 +907,22 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Narrow blocks (<~60px): subject in 9px over the bold catalog number. */
+.cal-block.narrow { padding: 1px 3px; }
+.cal-block-sub {
+  display: block;
+  font-size: 9px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--org-ink, var(--text-2));
+}
+.cal-block-num {
+  display: block;
+  font-size: 11px;
+  font-weight: var(--w-bold);
+  line-height: 1.15;
 }
 .cal-block-time {
   display: block;

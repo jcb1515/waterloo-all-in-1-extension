@@ -2,8 +2,8 @@
 // Toronto-time grid with a due strip and workload-heat tint; Month is a 6x7
 // grid with compact markers. Tapping an item opens a detail popover.
 
-import { useMemo, useState } from "preact/hooks";
-import { weekModel, monthModel, weekStartOf, dayKeyOf } from "../model/calendar.js";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { weekModel, monthModel, weekStartOf, dayKeyOf, shortLabel } from "../model/calendar.js";
 import { fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { orgStyle } from "../../ui/colors.js";
 import { typeIcon, ChevronRightIcon, XIcon, MapPinIcon } from "../../ui/icons.jsx";
@@ -101,6 +101,21 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const nowInRange = nowMin >= startHour * 60 && nowMin <= endHour * 60;
 
+  // Real column width drives the label switch: under ~60px a block/pill
+  // shows the compact subject/catalog split instead of the full org.
+  const gridRef = useRef(null);
+  const [gridW, setGridW] = useState(0);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setGridW(el.clientWidth));
+    ro.observe(el);
+    setGridW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const colPx = gridW ? gridW / 7 : 80;
+  const pillNarrow = colPx < 60;
+
   return (
     <div class="cal-week">
       {/* Due strip + day headers, both heat-tinted. */}
@@ -111,19 +126,31 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
             <span class="cal-dow">{WD_SHORT[i]}</span>
             <span class="cal-date tabular">{d.date.slice(8)}</span>
             <div class="cal-due">
-              {d.due.slice(0, 3).map((it) => (
-                <button
-                  key={it.id}
-                  type="button"
-                  class="cal-due-pill"
-                  style={orgStyle(it.org)}
-                  title={`${it.title}${typeof it.weight === "number" ? ` · ${it.weight}%` : ""}`}
-                  onClick={() => onPick(it)}
-                >
-                  {it.org ? `${it.org} ` : ""}
-                  {it.title.length > 18 ? `${it.title.slice(0, 17)}…` : it.title}
-                </button>
-              ))}
+              {d.due.slice(0, 3).map((it) => {
+                const sl = pillNarrow ? shortLabel(it) : null;
+                return (
+                  <button
+                    key={it.id}
+                    type="button"
+                    class="cal-due-pill"
+                    style={orgStyle(it.org)}
+                    title={`${it.title}${typeof it.weight === "number" ? ` · ${it.weight}%` : ""}`}
+                    onClick={() => onPick(it)}
+                  >
+                    {sl ? (
+                      <>
+                        {sl.sub ? <span class="cal-pill-sub">{sl.sub}</span> : null}
+                        <strong>{sl.main}</strong>
+                      </>
+                    ) : (
+                      <>
+                        {it.org ? `${it.org} ` : ""}
+                        {it.title.length > 18 ? `${it.title.slice(0, 17)}…` : it.title}
+                      </>
+                    )}
+                  </button>
+                );
+              })}
               {d.due.length > 3 ? <span class="cal-due-more">+{d.due.length - 3}</span> : null}
             </div>
           </div>
@@ -138,7 +165,7 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
             </span>
           ))}
         </div>
-        <div class="cal-grid" style={{ height: gridH }}>
+        <div class="cal-grid" ref={gridRef} style={{ height: gridH }}>
           {hourTicks.map((h) => (
             <div
               key={h}
@@ -151,39 +178,49 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
               {d.today && nowInRange ? (
                 <span class="cal-now" style={{ top: (nowMin - startHour * 60) * PX_PER_MIN }} />
               ) : null}
-              {d.timed.map((ev) => (
-                <button
-                  key={ev.item.id}
-                  type="button"
-                  class={[
-                    "cal-block",
-                    ev.item.confidence === "tentative" ? "tentative" : "",
-                    ev.clash ? (ev.severe ? "clash severe" : "clash") : "",
-                    ev.item.type === "exam" || ev.item.type === "interview" ? "major" : "",
-                    ev.item.status === "done" || ev.item.status === "submitted" ? "dim" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  style={{
-                    ...orgStyle(ev.item.org),
-                    top: ev.top * PX_PER_MIN,
-                    height: ev.height * PX_PER_MIN,
-                    left: `${(ev.col / ev.cols) * 100}%`,
-                    width: `${100 / ev.cols}%`,
-                  }}
-                  title={ev.item.title}
-                  onClick={() => onPick(ev.item)}
-                >
-                  <span class="cal-block-title">
-                    {ev.item.org || ev.item.title}
-                  </span>
-                  {ev.e - ev.s >= 45 * 60000 ? (
-                    <span class="cal-block-time">
-                      {fmtTime(ev.s)}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+              {d.timed.map((ev) => {
+                const narrow = colPx / ev.cols < 60;
+                const sl = narrow ? shortLabel(ev.item) : null;
+                return (
+                  <button
+                    key={ev.item.id}
+                    type="button"
+                    class={[
+                      "cal-block",
+                      narrow ? "narrow" : "",
+                      ev.item.confidence === "tentative" ? "tentative" : "",
+                      ev.clash ? (ev.severe ? "clash severe" : "clash") : "",
+                      ev.item.type === "exam" || ev.item.type === "interview" ? "major" : "",
+                      ev.item.status === "done" || ev.item.status === "submitted" ? "dim" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    style={{
+                      ...orgStyle(ev.item.org),
+                      top: ev.top * PX_PER_MIN,
+                      height: ev.height * PX_PER_MIN,
+                      left: `${(ev.col / ev.cols) * 100}%`,
+                      width: `${100 / ev.cols}%`,
+                    }}
+                    title={ev.item.title}
+                    onClick={() => onPick(ev.item)}
+                  >
+                    {sl ? (
+                      <span class="cal-block-title">
+                        {sl.sub ? <span class="cal-block-sub">{sl.sub}</span> : null}
+                        <span class="cal-block-num">{sl.main}</span>
+                      </span>
+                    ) : (
+                      <span class="cal-block-title">{ev.item.org || ev.item.title}</span>
+                    )}
+                    {!narrow && ev.e - ev.s >= 45 * 60000 ? (
+                      <span class="cal-block-time">
+                        {fmtTime(ev.s)}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -239,13 +276,14 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay, onPick })
           </button>
         ))}
       </div>
-      <label class="cal-toggle">
+      <label class="switch cal-toggle">
         <input
           type="checkbox"
           checked={showClassCounts}
           onChange={(e) => setShowClassCounts(/** @type {any} */ (e.target).checked)}
         />
-        Show class counts
+        <span class="track" aria-hidden="true" />
+        <span>Show class counts</span>
       </label>
       {sel ? (
         <div class="cal-day-items">
@@ -332,13 +370,14 @@ export function CalendarView({ state, actions, now }) {
       </div>
 
       {mode === "week" ? (
-        <label class="cal-toggle">
+        <label class="switch cal-toggle">
           <input
             type="checkbox"
             checked={showClasses}
             onChange={(e) => setShowClasses(/** @type {any} */ (e.target).checked)}
           />
-          Show classes
+          <span class="track" aria-hidden="true" />
+          <span>Show classes</span>
         </label>
       ) : null}
 
