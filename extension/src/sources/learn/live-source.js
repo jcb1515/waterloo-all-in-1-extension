@@ -116,6 +116,8 @@
   ------------------------------------------------------------------------
 */
 
+import { zonedIso } from "../../lib/textdates/index.js";
+
 export const LEARN_BASE = "https://learn.uwaterloo.ca";
 
 const FALLBACK_VERSIONS = { lp: "1.30", le: "1.60" };
@@ -419,7 +421,8 @@ function eventDate(ev) {
   const assoc = !!(ev.AssociatedEntity && ev.IsAssociatedWithEntity !== false);
   if (ev.IsAllDayEvent) {
     const day = String(ev.EndDay || ev.StartDay || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (day) return new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 23, 59).toISOString();
+    // Toronto wall time, so the stored instant does not depend on the machine zone.
+    if (day) return zonedIso(Number(day[1]), Number(day[2]), Number(day[3]), 23, 59);
   }
   // A Learn item's event marks its date at the end; a plain event (a midterm) matters when it starts.
   return assoc ? isoOrNull(ev.EndDateTime) || isoOrNull(ev.StartDateTime) : isoOrNull(ev.StartDateTime) || isoOrNull(ev.EndDateTime);
@@ -490,6 +493,22 @@ export function itemUrl(base, ou, kind, id, groupId = null) {
   }
 }
 
+/** News Body.Html -> plain text: tags stripped, the common entities decoded, whitespace collapsed. */
+function htmlToText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** The course's list page for a tool. Always openable, even before an item unlocks. */
 export function toolListUrl(base, ou, kind) {
   switch (kind) {
@@ -546,16 +565,21 @@ export function sessionReason(workerWhy, tabWhy) {
 export class LiveSource {
   /**
    * @param {object} settings
-   * @param {{relay?: (base: string, path: string) => Promise<object>, now?: Date}} [opts]
-   *   relay runs a GET through an open Learn tab. It resolves to the same result
-   *   object as workerFetch, or { noTab: true } when there is no usable tab.
+   * @param {{transport?: (path: string) => Promise<object>, relay?: (base: string, path: string) => Promise<object>, now?: Date}} [opts]
+   *   transport replaces workerFetch's global fetch (the contract adapter feeds
+   *   it ctx.fetch). relay runs a GET through an open Learn tab. Both resolve to
+   *   the same result object as workerFetch; relay may answer { noTab: true }
+   *   when there is no usable tab.
    */
   constructor(settings, opts = {}) {
     this.mode = "live";
     this.base = liveBase(settings);
     this.settings = settings;
+    this.transport = opts.transport || null;
     this.relay = opts.relay || null;
     this.now = opts.now || new Date();
+    this.userId = null;
+    this.quizAttemptsForbidden = false;
     this.versions = null;
     this.via = "worker";
     this.lastAt = 0;
@@ -584,6 +608,13 @@ export class LiveSource {
   }
 
   async workerFetch(path) {
+    if (this.transport) {
+      try {
+        return await this.transport(path);
+      } catch (e) {
+        return { status: 0, error: String(e && e.message ? e.message : e) };
+      }
+    }
     let res;
     try {
       res = await fetch(this.base + path, {
@@ -727,6 +758,8 @@ export class LiveSource {
       const first = String(me.FirstName || "").trim();
       const last = String(me.LastName || "").trim();
       const initials = `${first.charAt(0)}${last.charAt(0)}`.toUpperCase();
+      // Needed to spot the student's own discussion posts (readTopicPosts).
+      this.userId = me.Identifier != null ? String(me.Identifier) : null;
       this.personal = [`${first} ${last}`, first, last, String(me.UniqueName || ""), String(me.Identifier || "")]
         .filter((x) => x.trim().length > 1)
         .sort((a, b) => b.length - a.length);
@@ -815,6 +848,7 @@ export class LiveSource {
         name,
         orgUnitId: id,
         color: "mint",
+        term: term ?? null,
         termMatch: term === current,
         // current: shown as a course while scanning and kept even with nothing due.
         current: term === current || termFilter !== "term",
@@ -1018,7 +1052,14 @@ export class LiveSource {
         if (calRep && calRep.skipped.length < 12) calRep.skipped.push(String(title).slice(0, 60));
         continue;
       }
-      rows.push({ kind: "content", sourceId: `cal${ev.CalendarEventId}`, title, dueAt: at, dueField: "event", url, completedAt: null, category: categoryFromTitle(title) });
+      // startAt/endAt/allDay stay on the row so a plain event (a midterm) can be
+      // published as a timed calendar item instead of a deadline.
+      const startAt = isoOrNull(ev.StartDateTime);
+      const endAt = isoOrNull(ev.EndDateTime);
+      rows.push({
+        kind: "content", sourceId: `cal${ev.CalendarEventId}`, title, dueAt: at, dueField: "event", url, completedAt: null, category: categoryFromTitle(title),
+        startAt, endAt: startAt && endAt && endAt > startAt ? endAt : null, allDay: !!ev.IsAllDayEvent,
+      });
     }
     for (const row of rows) {
       const o = opens.get(`${row.kind}:${row.sourceId}`);
@@ -1125,14 +1166,15 @@ export class LiveSource {
       try {
         const topics = listOf(await this.api(`/d2l/api/le/${le}/${ou}/discussions/forums/${f.ForumId}/topics/`));
         total += topics.length;
-        topicsSeen.push(...topics);
+        // The forum id rides along so a posts check can be run per topic later.
+        for (const t of topics) if (t && typeof t === "object") topicsSeen.push({ t, forumId: String(f.ForumId) });
       } catch (e) {
         if (e.code === "signed-out") throw e;
         failures++;
       }
     }
     const seen = seenCounter(rep, "discussions", total);
-    for (const t of topicsSeen) {
+    for (const { t, forumId } of topicsSeen) {
       if (!t || t.TopicId == null) continue;
       if (t.IsHidden === true) {
         seen.stats.hidden++;
@@ -1143,7 +1185,7 @@ export class LiveSource {
       seen.sample(t.Name, { DueDate: t.DueDate ?? null, UnlockEndDate: t.UnlockEndDate ?? null, EndDate: t.EndDate ?? null }, !!dueAt);
       if (!dueAt) continue;
       const opensAt = laterOnly(isoOrNull(t.UnlockStartDate) || isoOrNull(t.StartDate), dueAt);
-      out.push({ kind: "discussion", sourceId: String(t.TopicId), title: String(t.Name || "Discussion"), dueAt, dueField: fieldOf(t.DueDate), opensAt, completedAt: null });
+      out.push({ kind: "discussion", sourceId: String(t.TopicId), forumId, title: String(t.Name || "Discussion"), dueAt, dueField: fieldOf(t.DueDate), opensAt, completedAt: null });
     }
     if (failures && !out.length && failures === forums.length) {
       const err = new Error("Every discussion forum failed");
@@ -1193,6 +1235,14 @@ export class LiveSource {
           seen: new Set([source]),
         };
         if (x.opensAt) item.opensAt = x.opensAt;
+        // A plain calendar event carries real start/end times (a midterm), so
+        // the adapter can publish it as a timed item instead of a deadline.
+        if (x.startAt) {
+          item.startAt = x.startAt;
+          if (x.endAt) item.endAt = x.endAt;
+          item.allDay = !!x.allDay;
+        }
+        if (x.forumId) item.forumId = x.forumId;
         byKey.set(key, item);
         if (!byTitle.has(tkey)) byTitle.set(tkey, item);
         return;
@@ -1313,7 +1363,6 @@ export class LiveSource {
       delete i.srcs;
       delete i.seen;
       delete i.learnUrl;
-      delete i.groupFolder;
     }
     rep.items = items.length;
     rep.submitted = items.filter((i) => i.status === "submitted").length;
@@ -1377,6 +1426,120 @@ export class LiveSource {
       }
     }
     return null;
+  }
+
+  /**
+   * Published, non-hidden news items for a course, flattened to
+   * {id, title, text, at} for the announcement scan.
+   */
+  async readNews(course) {
+    const { le } = await this.ensureVersions();
+    const rows = listOf(await this.api(`/d2l/api/le/${le}/${course.orgUnitId}/news/`));
+    const out = [];
+    for (const n of rows) {
+      if (!n || n.Id == null || n.IsPublished === false || n.IsHidden === true) continue;
+      const body = n.Body || {};
+      const text = typeof body.Text === "string" && body.Text.trim() ? body.Text.trim() : htmlToText(body.Html);
+      out.push({ id: String(n.Id), title: String(n.Title || "").slice(0, 200), text, at: isoOrNull(n.StartDate) });
+    }
+    return out;
+  }
+
+  /**
+   * Grade objects, categories and the student's own grade values for a course.
+   * Each read fails soft on its own: ok is true only when all three answered.
+   * Returns { objects, categories, values, ok }.
+   */
+  async readGrades(course) {
+    const { le } = await this.ensureVersions();
+    const ou = course.orgUnitId;
+    const read = async (p) => {
+      try {
+        return await this.api(p);
+      } catch (e) {
+        if (e.code === "signed-out") throw e;
+        return undefined;
+      }
+    };
+    const objects = await read(`/d2l/api/le/${le}/${ou}/grades/`);
+    const categories = await read(`/d2l/api/le/${le}/${ou}/grades/categories/`);
+    const values = await read(`/d2l/api/le/${le}/${ou}/grades/values/myGradeValues/`);
+    return {
+      objects: listOf(objects),
+      categories: listOf(categories),
+      values: listOf(values),
+      ok: objects !== undefined && categories !== undefined && values !== undefined,
+    };
+  }
+
+  /**
+   * The content table of contents, walked recursively. outlineUrls are topic
+   * links on outline.uwaterloo.ca; syllabusUrls are topics titled like a
+   * syllabus whose link ends in .pdf (made absolute against the Learn base).
+   * Returns { outlineUrls, syllabusUrls: [{title, url}] }.
+   */
+  async readToc(course) {
+    const { le } = await this.ensureVersions();
+    const toc = await this.api(`/d2l/api/le/${le}/${course.orgUnitId}/content/toc`);
+    const outlineUrls = [];
+    const syllabusUrls = [];
+    const walk = (mods) => {
+      for (const m of Array.isArray(mods) ? mods : []) {
+        for (const t of (m && m.Topics) || []) {
+          const url = absolute(this.base, t && t.Url);
+          if (!url) continue;
+          let u;
+          try {
+            u = new URL(url);
+          } catch {
+            continue;
+          }
+          if (u.hostname === "outline.uwaterloo.ca") outlineUrls.push(url);
+          if (/syllabus|course outline/i.test(String(t.Title || "")) && /\.pdf$/i.test(u.pathname)) {
+            syllabusUrls.push({ title: String(t.Title || ""), url });
+          }
+        }
+        walk(m && m.Modules);
+      }
+    };
+    walk(toc && toc.Modules);
+    return { outlineUrls, syllabusUrls };
+  }
+
+  /**
+   * True when the student (myUserId, from whoami's Identifier) has at least one
+   * post in the given discussion topic.
+   */
+  async readTopicPosts(course, forumId, topicId, myUserId) {
+    const { le } = await this.ensureVersions();
+    const posts = await this.paged(
+      `/d2l/api/le/${le}/${course.orgUnitId}/discussions/forums/${forumId}/topics/${topicId}/posts/`
+    );
+    return posts.some((p) => p && String(p.PostingUserId ?? "") === String(myUserId));
+  }
+
+  /**
+   * The latest completed attempt's date for a quiz, or null. Learn answers 403
+   * to students on this route; after the first 403 quizAttemptsForbidden is set
+   * and no more attempts are requested this sync.
+   */
+  async readQuizAttempts(course, quizId) {
+    if (this.quizAttemptsForbidden) return null;
+    const { le } = await this.ensureVersions();
+    let rows;
+    try {
+      rows = listOf(await this.api(`/d2l/api/le/${le}/${course.orgUnitId}/quizzes/${quizId}/attempts/`));
+    } catch (e) {
+      if (e.code === "signed-out") throw e;
+      if (e.code === "forbidden") this.quizAttemptsForbidden = true;
+      return null;
+    }
+    let best = null;
+    for (const a of rows) {
+      const at = a && isoOrNull(a.CompletionDate || a.CompletedDate || a.DateCompleted);
+      if (at && (!best || at > best)) best = at;
+    }
+    return best;
   }
 
   /** Called by the background once a sync ends. */
