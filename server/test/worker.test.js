@@ -676,3 +676,166 @@ test("scheduled cleanup removes expired feeds and orphan aliases", async () => {
   assert.equal(db.feeds.size, 0);
   assert.equal(db.aliases.size, 0);
 });
+
+// --- rendered-feed cache ----------------------------------------------------
+
+test("GET serves the stored render, byte-identical to buildCalendar(state)", async () => {
+  const db = fakeD1();
+  const events = [
+    ev({ id: "quiz", type: "quiz", title: "Quiz", org: "ECE 105" }),
+    ev({ id: "lec", type: "class", title: "Lecture", dueAt: undefined,
+      startAt: "2026-10-01T14:30:00Z" }),
+    ev({ id: "ww", type: "meeting", title: "Interview", source: "waterlooworks",
+      dueAt: undefined, startAt: "2026-10-03T14:30:00Z" })
+  ];
+  const created = await call(req("POST", "/v1/calendars", payload(events)), db);
+  const body = await created.json();
+  const state = JSON.parse(db.feeds.get(body.feedId).calendar_json);
+
+  const main = await call(req("GET", new URL(body.feedUrl).pathname), db);
+  assert.equal(await main.text(), buildCalendar(state));
+  // One render row per public feed id: main + 5 group aliases.
+  assert.equal(db.renders.size, 6);
+  for (const group of Object.values(body.groupFeeds)) {
+    const res = await call(req("GET", new URL(group.feedUrl).pathname), db);
+    const expected = buildCalendar(state, {
+      group: db.aliases.get(group.feedId).feed_group
+    });
+    assert.equal(await res.text(), expected);
+  }
+});
+
+test("a normal GET prepares exactly one SELECT statement", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl, groupFeeds } = await created.json();
+  db.prepares.length = 0;
+  await call(req("GET", new URL(feedUrl).pathname), db);
+  assert.equal(db.prepares.length, 1);
+  assert.match(db.prepares[0], /^SELECT ics, etag, expires_at FROM calendar_renders/);
+  db.prepares.length = 0;
+  await call(req("GET", new URL(groupFeeds.coop.feedUrl).pathname), db);
+  assert.equal(db.prepares.length, 1);
+});
+
+test("ETag + If-None-Match: 304 keeps ETag and Cache-Control, no body", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl } = await created.json();
+  const path = new URL(feedUrl).pathname;
+  const first = await call(req("GET", path), db);
+  assert.equal(first.headers.get("cache-control"), "private, max-age=900");
+  const etag = first.headers.get("etag");
+  assert.match(etag, /^"[0-9a-f]{64}"$/);
+
+  const second = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": etag }
+    }),
+    db
+  );
+  assert.equal(second.status, 304);
+  assert.equal(second.headers.get("etag"), etag);
+  assert.equal(second.headers.get("cache-control"), "private, max-age=900");
+  assert.equal(await second.text(), "");
+
+  // A stale etag doesn't match; wildcard does.
+  const stale = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": '"deadbeef"' }
+    }),
+    db
+  );
+  assert.equal(stale.status, 200);
+  const wild = await call(
+    new Request(`https://feed.test${path}`, {
+      headers: { "if-none-match": "*" }
+    }),
+    db
+  );
+  assert.equal(wild.status, 304);
+});
+
+test("PUT re-renders: alias GET serves the new content and a new etag", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const body = await created.json();
+  const feedPath = new URL(body.feedUrl).pathname;
+  const classesPath = new URL(body.groupFeeds.classes.feedUrl).pathname;
+  const etagBefore = (await call(req("GET", feedPath), db)).headers.get("etag");
+
+  await call(
+    req("PUT", feedPath, payload([
+      ev({ id: "cls", type: "class", title: "Lecture", dueAt: undefined,
+        startAt: "2026-10-01T14:30:00Z" })
+    ]), body.updateToken),
+    db
+  );
+  const aliasRes = await call(req("GET", classesPath), db);
+  assert.ok((await aliasRes.text()).includes("UID:cls@waterloo-all-in-1"));
+  const mainRes = await call(req("GET", feedPath), db);
+  assert.notEqual(mainRes.headers.get("etag"), etagBefore);
+  assert.ok(!(await mainRes.text()).includes("UID:learn:a1@")); // replaced
+});
+
+test("lazy backfill: a pre-migration feed renders once, stores, then reads", async () => {
+  const db = fakeD1();
+  const ctx = { pending: [], waitUntil(p) { this.pending.push(p); } };
+  const { state } = applyPublish(null, payload([ev()]), T1);
+  const feedId = "f".repeat(24);
+  db.feeds.set(feedId, {
+    update_token_hash: "x",
+    calendar_json: serializeState(state).json,
+    expires_at: Date.now() + 60_000,
+    updated_at: Date.parse("2026-09-01T12:00:00Z")
+  });
+  // No render row — this is a feed created before migration 0003.
+  const res = await call(req("GET", `/v1/calendars/${feedId}.ics`), db, ctx);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), buildCalendar(state));
+  await Promise.all(ctx.pending); // the render row write is a waitUntil
+  assert.equal(db.renders.size, 1);
+  assert.equal(db.renders.get(feedId).calendar_id, feedId);
+
+  db.prepares.length = 0;
+  const cached = await call(req("GET", `/v1/calendars/${feedId}.ics`), db);
+  assert.equal(cached.status, 200);
+  assert.equal(db.prepares.length, 1); // now served straight from the render
+});
+
+test("lazy backfill for a group alias renders only that group", async () => {
+  const db = fakeD1();
+  const ctx = { pending: [], waitUntil(p) { this.pending.push(p); } };
+  const { state } = applyPublish(null, payload([
+    ev({ id: "quiz", type: "quiz", title: "Quiz" }),
+    ev({ id: "lec", type: "class", title: "Lecture", dueAt: undefined,
+      startAt: "2026-10-01T14:30:00Z" })
+  ]), T1);
+  const feedId = "f".repeat(24);
+  const aliasId = "9".repeat(24);
+  db.feeds.set(feedId, {
+    update_token_hash: "x",
+    calendar_json: serializeState(state).json,
+    expires_at: Date.now() + 60_000,
+    updated_at: Date.parse("2026-09-01T12:00:00Z")
+  });
+  db.aliases.set(aliasId, { feed_id: feedId, feed_group: "classes" });
+  const res = await call(req("GET", `/v1/calendars/${aliasId}.ics`), db, ctx);
+  const ics = await res.text();
+  assert.ok(ics.includes("UID:lec@waterloo-all-in-1"));
+  assert.ok(!ics.includes("UID:quiz@"));
+  await Promise.all(ctx.pending);
+  assert.ok(db.renders.has(aliasId)); // stored under the public alias id
+});
+
+test("DELETE clears the calendar's render rows", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const body = await created.json();
+  assert.equal(db.renders.size, 6);
+  await call(
+    req("DELETE", new URL(body.feedUrl).pathname, undefined, body.updateToken),
+    db
+  );
+  assert.equal(db.renders.size, 0);
+});

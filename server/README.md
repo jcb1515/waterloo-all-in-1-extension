@@ -13,7 +13,7 @@ Based on gurshh-rain/uwlearn_assignment_extension `calendar-service`
 |---|---|---|---|
 | `POST` | `/v1/calendars` | — | Create a feed. 201 → `{feedId, updateToken, feedUrl, groupFeeds, expiresAt, accepted, skipped}` |
 | `PUT` | `/v1/calendars/<feedId>.ics` | `Authorization: Bearer <updateToken>` | Republish. Same response minus `updateToken`; refreshes expiry and backfills group aliases |
-| `GET` | `/v1/calendars/<feedId>.ics` | URL itself | `text/calendar` feed (main id or a group alias id) |
+| `GET` | `/v1/calendars/<feedId>.ics` | URL itself | `text/calendar` feed (main id or a group alias id); `ETag` + `If-None-Match` → 304; `Cache-Control: private, max-age=900` |
 | `DELETE` | `/v1/calendars/<feedId>.ics` | `Authorization: Bearer <updateToken>` | Delete feed + aliases → 204 |
 | `GET` | `/health` | — | `{ok: true, feeds: <live feed count>}` |
 
@@ -140,6 +140,57 @@ list for that event — `[]` disables alarms for it. No alarms are emitted
 unless the payload asks. Note: **Google Calendar ignores VALARM in subscribed
 feeds**; Apple Calendar and Outlook honour them.
 
+## Rendered-feed cache (free-tier efficiency)
+
+The expensive work (JSON parse → `applyPublish` → ICS render) happens **once at
+PUT/POST time**, not on every read. Publish stores state in
+`calendar_feeds` plus one pre-rendered ICS row per public feed id in
+`calendar_renders` (migration `0003_rendered_feeds.sql`) — six rows per feed:
+the main id and the five group aliases. A normal `GET` is then a single D1
+primary-key lookup of stored text with an `ETag`; a matching
+`If-None-Match` returns `304` with no body. Feeds created before 0003 lazily
+backfill their render row on first `GET`.
+
+### Measured CPU (Node 22, median of 7 runs — `test/bench.test.js`)
+
+| Feed size | Payload | JSON.parse | applyPublish | buildCalendar ×6 | Total |
+|---|---|---|---|---|---|
+| 400 events | 151 KiB | 0.7 ms | 29.6 ms | 201.4 ms | ~232 ms |
+| 3000 events | 1.1 MiB | 2.7 ms | 189.7 ms | 1378.0 ms | ~1570 ms |
+
+**These totals do not fit Cloudflare's free-tier 10 ms CPU limit.** Node is a
+proxy — V8 on the Workers runtime is the same engine, so order of magnitude
+holds. A 3000-event PUT is ~150× the free CPU budget; even a 400-event PUT is
+~20×. Rendering all six feeds dominates (a single 3000-event calendar render
+is ~230 ms). Options, without changing the client protocol:
+
+- **Workers Paid plan** (~$5/month): the "standard" CPU model allows 30 s —
+  trivial headroom at these sizes. This is the realistic choice for >400-event
+  feeds.
+- **Free tier only**: cap stored events low (~100–200; `MAX_EVENTS`/payload
+  size in `worker.js`) and/or lean on the lazy-backfill path — store state at
+  PUT and let each feed's first `GET` render (still ~100–200 ms per render at
+  3000 events, so still over 10 ms; the cap is the part that makes it fit).
+- **Queue/cron rendering**: enqueue a render job at PUT (small CPU), render in
+  a Queue consumer — but Queues are also paid-plan only.
+
+### Free-tier capacity estimate
+
+Limits (per day): 100k requests, 10 ms CPU each, 5M D1 rows read, 100k rows
+written, 5 GB storage.
+
+- **GETs are cheap**: 1 row read, ~1 ms CPU, `304` for unchanged feeds.
+  Google Calendar polls each subscribed feed about every 8–12 h → ~2–3 GETs
+  per feed per day. With all six feeds subscribed that's ~18 reads/user/day,
+  so the 5M D1 rows-read limit supports ~275k users and isn't binding. The
+  100k requests/day cap binds first: **~5.5k users** with all six feeds
+  subscribed (proportionally more when users subscribe to fewer feeds; a 304
+  still counts as a request but only 1 row).
+- **PUTs**: 7 row writes each (1 state + 6 renders) → `100k / 7 ≈ 14k PUTs/day`.
+  The extension PUTs only on change — a few/day/user → not the bottleneck.
+  CPU, not writes, limits PUT size (above).
+- **Storage**: 5 GB ÷ ~1 MB/feed (state + renders) ≈ 5k+ feeds.
+
 ## Privacy
 
 - Feed URLs (including the per-group ones) are unguessable secrets — anyone
@@ -157,7 +208,7 @@ feeds**; Apple Calendar and Outlook honour them.
 npx --yes wrangler@4.129.0 login
 npx --yes wrangler@4.129.0 d1 create waterloo-all-in-1-feed
 # paste the returned database_id into wrangler.jsonc
-npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote   # 0001 + 0002
+npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote   # 0001 + 0002 + 0003
 npx --yes wrangler@4.129.0 deploy
 ```
 

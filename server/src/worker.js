@@ -75,6 +75,21 @@ export const SQL = Object.freeze({
   deleteFeedAliases: "DELETE FROM calendar_feed_aliases WHERE feed_id = ?",
   deleteOrphanAliases:
     "DELETE FROM calendar_feed_aliases WHERE feed_id NOT IN (SELECT id FROM calendar_feeds)",
+  // Rendered ICS cache: one row per public feed id (main id + each group
+  // alias id), written at publish time so GET is a single row read.
+  selectRender:
+    "SELECT ics, etag, expires_at FROM calendar_renders WHERE feed_id = ?",
+  upsertRender:
+    "INSERT INTO calendar_renders (feed_id, calendar_id, ics, etag, expires_at, updated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(feed_id) DO UPDATE SET " +
+    "ics = excluded.ics, etag = excluded.etag, expires_at = excluded.expires_at, " +
+    "updated_at = excluded.updated_at",
+  deleteCalendarRenders:
+    "DELETE FROM calendar_renders WHERE calendar_id = ?",
+  deleteStaleRenders:
+    "DELETE FROM calendar_renders WHERE calendar_id = ? AND feed_id != ? " +
+    "AND feed_id NOT IN (SELECT id FROM calendar_feed_aliases WHERE feed_id = ?)",
+  deleteExpiredRenders: "DELETE FROM calendar_renders WHERE expires_at <= ?",
 });
 
 export default {
@@ -89,6 +104,10 @@ export default {
     context.waitUntil((async () => {
       await env.DB.prepare(SQL.deleteExpiredFeeds).bind(Date.now()).run();
       await env.DB.prepare(SQL.deleteOrphanAliases).bind().run();
+      await env.DB
+        .prepare(SQL.deleteExpiredRenders)
+        .bind(new Date().toISOString())
+        .run();
     })());
   }
 };
@@ -107,7 +126,7 @@ async function routeRequest(request, env, context) {
   const match = url.pathname.match(/^\/v1\/calendars\/([A-Za-z0-9_-]{20,})\.ics$/);
   if (!match) return jsonResponse({ error: "Not found." }, 404);
   const feedId = match[1];
-  if (request.method === "GET") return readFeed(feedId, env, context);
+  if (request.method === "GET") return readFeed(request, feedId, env, context);
   if (request.method === "PUT") return updateFeed(request, feedId, env, url.origin);
   if (request.method === "DELETE") return deleteFeed(request, feedId, env);
   return jsonResponse({ error: "Method not allowed." }, 405);
@@ -130,6 +149,7 @@ async function createFeed(request, env, origin) {
   await env.DB.prepare(SQL.insertFeed)
     .bind(feedId, updateTokenHash, stored.json, expiresAt, now).run();
   const aliases = await ensureAliases(env, feedId);
+  await storeRenders(env, feedId, state, expiresAt);
 
   return jsonResponse({
     feedId,
@@ -162,6 +182,7 @@ async function updateFeed(request, feedId, env, origin) {
   await env.DB.prepare(SQL.updateFeed)
     .bind(stored.json, expiresAt, now, feedId).run();
   const aliases = await ensureAliases(env, feedId);
+  await storeRenders(env, feedId, state, expiresAt);
 
   return jsonResponse({
     feedId,
@@ -173,7 +194,20 @@ async function updateFeed(request, feedId, env, origin) {
   });
 }
 
-async function readFeed(feedId, env, context) {
+async function readFeed(request, feedId, env, context) {
+  // Normal path: one prepared SELECT over the rendered-feed table — no
+  // JSON parse, no rendering. Renders are written at publish time.
+  const render = await env.DB.prepare(SQL.selectRender).bind(feedId).first();
+  if (render) {
+    if (Date.parse(render.expires_at) <= Date.now()) {
+      return jsonResponse({ error: "Calendar feed expired." }, 410);
+    }
+    return icsResponse(request, render.ics, render.etag);
+  }
+
+  // Lazy backfill: feeds created before the renders migration have no
+  // render row. Resolve the feed (or alias), render once, store, serve.
+  const requestedId = feedId;
   let group;
   let record = await env.DB.prepare(SQL.selectFeedForRead).bind(feedId).first();
   if (!record) {
@@ -188,20 +222,87 @@ async function readFeed(feedId, env, context) {
     context?.waitUntil((async () => {
       await env.DB.prepare(SQL.deleteFeed).bind(feedId).run();
       await env.DB.prepare(SQL.deleteFeedAliases).bind(feedId).run();
+      await env.DB.prepare(SQL.deleteCalendarRenders).bind(feedId).run();
     })());
     return jsonResponse({ error: "Calendar feed expired." }, 410);
   }
 
   const state = stateFromStored(safeJsonParse(record.calendar_json), record.updated_at);
   const calendar = buildCalendar(state, group ? { group } : {});
-  return new Response(calendar, {
-    headers: {
-      "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": "inline; filename=waterloo-all-in-1.ics",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff"
+  const etag = await etagOf(calendar);
+  const renderStmt = env.DB.prepare(SQL.upsertRender).bind(
+    requestedId,
+    feedId,
+    calendar,
+    etag,
+    new Date(record.expires_at).toISOString(),
+    new Date().toISOString()
+  );
+  if (context?.waitUntil) context.waitUntil(renderStmt.run());
+  else await renderStmt.run();
+  return icsResponse(request, calendar, etag);
+}
+
+/** Strong quoted ETag over the ICS bytes: "sha256hex". */
+async function etagOf(ics) {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(ics));
+  const hex = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `"${hex}"`;
+}
+
+/** Serve a stored ICS render, honouring If-None-Match. */
+function icsResponse(request, ics, etag) {
+  const headers = {
+    "Content-Type": "text/calendar; charset=utf-8",
+    "Content-Disposition": "inline; filename=waterloo-all-in-1.ics",
+    "Cache-Control": "private, max-age=900",
+    ETag: etag,
+    "X-Content-Type-Options": "nosniff"
+  };
+  const inm = request.headers.get("if-none-match");
+  if (inm) {
+    const tags = inm.split(",").map((t) => t.trim());
+    if (tags.includes("*") || tags.includes(etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          "Cache-Control": headers["Cache-Control"]
+        }
+      });
     }
-  });
+  }
+  return new Response(ics, { headers });
+}
+
+/**
+ * Render the main feed plus every group alias and upsert one
+ * calendar_renders row per public feed id (D1 batch), then delete render
+ * rows for ids no longer published.
+ */
+async function storeRenders(env, feedId, state, expiresAtMs) {
+  const aliases =
+    (await env.DB.prepare(SQL.selectFeedAliases).bind(feedId).all()).results || [];
+  const expiresIso = new Date(expiresAtMs).toISOString();
+  const updatedIso = new Date().toISOString();
+  const rows = [[feedId, buildCalendar(state)]];
+  for (const alias of aliases) {
+    rows.push([alias.id, buildCalendar(state, { group: alias.feed_group })]);
+  }
+  const statements = [];
+  for (const [publicId, ics] of rows) {
+    statements.push(
+      env.DB
+        .prepare(SQL.upsertRender)
+        .bind(publicId, feedId, ics, await etagOf(ics), expiresIso, updatedIso)
+    );
+  }
+  statements.push(
+    env.DB.prepare(SQL.deleteStaleRenders).bind(feedId, feedId, feedId)
+  );
+  await env.DB.batch(statements);
 }
 
 async function deleteFeed(request, feedId, env) {
@@ -212,6 +313,7 @@ async function deleteFeed(request, feedId, env) {
   }
   await env.DB.prepare(SQL.deleteFeed).bind(feedId).run();
   await env.DB.prepare(SQL.deleteFeedAliases).bind(feedId).run();
+  await env.DB.prepare(SQL.deleteCalendarRenders).bind(feedId).run();
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 
