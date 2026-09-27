@@ -1,9 +1,8 @@
 // @ts-check
-// The source adapters the scheduler drives. "learn" is the legacy WATnow
-// bridge until Window 2's adapter lands; the rest are stubs the other
-// windows fill in. "outlook"/"gmail" both map to the email adapter.
+// The source adapters the scheduler drives. "outlook"/"gmail" both map to
+// the email adapter.
 
-import learn from "./legacy-learn.js";
+import learn from "../sources/learn/index.js";
 import outline from "../sources/outline/index.js";
 import portal from "../sources/portal/index.js";
 import email from "../sources/email/index.js";
@@ -20,10 +19,10 @@ export const ADAPTERS = [learn, outline, portal, email, waterlooworks, discord];
  */
 export const SOURCE_STAGE = Object.freeze({
   learn: "live",
-  outline: "soon",
+  outline: "live",
   portal: "soon",
   outlook: "soon",
-  waterlooworks: "soon",
+  waterlooworks: "live",
   discord: "soon",
 });
 
