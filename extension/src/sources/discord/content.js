@@ -15,8 +15,9 @@ import { readLocation, inventoryExtract, readMessages } from "./dom.js";
 import { hashString } from "../../capture/redact.js";
 
 (() => {
-  if (!/^https:\/\/discord\.com\/channels\//.test(location.href)) return;
-
+  // No early return on the path: Discord is an SPA — it loads on /app,
+  // /login, etc. and navigates client-side. The observer stays up and
+  // tick() bails whenever readLocation sees a non-/channels/ URL.
   const THROTTLE_MS = 3000;
   const SEEN_CAP = 2000;
   /** @type {string|null} */

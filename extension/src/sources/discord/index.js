@@ -134,15 +134,48 @@ function pruneMessageItems(items, state, nowMs) {
 
 /**
  * Fold fresh candidates into lastGood.messages: a re-read message replaces
- * its own items (edits), then prune/cap.
+ * its own items (edits), then prune/cap. The DOM path produces the same ids
+ * as REST but weaker titles/snippets — a DOM read of a message that already
+ * has REST-derived items only replaces them when the derived id set differs
+ * (the date changed, i.e. an edit). REST always wins.
  */
-function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs) {
+function accumulateMessages(prevItems, freshItems, messageIds, state, nowMs, via) {
   const present = new Set((messageIds || []).filter(Boolean));
+  /** @type {Map<string, Set<string>>} */
+  const freshIdsByMsg = new Map();
+  for (const item of freshItems || []) {
+    const mid = String(item?.meta?.messageId || "");
+    const set = freshIdsByMsg.get(mid) || new Set();
+    set.add(item.id);
+    freshIdsByMsg.set(mid, set);
+  }
+  // DOM reads that derive the identical ids leave REST items in place.
+  const keepRest = new Set();
+  const kept = (prevItems || []).filter((item) => {
+    const mid = String(item?.meta?.messageId || "");
+    if (!present.has(mid)) return true;
+    if (via === "dom" && item?.meta?.via === "rest") {
+      const oldIds = new Set(
+        (prevItems || [])
+          .filter((p) => String(p?.meta?.messageId || "") === mid)
+          .map((p) => p.id)
+      );
+      const newIds = freshIdsByMsg.get(mid) || new Set();
+      if (
+        oldIds.size === newIds.size &&
+        [...oldIds].every((id) => newIds.has(id))
+      ) {
+        keepRest.add(mid);
+        return true;
+      }
+    }
+    return false;
+  });
   const combined = [
-    ...(prevItems || []).filter(
-      (item) => !present.has(String(item?.meta?.messageId || ""))
+    ...kept,
+    ...(freshItems || []).filter(
+      (item) => !keepRest.has(String(item?.meta?.messageId || ""))
     ),
-    ...(freshItems || []),
   ];
   return pruneMessageItems(combined, state, nowMs);
 }
@@ -183,7 +216,8 @@ function updateChannelStats(channelRec, messages, itemCount) {
  * Shared message pipeline for REST bodies and DOM message extracts.
  * @param {Record<string, any>} state
  * @param {any[]} messages REST-shaped messages (domMessageToRest output ok)
- * @param {{channelId?: string, guildId?: string, fromMentions?: boolean}} src
+ * @param {{channelId?: string, guildId?: string, fromMentions?: boolean,
+ *   via?: "rest"|"dom"}} src
  * @param {import("../../core/contract.js").SyncContext} ctx
  * @param {number} nowMs @param {string} nowIso @param {string} at
  */
@@ -224,6 +258,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
       channelId,
       channelName: loc?.channel?.name,
       team: srv?.team,
+      via: src.via,
       nowIso,
     });
     fresh.push(...items);
@@ -233,6 +268,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
       if (item.type === "meeting" && item.startAt && !item.allDay) {
         pushMeetingLog(state, {
           guildId, channelId,
+          messageId: String(msg.id),
           key: meetingKey(item.title),
           startAt: item.startAt, endAt: item.endAt,
           url: item.url, at,
@@ -245,7 +281,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
       if (hint) {
         pushMeetingLog(state, {
           guildId, channelId,
-          key: meetingKey(firstLine(stripped)),
+          messageId: String(msg.id),
           url: guildId
             ? `https://discord.com/channels/${guildId}/${channelId}/${msg.id}`
             : undefined,
@@ -276,15 +312,27 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
     (item) => !dmSet.has(String(item?.meta?.channelId || ""))
   );
   state.lastGood.messages = {
-    items: accumulateMessages(prevItems, fresh, seenIds, state, nowMs),
+    items: accumulateMessages(prevItems, fresh, seenIds, state, nowMs, src.via || "rest"),
     at,
   };
 }
 
+/**
+ * Append to meetingLog, replacing any earlier entry from the same message
+ * (channelId + messageId + fromText) — re-reads and REST/DOM doubles don't
+ * churn the cap. Entries older than MEETING_LOG_AGE_DAYS drop out.
+ */
 function pushMeetingLog(state, entry) {
   const cutoff = Date.parse(entry.at || "") - MEETING_LOG_AGE_DAYS * DAY_MS;
   const log = (state.meetingLog || []).filter(
-    (e) => !Number.isFinite(cutoff) || Date.parse(e?.at || "") >= cutoff
+    (e) =>
+      (!Number.isFinite(cutoff) || Date.parse(e?.at || "") >= cutoff) &&
+      !(
+        entry.messageId &&
+        e.channelId === entry.channelId &&
+        e.messageId === entry.messageId &&
+        Boolean(e.fromText) === Boolean(entry.fromText)
+      )
   );
   log.push(entry);
   state.meetingLog = log.slice(-MEETING_LOG_CAP);
@@ -448,8 +496,24 @@ export default {
     const now = ctx.now || new Date();
     const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
     const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
-    const state = { ...prev, guilds: { ...prev.guilds }, lastGood: { ...prev.lastGood }, watch: { ...prev.watch } };
-    const items = ctx.settings?.enabled === false ? [] : outputItems(state, ctx.settings || {}, nowMs, nowIso);
+    const state = {
+      ...prev,
+      guilds: JSON.parse(JSON.stringify(prev.guilds || {})),
+      lastGood: { ...prev.lastGood },
+      watch: { ...prev.watch },
+    };
+    if (prev.sweep) {
+      state.sweep = {
+        startedAt: prev.sweep.startedAt,
+        done: { ...(prev.sweep.done || {}) },
+      };
+    }
+    // Settings may have changed since the last inventory — re-resolve watch.
+    recomputeWatch(state, ctx.settings || {}, nowIso);
+    const items =
+      ctx.settings?.enabled === false
+        ? []
+        : outputItems(state, ctx.settings || {}, nowMs, nowIso);
     return { items, complete: false, session: "no-tab", state };
   },
 
@@ -491,6 +555,10 @@ export default {
         state,
       };
       const finish = () => {
+        // Settings (watched/userId/roleIds/keywords) can change between
+        // payloads — re-resolve watch before filtering output. Existing
+        // sweeps keep their startedAt.
+        recomputeWatch(state, settings, nowIso);
         result.items =
           settings.enabled === false ? [] : outputItems(state, settings, nowMs, nowIso);
         return result;
@@ -532,6 +600,7 @@ export default {
             channelId: norm.channelId,
             guildId: norm.guildId,
             fromMentions: norm.kind === "mentions",
+            via: "rest",
           },
           ctx,
           nowMs,
@@ -606,7 +675,7 @@ export default {
                 rest.guild_id = loc.guildId;
                 return rest;
               }),
-              { channelId: loc.channelId, guildId: loc.guildId },
+              { channelId: loc.channelId, guildId: loc.guildId, via: "dom" },
               ctx,
               nowMs,
               nowIso,

@@ -140,6 +140,11 @@ suggestion on its own (`weeks: 0, fromText: true`).
 
 - Every selector in `selectors.js` is a best guess from the discovery
   report + accessibility attributes — verify against live DOM.
+- Whether Discord renders `<t:>` markers as `<time datetime>` inside
+  message content is UNVERIFIED. `dom.js` collects those `time` elements
+  into `times`; if the attribute/element guess is wrong the DOM path still
+  extracts dates from the rendered text (tentative confidence), it just
+  loses the exact-instant fast path.
 - `settings.keywords` classify as meeting triggers; if users expect a
   keyword to make deadlines, split the setting.
 - Only the FIRST date hit per message produces an item; multi-date

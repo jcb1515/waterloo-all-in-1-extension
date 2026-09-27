@@ -185,3 +185,40 @@ test("non-default/reply types and empty content produce nothing", () => {
   );
   assert.equal(candidatesForMessage(msg("   "), O()).length, 0);
 });
+
+test("multi-line DOM message: the title is line one only", () => {
+  const dom = domMessageToRest(
+    {
+      messageId: "9004",
+      timestamp: "2026-10-01T20:12:00.000Z",
+      content: "meeting Thursday at 6pm\nsecond line that is private",
+      times: [],
+      roleMentions: [],
+      mentionsMe: false,
+    },
+    "2001"
+  );
+  const [item] = candidatesForMessage(dom, O({ via: "dom" }));
+  assert.equal(item.title, "meeting Thursday at 6pm");
+  assert.ok(!JSON.stringify(item).includes("private"));
+  assert.equal(item.meta.via, "dom");
+});
+
+test("an @everyone DOM ping is not assignedToMe — deadline, not task", () => {
+  const dom = domMessageToRest(
+    {
+      messageId: "9005",
+      timestamp: "2026-10-01T20:15:00.000Z",
+      content: "@everyone please submit the form by October 9 at 5pm",
+      times: [],
+      roleMentions: ["@everyone"], // rendered with the roleMention class
+      mentionsMe: true,            // Discord highlights it for everyone
+    },
+    "2001"
+  );
+  assert.equal(dom.mention_everyone, true);
+  assert.equal(dom.domMentionsMe, false);
+  const [item] = candidatesForMessage(dom, O({ via: "dom" }));
+  assert.equal(item.type, "deadline");
+  assert.equal(item.meta.assignedToMe, false);
+});

@@ -43,6 +43,45 @@ export function readLocation(href) {
 const textOf = (el) => String(el?.textContent || "").replace(/\s+/g, " ").trim();
 
 /**
+ * Element text with line structure preserved: <br> and block boundaries
+ * become "\n", inline whitespace collapses to one space. Discord renders
+ * message line breaks as <br> inside the content element; textContent
+ * alone would flatten them (making "first line" mean the whole body).
+ * @param {Element|null} el
+ */
+function textWithBreaks(el) {
+  let out = "";
+  /** @param {any} node */
+  const walk = (node) => {
+    for (const child of node?.childNodes || []) {
+      if (child.nodeType === 3 /* TEXT_NODE */) {
+        out += child.nodeValue || "";
+      } else if (String(child.nodeName || "").toUpperCase() === "BR") {
+        out += "\n";
+      } else {
+        const before = out.length;
+        walk(child);
+        // A block-level child that added text is a visual line break.
+        if (
+          out.length > before &&
+          /^(DIV|P|LI|H[1-6]|SECTION|ARTICLE|TR|PRE|BLOCKQUOTE)$/.test(
+            String(child.nodeName || "").toUpperCase()
+          ) &&
+          !out.endsWith("\n")
+        ) {
+          out += "\n";
+        }
+      }
+    }
+  };
+  walk(el);
+  return out
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n+ */g, "\n")
+    .trim();
+}
+
+/**
  * The server rail -> [{guildId, name, unread, mentions}]. Discord prefixes
  * the aria-label with unread state ("3 mentions, X" / "Unread messages, X").
  * @param {Document} doc
@@ -161,7 +200,7 @@ export function readMessages(doc) {
       if (!im) continue;
       const contentEl =
         li.querySelector(`[id^="${MESSAGE_CONTENT_PREFIX}"]`) || null;
-      const content = textOf(contentEl).slice(0, 4000);
+      const content = textWithBreaks(contentEl).slice(0, 4000);
       const timeEl = li.querySelector(MESSAGE_TIME_SEL);
       const timestamp = String(timeEl?.getAttribute("datetime") || "") || undefined;
       const times = [];

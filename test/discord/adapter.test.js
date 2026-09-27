@@ -289,6 +289,99 @@ test("mentions payload infers identity; result folds through applyResult", async
   assert.equal(raw2.items.length, 2);
 });
 
+test("DOM read keeps REST items when the derived ids match, replaces on edit", async () => {
+  const ctx = makeCtx();
+  const r1 = await adapter.observe.parse(dom(inventory), ctx);
+  const r2 = await adapter.observe.parse(
+    net(`${API}/channels/${CH}/messages?limit=50`, [
+      restMsg("9401", CH, `design review <t:${TS_OCT8_6PM}>`),
+    ]),
+    makeCtx(r1.state)
+  );
+  assert.equal(r2.items[0].meta.via, "rest");
+
+  // Same message + same instant via DOM: identical ids → REST item kept.
+  const domSame = {
+    v: 1, type: "messages",
+    location: { guildId: G, channelId: CH },
+    messages: [{
+      channelId: CH, messageId: "9401",
+      timestamp: "2026-10-01T19:00:00.000Z",
+      content: "design review October 8 at 6 PM", // renders differently, same instant
+      times: ["2026-10-08T22:00:00.000Z"],
+      roleMentions: [], mentionsMe: false,
+    }],
+  };
+  const r3 = await adapter.observe.parse(dom(domSame), makeCtx(r2.state));
+  const kept = r3.state.lastGood.messages.items.find(
+    (i) => i.meta?.messageId === "9401"
+  );
+  assert.equal(kept.meta.via, "rest"); // not flip-flopped to the DOM text
+
+  // An edited DOM read (different date) DOES replace — new id set. Discord
+  // re-renders the text on edit, so the rendered date moves too.
+  const domEdited = {
+    ...domSame,
+    messages: [{
+      ...domSame.messages[0],
+      content: "design review October 15 at 6 PM",
+      times: ["2026-10-15T22:00:00.000Z"],
+    }],
+  };
+  const r4 = await adapter.observe.parse(dom(domEdited), makeCtx(r3.state));
+  const replaced = r4.state.lastGood.messages.items.find(
+    (i) => i.meta?.messageId === "9401"
+  );
+  assert.equal(replaced.meta.via, "dom");
+  assert.equal(replaced.id, `discord:${CH}:9401:2026-10-15T22:00:00.000Z`);
+});
+
+test("meetingLog dedupes re-reads of the same message", async () => {
+  const ctx = makeCtx();
+  const r1 = await adapter.observe.parse(dom(inventory), ctx);
+  const body = [
+    restMsg("9550", CH, `weekly sync <t:${TS_OCT8_6PM}>`),
+    restMsg("9551", CH, `meeting October 9 at 6 PM`),
+  ];
+  let state = r1.state;
+  for (let i = 0; i < 3; i++) {
+    state = (
+      await adapter.observe.parse(
+        net(`${API}/channels/${CH}/messages?limit=50`, body),
+        makeCtx(state)
+      )
+    ).state;
+  }
+  const entries = state.meetingLog.filter((e) => e.channelId === CH);
+  const keys = entries.map((e) => `${e.channelId}|${e.messageId}`);
+  assert.equal(new Set(keys).size, keys.length); // no dupes across re-reads
+  assert.equal(entries.length, 2); // one occurrence entry per message
+});
+
+test("a settings.watched change applies without a new inventory", async () => {
+  const ctx = makeCtx();
+  const r1 = await adapter.observe.parse(dom(inventory), ctx);
+  // memes is never suggested — an item there is stored but hidden.
+  const r2 = await adapter.observe.parse(
+    net(`${API}/channels/${CH_MEMES}/messages?limit=50`, [
+      restMsg("9201", CH_MEMES, `meeting October 8 at 6 PM`),
+    ]),
+    makeCtx(r1.state)
+  );
+  assert.equal(r2.items.length, 0);
+  // Now the user pins memes via settings — a payload-free setting change.
+  const r3 = await adapter.observe.parse(
+    net(`${API}/channels/${CH}/messages?limit=50`, []),
+    makeCtx(r2.state, {
+      settings: { watched: { WATonomous: { channels: ["memes"] } } },
+    })
+  );
+  assert.deepEqual(r3.state.watch[G].channelIds, [CH_MEMES]);
+  assert.equal(r3.state.watch[G].from, "settings");
+  assert.equal(r3.items.length, 1);
+  assert.equal(r3.items[0].meta.channelId, CH_MEMES);
+});
+
 test("sync returns the cached filtered union", async () => {
   const ctx = makeCtx();
   const r1 = await adapter.observe.parse(dom(inventory), ctx);

@@ -69,7 +69,7 @@ test("readChannels: categories, types, unread/mentions, limited", () => {
 
 test("readMessages: ids, timestamps, <time> datetimes, mentionsMe", () => {
   const msgs = readMessages(doc("chat-messages.html"));
-  assert.equal(msgs.length, 3);
+  assert.equal(msgs.length, 4);
   const [m1, m2] = msgs;
   assert.equal(m1.channelId, "2000000000000000001");
   assert.equal(m1.messageId, "9000000000000000001");
@@ -78,6 +78,8 @@ test("readMessages: ids, timestamps, <time> datetimes, mentionsMe", () => {
   assert.equal(m1.mentionsMe, false);
   assert.equal(m2.mentionsMe, true);
   assert.deepEqual(m2.roleMentions, ["@electrical"]);
+  // <br> becomes a real newline — the title's "first line" means line one.
+  assert.equal(msgs[3].content, "meeting Thursday at 6pm\nsecond line that is private");
 });
 
 test("inventoryExtract bundles location + guilds + channels", () => {

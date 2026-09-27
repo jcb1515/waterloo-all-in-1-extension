@@ -177,20 +177,29 @@ export function domMessageToRest(dom, channelId) {
     })
     .filter(Boolean)
     .join(" ");
+  const content = `${String(dom?.content || "").trim()}${markers ? " " + markers : ""}`;
+  // Discord highlights @everyone/@here the same as a personal ping (and
+  // renders them with the roleMention class). A "mention" with no real
+  // role left over is a broadcast — never counts as pinging me.
+  const realRoles = (dom?.roleMentions || []).filter(
+    (r) => !/^@(everyone|here)$/i.test(String(r).trim())
+  );
+  const everyoneOnly =
+    realRoles.length === 0 && /@(everyone|here)\b/i.test(content);
   return {
     id: String(dom?.messageId || ""),
     channel_id: String(channelId || ""),
-    content: `${String(dom?.content || "").trim()}${markers ? " " + markers : ""}`,
+    content,
     timestamp: dom?.timestamp,
     edited_timestamp: null,
     mentions: [],
     mention_roles: [],
-    mention_everyone: false,
+    mention_everyone: everyoneOnly,
     type: 0,
     // DOM can't tell who a message mentions; the highlighted style is the
-    // only signal — treated as "this pinged me".
-    domMentionsMe: dom?.mentionsMe === true,
-    domRoleMentions: dom?.roleMentions || [],
+    // only signal — treated as "this pinged me" unless it's @everyone.
+    domMentionsMe: dom?.mentionsMe === true && !everyoneOnly,
+    domRoleMentions: realRoles,
   };
 }
 
@@ -207,6 +216,7 @@ export function domMessageToRest(dom, channelId) {
  *   <t:> -> "event" rule)
  * @param {string} [o.guildId] @param {string} [o.channelId]
  * @param {string} [o.channelName] @param {string} [o.team]
+ * @param {"rest"|"dom"} [o.via]  which read path produced this message
  * @param {string} o.nowIso
  * @returns {Item[]}
  */
@@ -359,6 +369,7 @@ export function candidatesForMessage(msg, o) {
       messageId,
       assignedToMe,
       trigger,
+      via: o.via === "dom" ? "dom" : "rest",
       undated: undated || undefined,
       weekdayMismatch: hit?.weekdayMismatch || undefined,
     },
