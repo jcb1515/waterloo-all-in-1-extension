@@ -32,6 +32,7 @@ test("learn adapter: happy path", async () => {
   assert.ok(a1, "dropbox 42 item");
   assert.equal(a1.type, "deadline");
   assert.equal(a1.category, "assignment");
+  assert.deepEqual(a1.meta.facts, [{ label: "Submission", value: "Dropbox" }]);
   assert.equal(a1.status, "submitted");
   assert.ok(a1.url && a1.url.includes("db=42"), "deep-link url");
   assert.equal(a1.confidence, "exact");
@@ -109,6 +110,46 @@ test("learn adapter: happy path", async () => {
   }
   assert.equal(result.session, "signed-in");
   assert.ok(result.state && result.state.versions && result.state.versions.le, "state.versions set");
+});
+
+test("learn adapter: group memberships give course.group", async () => {
+  const { ctx } = makeCtx(learnRoutes());
+  const result = await adapter.sync(ctx);
+  const ece = (result.courses || []).find((c) => c.code === "ECE 105");
+  assert.equal(ece.group, "5");
+  assert.ok(result.readOk.includes("1001:groups"));
+});
+
+test("learn adapter: a groups 403 degrades quietly", async () => {
+  const routes = learnRoutes();
+  routes.set(`/d2l/api/lp/V/1001/groupcategories/`, { status: 403, json: {} });
+  const { ctx } = makeCtx(routes);
+  const result = await adapter.sync(ctx);
+  const ece = (result.courses || []).find((c) => c.code === "ECE 105");
+  assert.equal(ece.group, undefined);
+  assert.ok(!result.readOk.includes("1001:groups"));
+  assert.equal(result.complete, true);
+  // Same items as the happy path — groups never produce items.
+  const base = await adapter.sync(makeCtx(learnRoutes()).ctx);
+  assert.deepEqual(
+    result.items.map((i) => i.id).sort(),
+    base.items.map((i) => i.id).sort(),
+  );
+});
+
+test("learn adapter: several group numbers stay unset", async () => {
+  const routes = learnRoutes();
+  routes.set(`/d2l/api/lp/V/1001/groupcategories/11/groups/`, {
+    json: [
+      { GroupId: 1, Name: "Group 4", Enrollments: [8001] },
+      { GroupId: 2, Name: "Group 5", Enrollments: [8001] },
+    ],
+  });
+  const { ctx } = makeCtx(routes);
+  const result = await adapter.sync(ctx);
+  const ece = (result.courses || []).find((c) => c.code === "ECE 105");
+  assert.equal(ece.group, undefined);
+  assert.ok(result.readOk.includes("1001:groups"));
 });
 
 test("learn adapter: a failing quizzes route fails completeness, not the course", async () => {

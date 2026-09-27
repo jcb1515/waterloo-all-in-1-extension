@@ -33,6 +33,7 @@ function emptyCourseRoutes(routes, ou) {
   routes.set(`/d2l/api/le/V/${ou}/grades/categories/`, { json: [] });
   routes.set(`/d2l/api/le/V/${ou}/grades/values/myGradeValues/`, { json: [] });
   routes.set(`/d2l/api/le/V/${ou}/content/toc`, { json: { Modules: [] } });
+  routes.set(`/d2l/api/lp/V/${ou}/groupcategories/`, { json: [] });
 }
 
 /** The happy-path route map. Pass overrides to makeCtx to break single routes. */
@@ -158,10 +159,22 @@ export function learnRoutes() {
     },
   });
 
+  // Lab groups: the student (whoami Identifier 8001) is in Group 5.
+  routes.set(`/d2l/api/lp/V/${OU.ECE}/groupcategories/`, {
+    json: [{ GroupCategoryId: 11, Name: "Lab Groups" }],
+  });
+  routes.set(`/d2l/api/lp/V/${OU.ECE}/groupcategories/11/groups/`, {
+    json: [
+      { GroupId: 1, Name: "Group 4", Enrollments: [999] },
+      { GroupId: 2, Name: "Group 5", Enrollments: [8001] },
+    ],
+  });
+
   /* ---- MATH 117 (1002): one deadline, everything else empty ---- */
   routes.set(`/d2l/api/le/V/${OU.MATH}/dropbox/folders/`, {
     json: [{ Id: 44, Name: "Assignment 2", DueDate: "2026-10-05T03:59:00.000Z" }],
   });
+  routes.set(`/d2l/api/lp/V/${OU.MATH}/groupcategories/`, { json: [] });
   routes.set(`/d2l/api/le/V/${OU.MATH}/dropbox/folders/44/submissions/mysubmissions/`, { json: [] });
   routes.set(`/d2l/api/le/V/${OU.MATH}/quizzes/`, { json: [] });
   routes.set(`/d2l/api/le/V/${OU.MATH}/discussions/forums/`, { json: [] });

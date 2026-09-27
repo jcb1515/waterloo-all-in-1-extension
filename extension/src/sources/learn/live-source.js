@@ -1507,6 +1507,35 @@ export class LiveSource {
   }
 
   /**
+   * The distinct "Group N" numbers the student belongs to in this course,
+   * read through groupcategories -> groups. Optional metadata: the caller
+   * treats any thrown error as "no groups" (Learn 403s this for some
+   * courses). Groups the student is in are those whose Enrollments contain
+   * the whoami Identifier (compared numerically). VERIFY: the groups list may
+   * be paged on courses with many groups.
+   */
+  async readGroups(course) {
+    const { lp } = await this.ensureVersions();
+    const ou = course.orgUnitId;
+    const cats = listOf(await this.api(`/d2l/api/lp/${lp}/${ou}/groupcategories/`));
+    const me = this.userId == null ? null : Number(this.userId);
+    const numbers = new Set();
+    for (const c of cats) {
+      const cid = c && (c.GroupCategoryId ?? c.Id);
+      if (cid == null) continue;
+      const groups = listOf(await this.api(`/d2l/api/lp/${lp}/${ou}/groupcategories/${cid}/groups/`));
+      for (const g of groups) {
+        const mine =
+          me != null && (Array.isArray(g && g.Enrollments) ? g.Enrollments : []).some((id) => Number(id) === me);
+        if (!mine) continue;
+        const m = String(g.Name || "").match(/\bgroup\s*0*(\d+)\b/i);
+        if (m) numbers.add(Number(m[1]));
+      }
+    }
+    return [...numbers].sort((a, b) => a - b);
+  }
+
+  /**
    * True when the student (myUserId, from whoami's Identifier) has at least one
    * post in the given discussion topic.
    */

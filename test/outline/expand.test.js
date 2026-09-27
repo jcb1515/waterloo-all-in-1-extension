@@ -92,6 +92,35 @@ test("MATH117 midterm from TST and tentative final window", () => {
   assert.equal(ta.weight, 14);
 });
 
+test("class items carry Instructor, Week topic and Office hours facts", () => {
+  const { items, course } = build("ECE190");
+  const cls = items.find((i) => i.type === "class");
+  const facts = Object.fromEntries((cls.meta.facts || []).map((f) => [f.label, f.value]));
+  assert.equal(facts.Instructor, "Instructor"); // redacted placeholder
+  assert.match(facts["Office hours"] || "", /Tuesdays 10:30am - 12:30pm in EIT 3114/);
+  // The whole office-hours block, bullet markers stripped, no dangling "and".
+  assert.ok(course.officeHours.startsWith("Tuesdays 10:30am"), course.officeHours);
+  assert.ok(!/and\s*$/i.test(course.officeHours));
+  assert.match(course.officeHours, /Thursdays 10:30am - 12:30pm in EIT 3114/);
+
+  // A class with a plan-week details line repeats it as the Week topic fact.
+  const m = build("MATH117");
+  const withTopic = m.items.find((i) => i.type === "class" && i.details);
+  assert.ok(withTopic);
+  const tf = Object.fromEntries((withTopic.meta.facts || []).map((f) => [f.label, f.value]));
+  assert.equal(tf["Week topic"], withTopic.details);
+  assert.equal(tf.Instructor, "Instructor");
+});
+
+test("exam coverage notes become a Covers fact", () => {
+  const { items } = build("ECE105");
+  const mid = items.find((i) => i.id === "outline:ECE105:exam:midterm");
+  assert.match(mid.details, /Energy Conservation/);
+  const covers = (mid.meta.facts || []).find((f) => f.label === "Covers");
+  assert.ok(covers);
+  assert.match(covers.value, /Energy Conservation/);
+});
+
 test("ECE105 midterm dedupe and prose items", () => {
   const { items, course } = build("ECE105");
   const mids = items.filter((i) => i.category === "midterm");

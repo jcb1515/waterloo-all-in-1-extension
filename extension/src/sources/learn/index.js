@@ -10,7 +10,7 @@
 
 import { itemId, normCourseCode } from "../../core/contract.js";
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
-import { classify, isDueish, TRIGGER_RE } from "./classify.js";
+import { classify, factsOf, isDueish, sentenceOf, TRIGGER_RE } from "./classify.js";
 import { cleanEventTitle, LiveSource, liveBase } from "./live-source.js";
 
 /** @typedef {import("../../core/contract.js").FetchResult} FetchResult */
@@ -35,6 +35,8 @@ const NEWS_WINDOW_MS = 60 * DAY_MS;
 const POSTS_LOOKBACK_MS = 14 * DAY_MS;
 const POSTS_LOOKAHEAD_MS = 30 * DAY_MS;
 const TOOL_SCOPES = ["dropbox", "quizzes", "discussions", "feed", "calendar"];
+/** Tool kind -> the Submission fact label the calendar renders. */
+const SUBMISSION = { dropbox: "Dropbox", quiz: "Quiz", discussion: "Discussion" };
 
 /**
  * A contract FetchResult -> LiveSource's fetch result shape.
@@ -60,40 +62,6 @@ function toLive(r) {
     out.body = String(r.text || "").slice(0, 2000);
   }
   return out;
-}
-
-/** The sentence a date hit sits in: text up to the nearest sentence boundary on each side. */
-function sentenceOf(text, index, length) {
-  // . ! ? only end a sentence when a new uppercase sentence (or the end of the
-  // text) follows, so abbreviations ("Ch. 3", "Oct. 9") don't cut it. \n always
-  // ends one.
-  const isBoundary = (i) => {
-    if (text[i] === "\n") return true;
-    if (text[i] !== "." && text[i] !== "!" && text[i] !== "?") return false;
-    const rest = text.slice(i + 1).replace(/^\s+/, "");
-    return rest === "" || /^[A-Z]/.test(rest);
-  };
-  let start = 0;
-  for (let i = index - 1; i >= 0; i--) {
-    if (isBoundary(i)) {
-      start = i + 1;
-      break;
-    }
-  }
-  let end = text.length;
-  for (let i = index + length; i < text.length; i++) {
-    if (isBoundary(i)) {
-      end = i + 1;
-      break;
-    }
-  }
-  if (end - start > 300) {
-    // A sentence longer than the cap is cropped around the hit, not at its start.
-    const mid = index + Math.floor(length / 2);
-    start = Math.max(0, mid - 150);
-    end = Math.min(text.length, start + 300);
-  }
-  return text.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 /** A normalised title for grade matching: case/spacing-insensitive, Learn decorations off. */
@@ -214,6 +182,7 @@ const adapter = {
               listUrl: row.listUrl,
               completedAt: row.completedAt || undefined,
               groupFolder: row.groupFolder || undefined,
+              facts: factsOf([["Submission", SUBMISSION[row.kind]]]),
             },
           };
           if (cls.category) item.category = cls.category;
@@ -337,6 +306,21 @@ const adapter = {
           ctx.log(`learn: ${course.code} toc: ${errReason(e)}`);
         }
 
+        // Group memberships are optional metadata: a failure never touches
+        // complete. One distinct "Group N" number is the student's group;
+        // several mean ambiguous.
+        /** @type {string|undefined} */
+        let group;
+        try {
+          const nums = await src.readGroups(course);
+          readOk.push(`${ou}:groups`);
+          if (nums.length === 1) group = String(nums[0]);
+          else if (nums.length > 1) ctx.log(`learn: ${course.code} groups ambiguous (${nums.join(", ")})`);
+        } catch (e) {
+          if (isSignedOut(e)) throw e;
+          ctx.log(`learn: ${course.code} groups: ${errReason(e)}`);
+        }
+
         const objectById = new Map();
         for (const o of grades.objects) if (o && o.Id != null) objectById.set(String(o.Id), o);
         const catNameById = new Map();
@@ -395,6 +379,7 @@ const adapter = {
           weights,
           grades: courseGrades,
           syllabusUrls: toc.syllabusUrls,
+          group,
         });
       }
     } catch (e) {

@@ -7,7 +7,7 @@
 
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { termFromText } from "../learn/live-source.js";
-import { classify } from "../learn/classify.js";
+import { classify, factsOf } from "../learn/classify.js";
 import { addDays, clockOf, dNum, dow, fromNum, inRanges, pad, slug, torontoDate } from "./expand.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -74,6 +74,15 @@ export function parseSyllabusText(text, opts = {}) {
   const classDays = hoursM ? daysOf(hoursM[1]) : [];
   const classStart = hoursM ? clockOf(hoursM[2]) : null;
   const classEnd = hoursM ? clockOf(hoursM[3]) : null;
+  const instrM = clean.match(/^Instructor:\s*(.+?)\s*$/m);
+  const instructor = instrM ? instrM[1].trim() : null;
+  // "…only ." — the PDF extractor leaves a stray space before the final stop.
+  const officeM = clean.match(/^Office Hours:\s*(.+?)\s*$/im);
+  const officeHours = officeM ? officeM[1].replace(/\s+\.$/, ".").trim() : null;
+  const classFacts = factsOf([
+    ["Instructor", instructor],
+    ["Office hours", officeHours],
+  ]);
 
   const hits = (line) => extractDates(line, { now, termCode: term ?? undefined });
   const dueEnd = (hit) => {
@@ -230,6 +239,7 @@ export function parseSyllabusText(text, opts = {}) {
           review: "auto",
           seenIn: seen(id),
           evidence: { snippet: "Course Schedule", method: "text" },
+          meta: classFacts ? { facts: classFacts } : undefined,
         });
       }
     } else {
@@ -355,5 +365,6 @@ export function parseSyllabusText(text, opts = {}) {
     weights,
     assessments,
   };
+  if (officeHours) course.officeHours = officeHours;
   return { code, term, section, room, title, items, course, skippedClasses };
 }
