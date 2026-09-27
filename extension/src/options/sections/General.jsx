@@ -1,6 +1,6 @@
-// General: theme, density, classes-in-agenda.
+// General: theme, density, classes-in-agenda, review behaviour.
 
-import { Card, Field, Segmented } from "../bits.jsx";
+import { Card, Field, Segmented, Toggle } from "../bits.jsx";
 
 /**
  * @param {{settings: any, save: (patch: any) => void}} p
@@ -47,6 +47,15 @@ export function GeneralSection({ settings, save }) {
             onChange={(v) => save({ agenda: { showClasses: v } })}
           />
         </Field>
+        <Toggle
+          label="Show items found in text without review"
+          checked={!!(settings.review && settings.review.showPending)}
+          onChange={(v) => save({ review: { ...(settings.review || {}), showPending: v } })}
+        />
+        <p class="help">
+          Dates spotted inside announcements and messages normally wait in the
+          Review tab first. Turn this on to list them straight away.
+        </p>
       </Card>
     </div>
   );

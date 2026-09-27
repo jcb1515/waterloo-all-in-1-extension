@@ -59,6 +59,32 @@ export const DEFAULT_SETTINGS = {
     },
   },
   agenda: { showClasses: "today" },
+  // Review queue: showPending treats text-found dates as accepted without a
+  // trip through the Review tab (dismissed items still hide).
+  review: { showPending: false },
+  reminders: {
+    enabled: true,
+    // Minutes before the item's anchor. [] = no reminders for that type.
+    leads: {
+      deadline: [1440, 120],
+      quiz: [1440, 60],
+      exam: [4320, 1440],
+      presentation: [1440],
+      interview: [1440, 60],
+      "application-deadline": [1440, 180],
+      "offer-deadline": [1440, 180],
+      meeting: [30],
+      task: [1440],
+      lab: [120],
+      class: [],
+      tutorial: [],
+      event: [60],
+      "cycle-date": [1440],
+    },
+    quietHours: { enabled: true, start: "23:00", end: "08:00" },
+    briefing: { enabled: true, time: "08:00" },
+    includeTentative: false,
+  },
   calendar: {
     enabled: false,
     serviceUrl: "",

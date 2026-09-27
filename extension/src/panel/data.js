@@ -8,7 +8,7 @@
 */
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { resolveSettings, SETTINGS_KEY } from "../core/store.js";
+import { resolveSettings, SETTINGS_KEY, setLocal } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
 
@@ -21,6 +21,8 @@ const KEYS = [
   "terms",
   "calendarFeed",
   "outlineFiles",
+  "updates",
+  "updatesSeenAt",
   SETTINGS_KEY,
 ];
 
@@ -60,6 +62,8 @@ async function readAll() {
     terms: isObj(all.terms) ? all.terms : {},
     calendarFeed: isObj(all.calendarFeed) ? all.calendarFeed : null,
     outlineFiles: Array.isArray(all.outlineFiles) ? all.outlineFiles : [],
+    updates: Array.isArray(all.updates) ? all.updates : [],
+    updatesSeenAt: typeof all.updatesSeenAt === "string" ? all.updatesSeenAt : null,
     settings: mergeSettings(all[SETTINGS_KEY]),
   };
 }
@@ -74,6 +78,8 @@ function blank() {
     terms: {},
     calendarFeed: null,
     outlineFiles: [],
+    updates: [],
+    updatesSeenAt: null,
     settings: mergeSettings(null),
   });
 }
@@ -100,6 +106,8 @@ export function useStore() {
         terms: fx.terms,
         calendarFeed: fx.calendarFeed || null,
         outlineFiles: Array.isArray(fx.outlineFiles) ? fx.outlineFiles : [],
+        updates: Array.isArray(fx.updates) ? fx.updates : [],
+        updatesSeenAt: fx.updatesSeenAt || null,
         settings: mergeSettings(fx.settings),
       });
       return;
@@ -160,6 +168,17 @@ export function useStore() {
         }));
         return send({ type: UI.SET_USER_STATE, id, patch });
       },
+      /** Stamp updatesSeenAt = now (drives the bell's unread badge). */
+      markUpdatesSeen() {
+        const at = new Date().toISOString();
+        setState((s) => ({ ...s, updatesSeenAt: at }));
+        if (!IS_PREVIEW) setLocal("updatesSeenAt", at).catch(() => {});
+      },
+      /** "Clear all" on the updates feed. */
+      clearUpdates() {
+        setState((s) => ({ ...s, updates: [] }));
+        if (!IS_PREVIEW) setLocal("updates", []).catch(() => {});
+      },
     }),
     [state.userState]
   );
@@ -178,6 +197,8 @@ function emptyPreviewState() {
     terms: {},
     calendarFeed: null,
     outlineFiles: [],
+    updates: [],
+    updatesSeenAt: null,
     settings: null,
   };
 }
