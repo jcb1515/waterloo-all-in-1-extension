@@ -55,6 +55,15 @@ function toHour(h, mer) {
   return h;
 }
 
+/**
+ * Casual-text meridiem guess for a bare hour: 1-7 is PM ("meet Thursday at 2"
+ * is 2 PM, not 2 AM), 8-11 stays AM, 12 stays noon. Only when chrono saw no
+ * explicit AM/PM; 24-hour hours (>12) are never touched.
+ * @param {number} h @param {boolean} meridiemCertain
+ */
+const meridiemGuess = (h, meridiemCertain) =>
+  !meridiemCertain && h >= 1 && h <= 7 ? h + 12 : h;
+
 /** "YYYY-MM-DD" wall date of an ISO instant in tz. */
 function dayStr(iso, tz) {
   const p = zonedParts(new Date(iso), tz);
@@ -108,7 +117,7 @@ export function extractDates(text, { now = new Date(), termCode, tz = "America/T
     const monthDay = hasMonth || hasIso;
     const d = st.get("day") ?? 0, mo = st.get("month") ?? 0;
     const y = yrC ? (st.get("year") ?? 0) : monthDay ? inferYear(mo, d, { now, termCode, tz }) : (st.get("year") ?? 0);
-    let h = hrC ? (st.get("hour") ?? 0) : 0;
+    let h = hrC ? meridiemGuess(st.get("hour") ?? 0, st.isCertain("meridiem")) : 0;
     let mi = hrC ? (st.get("minute") ?? 0) : 0;
 
     let origStart = startOf[nStart] ?? text.length;
@@ -173,7 +182,9 @@ export function extractDates(text, { now = new Date(), termCode, tz = "America/T
         else if (Date.UTC(y, em - 1, ed) < Date.UTC(y, mo - 1, d)) ey = y + 1;
       }
       endAt = endTimed
-        ? zonedIso(ey, em, ed, r.end.get("hour") ?? 0, r.end.get("minute") ?? 0, tz)
+        ? zonedIso(ey, em, ed,
+            meridiemGuess(r.end.get("hour") ?? 0, r.end.isCertain("meridiem")),
+            r.end.get("minute") ?? 0, tz)
         : zonedIso(ey, em, ed + 1, 0, 0, tz);
     }
 
@@ -187,7 +198,7 @@ export function extractDates(text, { now = new Date(), termCode, tz = "America/T
         const tm = /^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?/i.exec(rest)
                 || /^(\d{1,2}):(\d{2})(?![\d:])/.exec(rest);
         if (tm) {
-          h = toHour(Number(tm[1]), tm[3]);
+          h = tm[3] ? toHour(Number(tm[1]), tm[3]) : meridiemGuess(Number(tm[1]), false);
           mi = Number(tm[2] ?? 0);
           hrC = true;
           origEnd += pre.length + tm[0].length;
