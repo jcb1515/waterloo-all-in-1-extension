@@ -1,0 +1,217 @@
+// Preview/screenshot tool for the UI redesign.
+//
+//   node tools/preview.mjs serve   — static-serve dist/ on http://127.0.0.1:5178
+//   node tools/preview.mjs shots   — serve dist/, drive headless Edge over CDP,
+//                                    capture the screenshot set, exit
+//
+// Screenshots land in ../captures/screenshots/phase1b/ (outside git).
+// CDP is used instead of --screenshot because repeated `msedge --screenshot`
+// invocations get delegated to a running Edge instance and re-shoot the wrong
+// page.
+
+import { createServer } from "node:http";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DIST = path.join(REPO, "dist");
+const OUT = path.join(REPO, "..", "captures", "screenshots", "phase1b");
+const HOST = "127.0.0.1";
+const PORT = 5178;
+const BASE = `http://${HOST}:${PORT}`;
+const CDP_PORT = 9333;
+const CDP = `http://${HOST}:${CDP_PORT}`;
+
+const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function serve() {
+  return createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || "/", BASE);
+      let file = path.join(DIST, decodeURIComponent(url.pathname));
+      if (url.pathname === "/" || url.pathname.endsWith("/")) file = path.join(file, "index.html");
+      const body = await readFile(file);
+      res.writeHead(200, { "content-type": MIME[path.extname(file)] || "application/octet-stream" });
+      res.end(body);
+    } catch {
+      res.writeHead(404);
+      res.end("not found");
+    }
+  });
+}
+
+const SHOTS = [
+  { name: "panel-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
+  { name: "panel-compact-light", url: "/src/panel/panel.html?preview=1&density=compact", size: [400, 900] },
+  { name: "panel-sources", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
+  { name: "options-general-light", url: "/src/options/options.html#general", size: [1280, 900] },
+  { name: "options-sources-dark", url: "/src/options/options.html#sources", size: [1280, 900], dark: true },
+  { name: "options-privacy-light", url: "/src/options/options.html#privacy", size: [1280, 900] },
+];
+
+/* ------------------------------ tiny CDP client ----------------------------- */
+
+async function waitForEndpoint(url, tries = 100) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) return await r.json();
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`endpoint ${url} never came up`);
+}
+
+/** Minimal CDP connection over the built-in WebSocket. */
+function connect(wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  let nextId = 1;
+  const pending = new Map();
+  /** @type {string[]} */
+  const consoleErrors = [];
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.id && pending.has(msg.id)) {
+      const { resolve, reject } = pending.get(msg.id);
+      pending.delete(msg.id);
+      msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+    } else if (
+      msg.method === "Runtime.exceptionThrown" ||
+      (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") ||
+      (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error")
+    ) {
+      consoleErrors.push(JSON.stringify(msg.params).slice(0, 300));
+    }
+  };
+  const ready = new Promise((res, rej) => {
+    ws.onopen = res;
+    ws.onerror = rej;
+  });
+  const send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+  return { ready, send, consoleErrors, close: () => ws.close() };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* --------------------------------- shots ----------------------------------- */
+
+async function shots() {
+  await mkdir(OUT, { recursive: true });
+  const server = serve();
+  await new Promise((r) => server.listen(PORT, HOST, r));
+
+  const profile = await mkdtemp(path.join(tmpdir(), "wa1-cdp-"));
+  const edge = spawn(
+    EDGE,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--hide-scrollbars",
+      "--no-first-run",
+      "--force-device-scale-factor=1",
+      `--user-data-dir=${profile}`,
+      `--remote-debugging-port=${CDP_PORT}`,
+      "--remote-allow-origins=*",
+      "about:blank",
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] }
+  );
+
+  try {
+    await waitForEndpoint(`${CDP}/json/version`);
+    const targets = await waitForEndpoint(`${CDP}/json/list`);
+    const page = targets.find((t) => t.type === "page");
+    if (!page) throw new Error("no page target");
+    const cdp = connect(page.webSocketDebuggerUrl);
+    await cdp.ready;
+    await cdp.send("Page.enable");
+    await cdp.send("Runtime.enable");
+    await cdp.send("Log.enable");
+
+    for (const s of SHOTS) {
+      const [w, h] = s.size;
+      await cdp.send("Emulation.setDeviceMetricsOverride", {
+        width: w,
+        height: h,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await cdp.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: s.dark ? "dark" : "light" }],
+      });
+      await cdp.send("Page.navigate", { url: `${BASE}${s.url}` });
+      await sleep(1500); // module load + preact render + fonts
+      const stats = await cdp.send("Runtime.evaluate", {
+        returnByValue: true,
+        expression: `JSON.stringify({
+          title: document.title,
+          rows: document.querySelectorAll(".item-row").length,
+          groups: document.querySelectorAll(".agenda-group").length,
+          cards: document.querySelectorAll(".card").length,
+          overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          text: document.body.innerText.slice(0, 120)
+        })`,
+      });
+      const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+      const out = path.join(OUT, `${s.name}.png`);
+      await writeFile(out, Buffer.from(shot.data, "base64"));
+      console.log(`${s.name}.png  ${stats.result.value}`);
+      if (cdp.consoleErrors.length) {
+        console.log(`  console errors: ${cdp.consoleErrors.join(" | ")}`);
+        cdp.consoleErrors.length = 0;
+      }
+    }
+    await writeFile(
+      path.join(OUT, "manifest.json"),
+      JSON.stringify({ takenAt: new Date().toISOString(), shots: SHOTS }, null, 2)
+    );
+    cdp.close();
+  } finally {
+    // Kill the whole tree — msedge.exe re-spawns children, a bare kill()
+    // leaves the headless browser and its debug port behind.
+    if (edge.pid) {
+      spawn("taskkill", ["/PID", String(edge.pid), "/T", "/F"], { stdio: "ignore" });
+    }
+    edge.kill();
+    server.close();
+    rm(profile, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function main() {
+  const mode = process.argv[2] || "serve";
+  if (mode === "serve") {
+    serve().listen(PORT, HOST, () => console.log(`serving dist/ on ${BASE}`));
+    return;
+  }
+  if (mode === "shots") return shots();
+  console.error(`unknown mode ${mode}`);
+  process.exit(2);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
