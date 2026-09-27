@@ -268,7 +268,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
     const watched = arr(watch?.channelIds).includes(channelId);
 
     const items = candidatesForMessage(msg, {
-      extractDates: ctx.textDates,
+      extractDates: ctx?.textDates,
       selfId,
       roleIds,
       keywords: settings.keywords,
@@ -541,9 +541,8 @@ export default {
    * @param {import("../../core/contract.js").SyncContext} ctx
    */
   async sync(ctx) {
-    ctx = ctx && typeof ctx === "object" ? ctx : {};
-    const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-    const now = ctx.now || new Date();
+    const prev = ctx?.state && typeof ctx.state === "object" ? ctx.state : {};
+    const now = ctx?.now || new Date();
     const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
     const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
     const state = /** @type {any} */ ({
@@ -559,11 +558,11 @@ export default {
       };
     }
     // Settings may have changed since the last inventory — re-resolve watch.
-    recomputeWatch(state, obj(ctx.settings), nowIso);
+    recomputeWatch(state, obj(ctx?.settings), nowIso);
     const items =
-      ctx.settings?.enabled === false
+      ctx?.settings?.enabled === false
         ? []
-        : outputItems(state, obj(ctx.settings), nowMs, nowIso);
+        : outputItems(state, obj(ctx?.settings), nowMs, nowIso);
     return { items, complete: false, session: "no-tab", state };
   },
 
@@ -575,10 +574,9 @@ export default {
      * @returns {Promise<SyncResult & {scope: string}>}
      */
     async parse(payload, ctx) {
-      ctx = ctx && typeof ctx === "object" ? ctx : {};
-      const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-      const settings = obj(ctx.settings);
-      const now = ctx.now || new Date();
+      const prev = ctx?.state && typeof ctx.state === "object" ? ctx.state : {};
+      const settings = obj(ctx?.settings);
+      const now = ctx?.now || new Date();
       const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
       const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
       /** @type {Record<string, any>} */

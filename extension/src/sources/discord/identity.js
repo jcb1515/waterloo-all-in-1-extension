@@ -3,6 +3,9 @@
 // Discord ids this adapter ever stores are the user's own — author ids are
 // compared and discarded, never persisted. Pure.
 
+/** Non-array input (garbage persisted state) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+
 /**
  * Update identity inference from a mentions-endpoint message list.
  * - A mentions message with no @everyone and no role mentions must ping the
@@ -16,8 +19,6 @@
  * @param {{userId?: string, roleIds?: string[]}} [settings]
  * @returns {{selfId?: string, roleIds: string[], evidence: number}}
  */
-const arr = (v) => (Array.isArray(v) ? v : []);
-
 export function inferIdentity(prev, messages, settings) {
   const msgs = arr(messages);
   const out = {
