@@ -34,14 +34,24 @@
   };
 
   const buildSnapshot = () => {
-    const parts = [];
+    /** @type {Element[]} */
+    const targets = [];
     for (const el of document.querySelectorAll(OBSERVE_SEL)) {
       // .label/.value pairs need their shared parent to keep the pairing.
       const target =
         el.matches(".label,.control-label,.field-label") && el.parentElement
           ? el.parentElement
           : el;
-      const html = target.outerHTML;
+      if (!targets.includes(target)) targets.push(target);
+    }
+    // A target contained in another target would duplicate its tables —
+    // WW reuses ".label" broadly and the shared parent can wrap a grid.
+    const unique = targets.filter(
+      (t) => !targets.some((o) => o !== t && o.contains(t))
+    );
+    const parts = [];
+    for (const el of unique) {
+      const html = el.outerHTML;
       if (html && !parts.includes(html)) parts.push(html);
     }
     const complete =
