@@ -153,9 +153,10 @@
  * @property {string} [url]        Final URL after redirects
  * @property {string} [contentType]
  * @property {string} [text]       Body text (JSON or HTML) when status is 2xx
+ * @property {string} [base64]     Body as base64 instead of text when the request's init.binary is true
  * @property {boolean} [loginRedirect]
  * @property {boolean} [noTab]     Relay only: no usable tab of that site is open
- * @property {string} [error]
+ * @property {string} [error]      e.g. "timeout", "not-allowed", "too-large" (binary body over 10 MB)
  */
 
 /**
@@ -165,8 +166,8 @@
  * @property {Record<string, any>} state        This source's private state from the last run (read-only)
  * @property {Course[]} courses
  * @property {TermInfo[]} terms
- * @property {(url: string, init?: {method?: string, headers?: Record<string,string>, body?: string}) => Promise<FetchResult>} fetch   T1, credentials included
- * @property {(origin: string, path: string, init?: {method?: string, headers?: Record<string,string>, body?: string}) => Promise<FetchResult>} relay   T2 through an open tab
+ * @property {(url: string, init?: {method?: string, headers?: Record<string,string>, body?: string, binary?: boolean}) => Promise<FetchResult>} fetch   T1, credentials included
+ * @property {(origin: string, path: string, init?: {method?: string, headers?: Record<string,string>, body?: string, binary?: boolean}) => Promise<FetchResult>} relay   T2 through an open tab
  * @property {(html: string, parser: string, opts?: Record<string, any>) => Promise<any>} parseHtml   Runs a registered parser ("<source>/<name>") in the offscreen document
  * @property {ExtractDates} textDates
  * @property {(message: string, data?: unknown) => void} log

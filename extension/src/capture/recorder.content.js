@@ -16,6 +16,7 @@
 
 import { MSG, PAGE_EVENT, SITE_BY_HOST } from "../core/contract.js";
 import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from "./redact.js";
+import { readBodyInto } from "./fetch.js";
 
 (() => {
   const site = /** @type {Record<string, string>} */ (SITE_BY_HOST)[location.hostname];
@@ -118,13 +119,7 @@ import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from ".
           /** @type {Record<string, any>} */
           const out = { status: res.status, url: res.url, contentType: res.headers.get("content-type") || "" };
           if (res.status === 401 || LOGIN_URL_RE.test(res.url || "")) out.loginRedirect = true;
-          if (res.ok) {
-            try {
-              out.text = await res.text();
-            } catch {
-              /* body unreadable */
-            }
-          }
+          if (res.ok) await readBodyInto(res, out, !!(msg.init && msg.init.binary === true));
           sendResponse(out);
         } catch (e) {
           const err = /** @type {any} */ (e);
