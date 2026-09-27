@@ -8,6 +8,7 @@
 import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates, linkEmailItems } from "./merge.js";
 import { deriveTodos } from "./todos.js";
 import { manualUpsertResult, manualDeleteResult } from "./quickadd.js";
+import { normalizeProject, upsertProjectFold, deleteProjectFold } from "./projects.js";
 import {
   getSettings,
   getLocal,
@@ -579,6 +580,43 @@ export async function manualDelete(id) {
 /** Backup import: replace the whole manual list. */
 export async function manualSetAll(items) {
   await manualFold(() => ({ items: Array.isArray(items) ? items : [], complete: true }));
+  return { ok: true };
+}
+
+/* ----------------------------- projects ----------------------------- */
+
+/**
+ * A project write plus its item writes inside the manual ingest queue:
+ * projects key and raw:manual stay consistent and one recompute covers both.
+ * @param {(projects: any[], items: any[]) => {projects: any[], items: any[]}} fold
+ */
+function projectMutate(fold) {
+  return ingest("manual", async () => {
+    const mv = await getMergedView();
+    const cur = await getLocal("projects");
+    const projects = Array.isArray(cur) ? cur : [];
+    const items =
+      mv.raws.manual && Array.isArray(mv.raws.manual.items) ? mv.raws.manual.items : [];
+    const next = fold(projects, items);
+    await setLocal("projects", next.projects);
+    const raw = applyResult(mv.raws.manual || null, { items: next.items, complete: true }, { mode: "sync" });
+    await setLocal(rawKey("manual"), raw);
+    await recomputeAll(new Date());
+  });
+}
+
+/** wa1:project-upsert — create or update a project and sync its items. */
+export async function projectUpsert(project) {
+  const p = normalizeProject(project);
+  if (!p) return { ok: false };
+  await projectMutate((projects, items) => upsertProjectFold(projects, items, p));
+  return { ok: true, id: p.id };
+}
+
+/** wa1:project-delete — drop the project and every item carrying its id. */
+export async function projectDelete(id) {
+  if (!id) return { ok: false };
+  await projectMutate((projects, items) => deleteProjectFold(projects, items, id));
   return { ok: true };
 }
 

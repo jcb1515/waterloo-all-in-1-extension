@@ -156,6 +156,70 @@ test("buildTodos: hidden and snoozed rows stay out; auto badge tooltip explains"
   assert.equal(rows[0].auto, "Completes after the midterm");
 });
 
+test("buildTodos: a derived to-do suppresses the source row it links", () => {
+  const items = {
+    ww: item("ww", {
+      source: "waterlooworks",
+      type: "offer-deadline",
+      title: "Acme — respond to offer",
+      dueAt: iso(t0 + DAY),
+      meta: { jobId: "1" },
+    }),
+  };
+  const todos = {
+    "todo:offer:a1": item("todo:offer:a1", {
+      source: "manual",
+      type: "task",
+      title: "Respond to offer — Acme",
+      dueAt: iso(t0 + DAY),
+      meta: {
+        auto: "offer",
+        applicationId: "a1",
+        linkedItemId: "ww",
+        completesWhen: "when WaterlooWorks shows your response",
+      },
+    }),
+  };
+  const out = buildTodos({ items, todos, settings: SETTINGS, now: NOW });
+  const ids = out.groups.flatMap((g) => g.rows.map((r) => r.item.id));
+  assert.deepEqual(ids, ["todo:offer:a1"], "the derived row replaces the offer-deadline row");
+});
+
+test("buildTodos: study to-dos never suppress their parent row", () => {
+  const items = { q: item("q", { type: "quiz", dueAt: iso(t0 + 3 * DAY) }) };
+  const todos = {
+    "todo:study:q": item("todo:study:q", {
+      source: "manual",
+      type: "task",
+      title: "Study for Quiz",
+      dueAt: iso(t0 + 3 * DAY),
+      meta: { auto: "study", parentId: "q" },
+    }),
+  };
+  const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
+    .groups.flatMap((g) => g.rows.map((r) => r.item.id))
+    .sort();
+  assert.deepEqual(ids, ["q", "todo:study:q"], "the quiz itself stays a to-do");
+});
+
+test("buildTodos: project items get kind project; done/archived projects hide theirs", () => {
+  const items = {
+    p1: item("p1", { source: "manual", type: "task", meta: { projectId: "proj_a" } }),
+    p2: item("p2", { source: "manual", type: "task", meta: { projectId: "proj_b" } }),
+    p3: item("p3", { source: "manual", type: "task", meta: { projectId: "proj_gone" } }),
+  };
+  const projects = [
+    { id: "proj_a", name: "Hackathon", color: 0, status: "active" },
+    { id: "proj_b", name: "Old build", color: 1, status: "archived" },
+  ];
+  const out = buildTodos({ items, projects, settings: SETTINGS, now: NOW });
+  const ids = out.groups.flatMap((g) => g.rows.map((r) => r.item.id)).sort();
+  assert.deepEqual(ids, ["p1", "p3"], "archived project's item hidden; orphaned stays");
+  assert.equal(out.groups.flatMap((g) => g.rows)[0].kind, "project");
+  const pf = buildTodos({ items, projects, settings: SETTINGS, now: NOW, filter: "projects" });
+  assert.deepEqual(pf.groups.flatMap((g) => g.rows.map((r) => r.item.id)).sort(), ["p1", "p3"]);
+});
+
 test("dueLabel: overdue and dated rows", () => {
   const r = (a) => ({ item: { dueAt: iso(a) }, anchorMs: a });
   assert.equal(dueLabel(r(t0 - 2 * DAY), NOW), "2d late");

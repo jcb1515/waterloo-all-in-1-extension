@@ -30,6 +30,8 @@ import {
   manualUpsert,
   manualDelete,
   manualSetAll,
+  projectUpsert,
+  projectDelete,
 } from "../core/scheduler.js";
 import { resetSweep } from "../sources/discord/index.js";
 import { startMailScan, stopMailScan } from "../sources/email/index.js";
@@ -217,6 +219,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === UI.MAIL_SCAN_STOP) {
     mailScanStop().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.PROJECT_UPSERT) {
+    if (!msg.project) return false;
+    projectUpsert(msg.project).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.PROJECT_DELETE) {
+    if (!msg.id) return false;
+    projectDelete(msg.id).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   return false;

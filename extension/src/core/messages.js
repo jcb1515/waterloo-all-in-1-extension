@@ -32,4 +32,8 @@ export const UI = Object.freeze({
   MAIL_SCAN_START: "wa1:mail-scan-start",
   /** options/panel -> background: { type } stop the running mail scan */
   MAIL_SCAN_STOP: "wa1:mail-scan-stop",
+  /** panel -> background: { type, project } create/update a project */
+  PROJECT_UPSERT: "wa1:project-upsert",
+  /** panel -> background: { type, id } delete a project and its items */
+  PROJECT_DELETE: "wa1:project-delete",
 });

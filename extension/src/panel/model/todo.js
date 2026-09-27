@@ -9,6 +9,7 @@
 import { effectiveItem, isVisible } from "../../core/effective.js";
 import { autoDoneRule, todoSourceItem } from "../../core/todos.js";
 import { normCourseCode } from "../../core/contract.js";
+import { projectById } from "../../core/projects.js";
 import { startOfDay, fmtAgo, fmtDay, fmtTime } from "./agenda.js";
 
 const DAY = 86400000;
@@ -25,7 +26,7 @@ function kindOf(/** @type {any} */ item) {
   const meta = item.meta || {};
   if (meta.auto === "study") return "study";
   if (meta.auto === "offer" || meta.auto === "rank") return "coop";
-  if (meta.auto === "project" || item.source === "projects") return "project";
+  if (meta.auto === "project" || meta.projectId || item.source === "projects") return "project";
   if (item.category === "reply") return "reply";
   if (
     item.type === "application-deadline" ||
@@ -57,6 +58,7 @@ function autoTip(/** @type {any} */ item, /** @type {any} */ rule) {
  * @param {Record<string, any>} p.applications
  * @param {Record<string, any>} p.userState
  * @param {any} p.settings
+ * @param {any[]} [p.projects]          user projects (state.projects)
  * @param {Date} p.now
  * @param {string} [p.filter] all|school|coop|teams|projects|replies|mine
  * @returns {{groups: {id: string, label: string, rows: any[], done?: boolean,
@@ -64,7 +66,7 @@ function autoTip(/** @type {any} */ item, /** @type {any} */ rule) {
  *   startingSoon: {id: string, title: string, opensAt: string}[],
  *   counts: Record<string, number>}}
  */
-export function buildTodos({ items = {}, todos = {}, applications = {}, userState = {}, settings = {}, now = new Date(), filter = "all" }) {
+export function buildTodos({ items = {}, todos = {}, applications = {}, userState = {}, settings = {}, projects = [], now = new Date(), filter = "all" }) {
   const acceptPending = !!(settings.review && settings.review.showPending);
   const today = startOfDay(now);
   const tomorrow = today.getTime() + DAY;
@@ -78,8 +80,23 @@ export function buildTodos({ items = {}, todos = {}, applications = {}, userStat
   /** @type {Record<string, number>} */
   const counts = {};
 
+  /* A derived to-do supersedes the source row it links — e.g. an offer
+     to-do already carries the linked offer-deadline's due date, so listing
+     both would show the same thing twice. Study to-dos never suppress:
+     their parents (exams/quizzes) are their own deliverable. */
+  const suppressed = new Set();
+  for (const t of Object.values(todos)) {
+    const m = t && t.meta;
+    if (!m || m.auto === "study") continue;
+    if (m.linkedItemId) suppressed.add(m.linkedItemId);
+    if (m.parentId) suppressed.add(m.parentId);
+  }
+
   const collect = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
     if (!raw || !raw.id) return;
+    if (!isDerived && suppressed.has(raw.id)) return;
+    const project = raw.meta && raw.meta.projectId ? projectById(projects, raw.meta.projectId) : null;
+    if (project && project.status !== "active") return; // done/archived projects hide their items
     const us = userState[raw.id];
     const eff = effectiveItem(raw, us, { acceptPending });
     const auto = eff.meta && eff.meta.auto;

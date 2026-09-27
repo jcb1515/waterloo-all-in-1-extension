@@ -187,7 +187,8 @@ export function parseQuickAdd(text, { now = new Date(), orgs = [] } = {}) {
 /**
  * Build the raw manual item stored under raw:manual.
  * @param {{title: string, org?: string, type: string, dueAt?: string,
- *   startAt?: string, endAt?: string, allDay?: boolean, location?: string}} f
+ *   startAt?: string, endAt?: string, allDay?: boolean, location?: string,
+ *   meta?: Record<string, any>}} f
  * @param {{id?: string, now?: Date}} [opts]
  */
 export function manualItemFrom(f, { id, now = new Date() } = {}) {
@@ -208,6 +209,7 @@ export function manualItemFrom(f, { id, now = new Date() } = {}) {
   };
   if (f.org) item.org = f.org;
   if (f.location) item.location = f.location;
+  if (f.meta && typeof f.meta === "object") item.meta = { ...f.meta };
   if (f.startAt) item.startAt = f.startAt;
   if (f.endAt) item.endAt = f.endAt;
   if (f.dueAt) item.dueAt = f.dueAt;

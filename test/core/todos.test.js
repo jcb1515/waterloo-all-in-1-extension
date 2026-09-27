@@ -130,6 +130,7 @@ test("deriveTodos: an offered application gets a respond-to-offer to-do at the o
   assert.equal(todo.title, "Respond to offer — Acme Analog (Hardware Engineer)");
   assert.equal(todo.dueAt, iso(t0 + 2 * DAY), "due at the linked offer deadline");
   assert.equal(todo.meta.applicationId, APP.id);
+  assert.equal(todo.meta.linkedItemId, "ww:offer-dl", "links the source offer-deadline row it replaces");
   assert.equal(todo.meta.completesWhen, "when WaterlooWorks shows your response");
 });
 

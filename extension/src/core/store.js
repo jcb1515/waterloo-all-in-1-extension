@@ -15,6 +15,8 @@
     applications  Record<id, Application>
     courses       Record<code, Course>
     terms         Record<termCode, TermInfo>
+    projects      Project[] — user projects (core/projects.js); their items
+                  live in the manual raw with meta.projectId
     updates       Update[] ring buffer, newest first, max 300
     userState     Record<canonicalId, { done?, doneAt?, notes?, subtasks?,
                     estimateMin?, snoozedUntil?, hidden?, review? }>
@@ -250,7 +252,7 @@ export async function mutateKey(key, fn) {
 export async function getMergedView() {
   const keys = [
     "items", "todos", "links", "uidMap", "applications", "courses", "terms",
-    "userState", "updates", "sourceState",
+    "userState", "updates", "sourceState", "projects",
     ...SOURCE_IDS.map(rawKey),
   ];
   const all = /** @type {Record<string, any>} */ (await chrome.storage.local.get(keys));
@@ -269,6 +271,7 @@ export async function getMergedView() {
     userState: isObj(all.userState) ? all.userState : {},
     updates: Array.isArray(all.updates) ? all.updates : [],
     sourceState: isObj(all.sourceState) ? all.sourceState : {},
+    projects: Array.isArray(all.projects) ? all.projects : [],
   };
 }
 

@@ -135,14 +135,17 @@ export function deriveTodos({ items = {}, applications = {}, userState = {}, set
         out[id] = { ...p, status: "done" };
         continue;
       }
-      const deadline = offerDeadlineFor(app, items);
+      const deadlineItem = offerDeadlineItem(app, items);
       out[id] = todoItem(id, {
         title: `Respond to offer — ${app.employer}${app.jobTitle ? ` (${app.jobTitle})` : ""}`,
         org: app.employer || "Co-op",
-        dueAt: deadline || undefined,
+        dueAt: deadlineItem ? deadlineItem.dueAt || deadlineItem.startAt : undefined,
         meta: {
           auto: "offer",
           applicationId: app.id,
+          // The linked offer-deadline row is suppressed in the to-do list —
+          // this derived row carries the deadline itself.
+          ...(deadlineItem ? { linkedItemId: deadlineItem.id } : {}),
           completesWhen: "when WaterlooWorks shows your response",
           createdAt: firstAt(id),
         },
@@ -203,12 +206,14 @@ const appLastAtLatest = (apps) =>
   apps.reduce((m, a) => Math.max(m, appLastAt(a) ?? 0), 0);
 
 /**
- * The offer deadline for an application: a linked offer-deadline item by
- * meta.jobId / meta.applicationId, else an employer fuzzy match (≥0.6).
+ * The offer-deadline item linked to an application — by meta.jobId /
+ * meta.applicationId, else an employer fuzzy match (≥0.6). Earliest wins.
  */
-function offerDeadlineFor(app, items) {
+function offerDeadlineItem(app, items) {
   /** @type {number | null} */
   let best = null;
+  /** @type {any} */
+  let bestItem = null;
   for (const i of Object.values(items || {})) {
     if (!i || i.type !== "offer-deadline") continue;
     const linked =
@@ -218,9 +223,12 @@ function offerDeadlineFor(app, items) {
     if (!linked) continue;
     const ms = anchorMs(i);
     if (ms == null) continue;
-    if (best == null || ms < best) best = ms;
+    if (best == null || ms < best) {
+      best = ms;
+      bestItem = i;
+    }
   }
-  return best == null ? null : new Date(best).toISOString();
+  return bestItem;
 }
 
 /** The earliest upcoming rankings-open cycle item's anchor, or null. */
