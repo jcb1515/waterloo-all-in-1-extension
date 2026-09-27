@@ -19,6 +19,7 @@ const MONTH_RE = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june
 const WEEKDAY_RE = /\b(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thur?s(?:day)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i;
 const REL_RE = /\b(?:today|tonight|tomorrow|yesterday)\b/i;
 const ISO_RE = /\b\d{4}-\d{2}-\d{2}\b/;
+const MONTH_G = new RegExp(MONTH_RE.source, "gi");
 
 /**
  * Rewrite `text` into a chrono-friendlier copy, keeping for every normalised
@@ -114,36 +115,66 @@ export function extractDates(text, { now = new Date(), termCode, tz = "America/T
     let origEnd = nEnd - 1 >= nStart ? endOf[nEnd - 1] : origStart;
     if (origStart < prevEnd) continue;                         // overlap
 
-    // ---- extend the end day when chrono stopped short: "through 27", "& 20", "/8"
+    // ---- find the end day: chrono's own r.end, a trailing "- NN" it folded
+    // into the start as an hour, or a bare day after the match ("through 27",
+    // "& 20", "/8"). The end year always follows the start's resolved year.
     let alternative = false;
     /** @type {string|null} */ let endAt = null;
+    /** Exclusive all-day end (midnight after day `ed`); month 13 rolls to January. */
+    const endIso = (/** @type {number} */ ey, /** @type {number} */ em, /** @type {number} */ ed) => {
+      if (em > 12) { em = 1; ey += 1; }
+      else if (Date.UTC(ey, em - 1, ed) < Date.UTC(y, mo - 1, d)) ey += 1;
+      return zonedIso(ey, em, ed + 1, 0, 0, tz);
+    };
     if (!r.end && monthDay) {
-      const win = text.slice(origEnd, origEnd + 40);
-      const ex = /^(\s*)(--+|through|to|until|&|and|,|\/)\s*(\d{1,2})(?!\d|:\d{2}|\s*[ap]\.?m)/i.exec(win);
-      if (ex) {
-        alternative = ex[2] === "/";
-        const lastDay = Number(ex[3]);
-        // Same month unless the day reads backwards ("January 30 - 2" -> Feb 2).
-        let eMs = Date.UTC(y, mo - 1, lastDay);
-        if (eMs <= Date.UTC(y, mo - 1, d)) eMs = Date.UTC(y, mo, lastDay);
-        const e = new Date(eMs);
-        endAt = zonedIso(e.getUTCFullYear(), e.getUTCMonth() + 1, e.getUTCDate() + 1, 0, 0, tz);
-        origEnd += ex[0].length;
+      const tail = /[-\u2013\u2014]\s*(\d{1,2})\s*$/.exec(body);
+      if (tail && (!hrC || (st.get("hour") ?? -1) === Number(tail[1]))) {
+        // "December 9, 2025 - 12": chrono read the bare end day as a start hour.
+        if (hrC) { hrC = false; forcedAllDay = true; h = 0; mi = 0; }
+        const last = Number(tail[1]);
+        let em = mo;
+        if (last <= d) em = mo + 1;
+        endAt = endIso(y, em, last);
+      } else {
+        const win = text.slice(origEnd, origEnd + 40);
+        const ex = /^(\s*)([-\u2013\u2014]|through|to|until|&|and|\/)\s*(\d{1,2})(?!\d|:\d{2})/i.exec(win);
+        if (ex) {
+          const conn = ex[2].toLowerCase();
+          const after = win.slice(ex[0].length);
+          // "12 students" / "10% penalty" are counts, not end days; "/" is
+          // laxer ("Dec 7/8 in E7") so it only rejects a trailing percent.
+          const bad = conn === "/" ? /^\s*%/.test(after) : /^\s*[%A-Za-z]/.test(after);
+          const last = Number(ex[3]);
+          const rolls = /^(?:[-\u2013\u2014]|through|to|until)$/i.test(conn);
+          if (!bad && (last > d || rolls)) {
+            alternative = conn === "/";
+            let em = mo;
+            if (last <= d) em = mo + 1;
+            endAt = endIso(y, em, last);
+            origEnd += ex[0].length;
+          }
+        }
       }
     } else if (r.end) {
       const ed = r.end.get("day") ?? 0;
       let em = r.end.get("month") ?? mo;
-      if (!r.end.isCertain("month")) {                          // bare end day
-        em = mo;
-        if (ed <= d) em = mo + 1;                             // rolls the year too
-      }
-      const ey = r.end.isCertain("year") ? (r.end.get("year") ?? y) : inferYear(em, ed, { now, termCode, tz });
-      if (r.end.isCertain("hour") && !forcedAllDay) {
-        endAt = zonedIso(ey, em, ed, r.end.get("hour") ?? 0, r.end.get("minute") ?? 0, tz);
+      const endTimed = r.end.isCertain("hour") && !forcedAllDay;
+      // A bare end day ("Dec 30 - 2") reports month-certain by inheritance;
+      // trust it only when a second month name was actually written.
+      if (!endTimed && ed <= d && (body.match(MONTH_G) || []).length < 2) em = mo + 1;
+      let ey;
+      if (r.end.isCertain("year")) {
+        ey = r.end.get("year") ?? y;
+        if (em > 12) em = 1;
       } else {
-        // all-day range: exclusive end = midnight after the last day
-        endAt = zonedIso(ey, em, ed + 1, 0, 0, tz);
+        // year follows the start's, rolling forward when the end reads earlier
+        ey = y;
+        if (em > 12) { em = 1; ey = y + 1; }
+        else if (Date.UTC(y, em - 1, ed) < Date.UTC(y, mo - 1, d)) ey = y + 1;
       }
+      endAt = endTimed
+        ? zonedIso(ey, em, ed, r.end.get("hour") ?? 0, r.end.get("minute") ?? 0, tz)
+        : zonedIso(ey, em, ed + 1, 0, 0, tz);
     }
 
     // ---- pull in a trailing " (8:30am)" / " (before 11:59pm)" chrono left separate

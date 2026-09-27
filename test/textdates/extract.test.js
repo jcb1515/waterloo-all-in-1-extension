@@ -217,3 +217,44 @@ test("results do not depend on the machine time zone", () => {
   const h = one("due Sun Sep 20 at 11:30pm");
   assert.equal(h.startAt, "2026-09-21T03:30:00.000Z");
 });
+
+/* ------------------------------ review fixes ------------------------------ */
+
+test("review: a comma or 'and' before a count is not a range", () => {
+  let h = one("Due Oct 4, 3 attempts allowed");
+  assert.equal(h.startAt, "2026-10-04T04:00:00.000Z");
+  assert.equal(h.endAt, undefined);
+  h = one("Quiz Oct 5 and 12 students per room");
+  assert.equal(h.startAt, "2026-10-05T04:00:00.000Z");
+  assert.equal(h.endAt, undefined);
+  h = one("Lab on Oct 5 & 10% penalty per day late");
+  assert.equal(h.endAt, undefined);
+});
+
+test("review: an en dash in the original text still extends a bare end day", () => {
+  const h = one("For October 21 \u2013 27: Midterms\u2014No classes");
+  assert.equal(h.startAt, "2026-10-21T04:00:00.000Z");
+  assert.equal(h.endAt, "2026-10-28T04:00:00.000Z");
+});
+
+test("review: 'Dec 7/8' followed by a word is still the two-day alternative", () => {
+  const h = one("showcase on Dec 7/8 in E7");
+  assert.equal(h.startAt, "2026-12-07T05:00:00.000Z");
+  assert.equal(h.endAt, "2026-12-09T05:00:00.000Z");
+  assert.equal(h.confidence, 0.6);
+});
+
+test("review: the end of a range takes the start's explicit year", () => {
+  let h = one("Winter break December 28, 2025 - Jan 3");
+  assert.equal(h.startAt, "2025-12-28T05:00:00.000Z");
+  assert.equal(h.endAt, "2026-01-04T05:00:00.000Z");
+  h = one("Exams December 9, 2025 - 12");
+  assert.equal(h.startAt, "2025-12-09T05:00:00.000Z");
+  assert.equal(h.endAt, "2025-12-13T05:00:00.000Z");
+});
+
+test("review: a bare end day before the start day rolls into the next month", () => {
+  const h = one("Break Dec 30 - 2");
+  assert.equal(h.startAt, "2026-12-30T05:00:00.000Z");
+  assert.equal(h.endAt, "2027-01-03T05:00:00.000Z");
+});
