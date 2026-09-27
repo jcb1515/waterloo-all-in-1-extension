@@ -49,6 +49,8 @@ export function WelcomeSection({ settings, state }) {
   const watched = (settings.sources && settings.sources.discord && settings.sources.discord.watched) || {};
   const watchedCount = Object.keys(watched).length;
   const sectionCount = Object.keys(((settings.profile && settings.profile.sections) || {})).length;
+  const cal = (settings && settings.calendar) || {};
+  const feed = (state && state.calendarFeed) || null;
 
   return (
     <div class="opt-stack">
@@ -77,8 +79,8 @@ export function WelcomeSection({ settings, state }) {
             {sectionCount > 0 ? ` ${sectionCount} set.` : ""}
           </Step>
           <Step n={3} done={outlineCount > 0} title={<>Add course outlines <a class="welcome-link" href="#sources">Sources</a></>}>
-            Paste each course's outline URL under Sources → Course outlines
-            (file import is coming).{outlineCount > 0 ? ` ${outlineCount} added.` : ""}
+            Paste outline URLs or import saved outline pages (Ctrl+S) under
+            Sources → Course outlines.{outlineCount > 0 ? ` ${outlineCount} added.` : ""}
           </Step>
           <Step n={4} done={!!(ss.waterlooworks && ss.waterlooworks.lastOkAt)} title={<>WaterlooWorks: just browse it <a class="welcome-link" href={WW_URL} target="_blank" rel="noreferrer">Open</a></>}>
             No sync button needed — applications and interviews update while you
@@ -89,8 +91,22 @@ export function WelcomeSection({ settings, state }) {
             notes dated messages in servers you already read.
             {watchedCount > 0 ? ` ${watchedCount} watched.` : ""}
           </Step>
-          <Step n={6} done={false} title={<>Google Calendar <a class="welcome-link" href="#calendar">Calendar</a></>}>
-            Coming soon: one subscribed calendar, no duplicates.
+          <Step
+            n={6}
+            done={!!(cal.enabled && feed && feed.status === "ok")}
+            title={
+              <>
+                Google Calendar <a class="welcome-link" href="#calendar">Calendar</a>{" "}
+                <StatusChip
+                  ok={!!(cal.enabled && feed && feed.status === "ok")}
+                  label="Syncing"
+                  todo={cal.enabled ? (feed && feed.status === "error" ? "Error" : "Setting up…") : "Not set up"}
+                />
+              </>
+            }
+          >
+            Publish your agenda to one private feed and subscribe to it from
+            Google Calendar — no duplicates.
           </Step>
         </ol>
       </Card>

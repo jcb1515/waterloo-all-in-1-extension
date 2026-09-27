@@ -19,6 +19,8 @@ const KEYS = [
   "courses",
   "applications",
   "terms",
+  "calendarFeed",
+  "outlineFiles",
   SETTINGS_KEY,
 ];
 
@@ -56,20 +58,24 @@ async function readAll() {
     courses: isObj(all.courses) ? all.courses : {},
     applications: isObj(all.applications) ? all.applications : {},
     terms: isObj(all.terms) ? all.terms : {},
+    calendarFeed: isObj(all.calendarFeed) ? all.calendarFeed : null,
+    outlineFiles: Array.isArray(all.outlineFiles) ? all.outlineFiles : [],
     settings: mergeSettings(all[SETTINGS_KEY]),
   };
 }
 
 function blank() {
-  return {
+  return /** @type {any} */ ({
     items: {},
     userState: {},
     sourceState: {},
     courses: {},
     applications: {},
     terms: {},
+    calendarFeed: null,
+    outlineFiles: [],
     settings: mergeSettings(null),
-  };
+  });
 }
 
 /**
@@ -81,7 +87,9 @@ export function useStore() {
 
   useEffect(() => {
     if (IS_PREVIEW) {
-      const fx = PREVIEW_EMPTY ? emptyPreviewState() : previewState(new Date());
+      const fx = PREVIEW_EMPTY
+        ? emptyPreviewState()
+        : previewState(new Date(), { cal: query.get("cal"), imports: query.has("imports") });
       setState({
         ready: true,
         items: fx.items,
@@ -90,6 +98,8 @@ export function useStore() {
         courses: fx.courses,
         applications: fx.applications,
         terms: fx.terms,
+        calendarFeed: fx.calendarFeed || null,
+        outlineFiles: Array.isArray(fx.outlineFiles) ? fx.outlineFiles : [],
         settings: mergeSettings(fx.settings),
       });
       return;
@@ -166,6 +176,8 @@ function emptyPreviewState() {
     courses: {},
     applications: {},
     terms: {},
+    calendarFeed: null,
+    outlineFiles: [],
     settings: null,
   };
 }

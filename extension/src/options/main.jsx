@@ -9,10 +9,11 @@ import { WelcomeSection } from "./sections/Welcome.jsx";
 import { GeneralSection } from "./sections/General.jsx";
 import { ProfileSection } from "./sections/Profile.jsx";
 import { SourcesSection } from "./sections/SourcesSection.jsx";
+import { CalendarSection } from "./sections/Calendar.jsx";
 import { PrivacySection } from "./sections/Privacy.jsx";
 import { AboutSection } from "./sections/About.jsx";
 import { SoonCard } from "./bits.jsx";
-import { CalendarIcon, BellIcon } from "../ui/icons.jsx";
+import { BellIcon } from "../ui/icons.jsx";
 
 const SECTIONS = [
   ["welcome", "Welcome", WelcomeSection],
@@ -24,18 +25,6 @@ const SECTIONS = [
   ["privacy", "Privacy & discovery", PrivacySection],
   ["about", "About", AboutSection],
 ];
-
-function CalendarSection() {
-  return (
-    <div class="opt-stack">
-      <SoonCard
-        icon={CalendarIcon}
-        title="Google Calendar"
-        text="Google Calendar sync arrives in the next update: one subscribed calendar, no duplicates."
-      />
-    </div>
-  );
-}
 
 function RemindersSection() {
   return (

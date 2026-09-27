@@ -4,7 +4,7 @@
 //   node tools/preview.mjs shots   — serve dist/, drive headless Edge over CDP,
 //                                    capture the screenshot set, exit
 //
-// Screenshots land in ../captures/screenshots/phase1b/ (outside git).
+// Screenshots land in ../captures/screenshots/<WA1_SHOT_DIR||phase1b>/ (outside git).
 // CDP is used instead of --screenshot because repeated `msedge --screenshot`
 // invocations get delegated to a running Edge instance and re-shoot the wrong
 // page.
@@ -18,7 +18,8 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(REPO, "dist");
-const OUT = path.join(REPO, "..", "captures", "screenshots", "phase1b");
+const SHOT_DIR = process.env.WA1_SHOT_DIR || "phase1b";
+const OUT = path.join(REPO, "..", "captures", "screenshots", SHOT_DIR);
 const HOST = "127.0.0.1";
 const PORT = 5178;
 const BASE = `http://${HOST}:${PORT}`;
@@ -54,7 +55,17 @@ function serve() {
   });
 }
 
-const SHOTS = [
+const SHOTS_2A = [
+  { name: "options-calendar-empty-light", url: "/src/options/options.html?preview=1&cal=empty#calendar", size: [1280, 900] },
+  { name: "options-calendar-published-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
+  { name: "options-calendar-split-dark", url: "/src/options/options.html?preview=1&cal=split#calendar", size: [1280, 900], dark: true },
+  { name: "options-calendar-resubscribe-light", url: "/src/options/options.html?preview=1&cal=error#calendar", size: [1280, 900] },
+  { name: "options-sources-imports-light", url: "/src/options/options.html?preview=1&imports=1#sources", size: [1280, 900] },
+  { name: "panel-calendar-error-light", url: "/src/panel/panel.html?preview=1&cal=error", size: [400, 900] },
+  { name: "options-welcome-light", url: "/src/options/options.html?preview=empty#welcome", size: [1280, 900] },
+];
+
+const SHOTS = process.env.WA1_SHOT_DIR === "phase2a" ? SHOTS_2A : [
   { name: "panel-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
   { name: "panel-light-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
   { name: "panel-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },

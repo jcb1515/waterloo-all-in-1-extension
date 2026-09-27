@@ -77,8 +77,24 @@ export function Agenda({ state, actions, now, onGoSources }) {
     return st && (st.error || st.session === "signed-out");
   });
 
+  // Calendar feed trouble gets its own strip — it isn't a "source", so the
+  // adapter loop above can't see it.
+  const calErr =
+    state.settings &&
+    state.settings.calendar &&
+    state.settings.calendar.enabled &&
+    state.calendarFeed &&
+    state.calendarFeed.status === "error"
+      ? state.calendarFeed.error || "Calendar publish failed"
+      : null;
+
   return (
     <div class="agenda">
+      {calErr ? (
+        <button type="button" class="attention-strip" onClick={openCalendarSettings}>
+          <AlertTriangleIcon size={14} /> Calendar: {calErr}
+        </button>
+      ) : null}
       {troubled ? (
         <button type="button" class="attention-strip" onClick={onGoSources}>
           <AlertTriangleIcon size={14} />
@@ -179,6 +195,15 @@ export function Agenda({ state, actions, now, onGoSources }) {
       ))}
     </div>
   );
+}
+
+/** Open the options page's calendar section. */
+function openCalendarSettings() {
+  try {
+    chrome.tabs.create({ url: chrome.runtime.getURL("src/options/options.html#calendar") });
+  } catch {
+    /* preview / no extension context */
+  }
 }
 
 function query0(name) {

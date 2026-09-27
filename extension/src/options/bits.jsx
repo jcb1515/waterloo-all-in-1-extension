@@ -48,14 +48,15 @@ export function Segmented({ value, options, onChange, ariaLabel }) {
 
 /**
  * Toggle switch row.
- * @param {{checked: boolean, onChange: (v: boolean) => void, label: string}} p
+ * @param {{checked: boolean, onChange: (v: boolean) => void, label: string, disabled?: boolean}} p
  */
-export function Toggle({ checked, onChange, label }) {
+export function Toggle({ checked, onChange, label, disabled }) {
   return (
-    <label class="switch">
+    <label class={`switch${disabled ? " disabled" : ""}`}>
       <input
         type="checkbox"
         checked={!!checked}
+        disabled={!!disabled}
         onChange={(e) => onChange(/** @type {any} */ (e.target).checked)}
       />
       <span class="track" aria-hidden="true" />
