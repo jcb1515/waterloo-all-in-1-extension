@@ -14,4 +14,8 @@ export const UI = Object.freeze({
   OPEN: "wa1:open",
   /** panel -> background: { type, source } drop a source's data */
   CLEAR_SOURCE: "wa1:clear-source",
+  /** options -> background: { type } publish the calendar feed now */
+  CALENDAR_PUBLISH: "wa1:calendar-publish",
+  /** options -> background: { type } delete the feed and disable sync */
+  CALENDAR_STOP: "wa1:calendar-stop",
 });

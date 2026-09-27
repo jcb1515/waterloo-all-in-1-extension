@@ -5,15 +5,18 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, IS_PREVIEW } from "../panel/data.js";
 import { setSettings } from "../core/store.js";
 import { BrandMark } from "../ui/brand.jsx";
+import { WelcomeSection } from "./sections/Welcome.jsx";
 import { GeneralSection } from "./sections/General.jsx";
 import { ProfileSection } from "./sections/Profile.jsx";
 import { SourcesSection } from "./sections/SourcesSection.jsx";
+import { CalendarSection } from "./sections/Calendar.jsx";
 import { PrivacySection } from "./sections/Privacy.jsx";
 import { AboutSection } from "./sections/About.jsx";
 import { SoonCard } from "./bits.jsx";
-import { CalendarIcon, BellIcon } from "../ui/icons.jsx";
+import { BellIcon } from "../ui/icons.jsx";
 
 const SECTIONS = [
+  ["welcome", "Welcome", WelcomeSection],
   ["general", "General", GeneralSection],
   ["profile", "Profile", ProfileSection],
   ["sources", "Sources", SourcesSection],
@@ -22,18 +25,6 @@ const SECTIONS = [
   ["privacy", "Privacy & discovery", PrivacySection],
   ["about", "About", AboutSection],
 ];
-
-function CalendarSection() {
-  return (
-    <div class="opt-stack">
-      <SoonCard
-        icon={CalendarIcon}
-        title="Google Calendar"
-        text="Google Calendar sync arrives in the next update: one subscribed calendar, no duplicates."
-      />
-    </div>
-  );
-}
 
 function RemindersSection() {
   return (
@@ -110,7 +101,7 @@ function OptionsApp() {
       <main class="opt-content">
         <h1 class="opt-heading">{activeLabel}</h1>
         {state.ready ? (
-          <ActiveView settings={state.settings} save={save} now={new Date()} />
+          <ActiveView settings={state.settings} save={save} now={new Date()} state={state} />
         ) : (
           <div class="opt-stack">
             <div class="skeleton" style={{ height: "140px" }} />

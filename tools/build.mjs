@@ -69,6 +69,16 @@ async function writeNotices() {
   await writeFile(dest, parts.join("\n"));
 }
 
+// Optional local developer defaults (gitignored): repo-root dev-profile.json
+// is baked into the bundle as __WA1_DEV_PROFILE__ and merged over
+// DEFAULT_SETTINGS by core/store.js. Released builds get null.
+let devProfile = null;
+try {
+  devProfile = JSON.parse(await readFile(path.join(REPO, "dev-profile.json"), "utf8"));
+} catch {
+  /* no dev profile — blank defaults */
+}
+
 const shared = {
   bundle: true,
   minify: false,
@@ -78,6 +88,10 @@ const shared = {
   outdir: DIST,
   outbase: SRC,
   logLevel: "info",
+  define: {
+    __WA1_DEV_PROFILE__: JSON.stringify(devProfile ?? null),
+    __WA1_CALENDAR_SERVICE_URL__: JSON.stringify(process.env.WA1_CALENDAR_SERVICE_URL || ""),
+  },
 };
 
 const configs = [

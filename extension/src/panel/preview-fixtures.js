@@ -33,8 +33,12 @@ const seen = (source, key, scope, at) => [{ source, key, scope, at }];
 
 /**
  * @param {Date} [nowD]
+ * @param {{cal?: string|null, imports?: boolean}} [variants]
+ *   cal: "published" | "split" | "error" — calendar feed states for the
+ *   options screenshots ("empty"/undefined = never published).
+ *   imports: show two imported outline files under Sources.
  */
-export function previewState(nowD = new Date()) {
+export function previewState(nowD = new Date(), variants = {}) {
   const now = nowD.getTime();
   const today = at(nowD, 12, 30);
 
@@ -217,13 +221,73 @@ export function previewState(nowD = new Date()) {
     "ENGL 192": { code: "ENGL 192", name: "Communication in Engineering", term: 1269 },
   };
 
+  const published = variants.cal === "published" || variants.cal === "split" || variants.cal === "error";
   const settings = {
     theme: "system",
     density: "comfortable",
     termCode: 1269,
     agenda: { showClasses: "today" },
     sources: {},
+    calendar: {
+      enabled: published,
+      serviceUrl: published ? "https://waterloo-all-in-1-feed.example.workers.dev" : "",
+      split: variants.cal === "split",
+      include: { classes: true, tentative: true, completed: true, termDates: true },
+      alarms: false,
+    },
   };
+
+  const calendarFeed = published
+    ? {
+        serviceUrl: "https://waterloo-all-in-1-feed.example.workers.dev",
+        feedId: "fx4k9m2p",
+        feedUrl:
+          "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/xk7p4m2q9f3h8j2w5n6r.ics",
+        groupFeeds: {
+          classes: { feedId: "cl7a2f9k4m8p3x6w1q5e", feedUrl: "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/cl7a2f9k4m8p3x6w1q5e.ics" },
+          deadlines: { feedId: "de2r6t8y1u4i7o9p3a5s", feedUrl: "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/de2r6t8y1u4i7o9p3a5s.ics" },
+          coop: { feedId: "co9p3e7r2v6x1m5k8j4h", feedUrl: "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/co9p3e7r2v6x1m5k8j4h.ics" },
+          teams: { feedId: "te4a8m1s6f9q2w7x3z5n", feedUrl: "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/te4a8m1s6f9q2w7x3z5n.ics" },
+          other: { feedId: "ot8h3e6r1c4v9b2n7m5k", feedUrl: "https://waterloo-all-in-1-feed.example.workers.dev/v1/calendars/ot8h3e6r1c4v9b2n7m5k.ics" },
+        },
+        lastPublishedAt: iso(now - 3 * MIN),
+        lastPayloadHash: "9f3e2c1a",
+        eventCount: 142,
+        accepted: 140,
+        skipped: [
+          { id: "manual:adhoc-1", reason: "no valid date" },
+          { id: "manual:adhoc-2", reason: "no valid date" },
+        ],
+        expiresAt: iso(now + 365 * DAY),
+        status: variants.cal === "error" ? "error" : "ok",
+        error:
+          variants.cal === "error"
+            ? "Feed server error 500"
+            : null,
+        needsResubscribe: variants.cal === "error",
+        retryAt: variants.cal === "error" ? iso(now + 15 * MIN) : null,
+        failures: variants.cal === "error" ? 2 : 0,
+      }
+    : null;
+
+  const outlineFiles = variants.imports
+    ? [
+        {
+          id: "m1k2j3-x4y5z6",
+          name: "ECE 105 Outline — Winter 2027.html",
+          kind: "html",
+          size: 184_320,
+          addedAt: iso(now - 2 * DAY),
+        },
+        {
+          id: "n7p8q9-a1b2c3",
+          name: "MATH 117 course outline.pdf",
+          kind: "pdf",
+          size: 96_214,
+          addedAt: iso(now - 6 * HOUR),
+        },
+      ]
+    : [];
 
   const discovery = {
     learn: {
@@ -243,5 +307,5 @@ export function previewState(nowD = new Date()) {
     },
   };
 
-  return { items, userState, sourceState, courses, applications: {}, terms: {}, settings, discovery };
+  return { items, userState, sourceState, courses, applications: {}, terms: {}, settings, discovery, calendarFeed, outlineFiles };
 }

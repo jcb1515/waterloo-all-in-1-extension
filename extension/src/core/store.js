@@ -16,6 +16,14 @@
     updates       Update[] ring buffer, newest first, max 300
     userState     Record<canonicalId, { done?, doneAt?, notes?, subtasks?,
                     estimateMin?, snoozedUntil?, hidden?, review? }>
+    calendarFeed  runtime state for the feed publish client:
+                  { serviceUrl, feedId, updateToken, feedUrl, groupFeeds,
+                    expiresAt, lastPublishedAt, lastPayloadHash, eventCount,
+                    accepted, skipped, status, error, needsResubscribe,
+                    retryAt, failures }
+                  The updateToken and feed URLs are secrets — never log them.
+    outlineFiles  imported outline pages:
+                  [{id, name, kind: "html"|"pdf", size, addedAt, html?|base64?}]
     log:<source>  the last 100 {at, message} lines per source
 
   Every write goes through one promise queue so writers can't interleave.
@@ -37,36 +45,56 @@ export const DEFAULT_SETTINGS = {
   density: "comfortable",
   termCode: 1269,
   profile: {
-    sections: {
-      "MATH 117": ["LEC 002"],
-      "MATH 115": ["LEC 002"],
-      "ECE 105": ["LEC 002"],
-      "ECE 150": ["LEC 002"],
-      "ECE 190": ["LEC 002"],
-      "ECE 198": ["LEC 002"],
-      "ENGL 192": ["LEC 008"],
-      "GENE 119": ["SEM 003"],
-    },
-    groups: { "ECE 190": "5" },
+    sections: {},
+    groups: {},
   },
   sources: {
     outline: {
       enabled: true,
-      urls: { "ECE 150": "https://outline.uwaterloo.ca/viewer/view/npch7t" },
+      urls: {},
     },
     discord: {
       enabled: true,
-      watched: {
-        UWASIC: { focus: [], channels: [] },
-        UWHPC: { focus: [], channels: [] },
-        WATonomous: { focus: ["electrical"], channels: [] },
-        "Waterloo Aerial Robotics Group": { focus: ["electrical"], channels: [] },
-        "ECE Waterloo '31": { focus: [], channels: [] },
-      },
+      watched: {},
     },
   },
   agenda: { showClasses: "today" },
+  calendar: {
+    enabled: false,
+    serviceUrl: "",
+    split: false,
+    include: { classes: true, tentative: true, completed: true, termDates: true },
+    alarms: false,
+  },
 };
+
+/*
+  Local developer profile: when a dev-profile.json exists at the repo root,
+  tools/build.mjs bakes it into the bundle as __WA1_DEV_PROFILE__. It sits
+  between DEFAULT_SETTINGS and the stored wa1Settings, so personal defaults
+  (sections, outline URLs, watched servers) stay out of the shipped source.
+*/
+const DEV_PROFILE =
+  typeof __WA1_DEV_PROFILE__ === "undefined" ? null : __WA1_DEV_PROFILE__;
+
+/*
+  Build-time calendar service URL: a released build can ship a hosted feed
+  server (set WA1_CALENDAR_SERVICE_URL in the environment when building), the
+  same way gurshh's calendar-service-config.js worked. It overrides the dev
+  profile's calendar.serviceUrl; the user's saved setting still wins.
+*/
+const BUILD_SERVICE_URL =
+  typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
+
+/**
+ * `defaults` deep-merged with a developer profile: plain objects merge,
+ * arrays and scalars replace. Pure — used by getSettings and the UI client.
+ * @param {Record<string, any>} defaults
+ * @param {Record<string, any> | null | undefined} profile
+ */
+export function withDevProfile(defaults, profile) {
+  return deepMerge(defaults, isObj(profile) ? profile : {});
+}
 
 /* --------------------------- write queue --------------------------- */
 
@@ -83,21 +111,45 @@ export function enqueue(fn) {
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+/**
+ * Keys holding whole user-edited tables (course -> value maps): a stored
+ * value replaces the inherited one outright, so deleting a row in the UI
+ * doesn't resurrect the default/dev-profile row.
+ */
+const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched"]);
+
 /** Recursive merge for plain-object values; arrays and scalars overwrite. */
 function deepMerge(base, patch) {
   const out = { ...(isObj(base) ? base : {}) };
   for (const [k, v] of Object.entries(patch || {})) {
-    out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+    if (REPLACE_KEYS.has(k) && isObj(v)) {
+      out[k] = v;
+    } else {
+      out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+    }
   }
   return out;
 }
 
 /* --------------------------- settings --------------------------- */
 
-/** Settings deep-merged over DEFAULT_SETTINGS. */
+/**
+ * Effective settings for `saved`: DEFAULT_SETTINGS + the baked-in developer
+ * profile (if any) + the user's stored settings, in that order.
+ * @param {any} saved raw wa1Settings value
+ */
+export function resolveSettings(saved) {
+  let base = withDevProfile(DEFAULT_SETTINGS, DEV_PROFILE);
+  if (BUILD_SERVICE_URL) {
+    base = deepMerge(base, { calendar: { serviceUrl: BUILD_SERVICE_URL } });
+  }
+  return deepMerge(base, isObj(saved) ? saved : {});
+}
+
+/** Settings deep-merged over DEFAULT_SETTINGS (+ dev profile). */
 export async function getSettings() {
   const { [SETTINGS_KEY]: saved } = await chrome.storage.local.get(SETTINGS_KEY);
-  return deepMerge(DEFAULT_SETTINGS, isObj(saved) ? saved : {});
+  return resolveSettings(saved);
 }
 
 /**

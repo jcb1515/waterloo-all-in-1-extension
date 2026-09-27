@@ -5,15 +5,19 @@ import { useState } from "preact/hooks";
 import { Card, Field, Toggle } from "../bits.jsx";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { normCourseCode } from "../../core/contract.js";
-import { ExternalLinkIcon, TrashIcon, PlusIcon } from "../../ui/icons.jsx";
+import { mutateKey } from "../../core/store.js";
+import { send, IS_PREVIEW } from "../../panel/data.js";
+import { UI } from "../../core/messages.js";
+import { fileToEntry, OUTLINE_FILES_KEY } from "../outline-import.js";
+import { ExternalLinkIcon, TrashIcon, PlusIcon, FileTextIcon } from "../../ui/icons.jsx";
 
 const STAGE_BADGE = { live: "badge-ok", soon: "badge-muted" };
 const STAGE_LABEL = { live: "Live", soon: "Coming soon" };
 
 /**
- * @param {{settings: any, save: (patch: any) => void, saveNow: (patch: any) => void}} p
+ * @param {{settings: any, save: (patch: any) => void, state?: any}} p
  */
-export function SourcesSection({ settings, save }) {
+export function SourcesSection({ settings, save, state }) {
   const src = settings.sources || {};
 
   const patchSource = (id, patch) => save({ sources: { [id]: { ...(src[id] || {}), ...patch } } });
@@ -46,7 +50,12 @@ export function SourcesSection({ settings, save }) {
                 onChange={(v) => patchSource(a.id, { enabled: v })}
               />
             </div>
-            {a.id === "outline" ? <OutlineUrls src={src.outline || {}} save={save} /> : null}
+            {a.id === "outline" ? (
+              <>
+                <OutlineUrls src={src.outline || {}} save={save} />
+                <OutlineFiles files={(state && state.outlineFiles) || []} />
+              </>
+            ) : null}
             {a.id === "discord" ? <DiscordWatched src={src.discord || {}} save={save} /> : null}
           </Card>
         );
@@ -123,6 +132,92 @@ function OutlineUrls({ src, save }) {
           </tr>
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * Imported outline pages (saved HTML / PDF), stored under `outlineFiles`.
+ * Re-parsed by the outline adapter on the next sync.
+ * @param {{files: any[]}} p
+ */
+function OutlineFiles({ files }) {
+  const [local, setLocal] = useState(/** @type {any[] | null} */ (null));
+  const [error, setError] = useState("");
+  const list = IS_PREVIEW && local ? local : files;
+
+  const resync = () => send({ type: UI.SYNC, source: "outline" });
+
+  const write = async (/** @type {(cur: any[]) => any[]} */ fn) => {
+    if (IS_PREVIEW) {
+      setLocal((cur) => fn(cur || files));
+      return;
+    }
+    await mutateKey(OUTLINE_FILES_KEY, (cur) => fn(Array.isArray(cur) ? cur : []));
+    resync();
+  };
+
+  const onPick = async (/** @type {any} */ e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = "";
+    for (const file of picked) {
+      try {
+        const entry = await fileToEntry(file);
+        // Same name replaces (re-saving a page refreshes it).
+        await write((cur) => [...cur.filter((f) => f.name !== entry.name), entry]);
+      } catch (err) {
+        setError(String((err && /** @type {any} */ (err).message) || err));
+      }
+    }
+  };
+
+  return (
+    <div class="src-sub">
+      <span class="label">Imported files</span>
+      <p class="help">
+        Or save the outline page (Ctrl+S) and import it — useful when a browser fetch is
+        blocked. HTML pages are sanitized before storing; PDFs are kept for later parsing.
+      </p>
+      {list.length ? (
+        <table class="edit-table">
+          <tbody>
+            {list.map((f) => (
+              <tr key={f.id || f.name}>
+                <td class="url-cell">
+                  <FileTextIcon size={12} /> {f.name}
+                </td>
+                <td class="num">
+                  {Math.round((f.size || 0) / 1024)} KB · {f.kind}
+                  {f.addedAt ? ` · ${new Date(f.addedAt).toLocaleDateString()}` : ""}
+                </td>
+                <td class="row-act">
+                  <button
+                    type="button"
+                    class="btn-icon"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => write((cur) => cur.filter((x) => x.id !== f.id))}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p class="help">No imported files yet.</p>
+      )}
+      {error ? <p class="help status-err">{error}</p> : null}
+      <label class="btn">
+        Import files
+        <input
+          type="file"
+          multiple
+          accept=".html,.htm,.pdf"
+          style={{ display: "none" }}
+          onChange={onPick}
+        />
+      </label>
     </div>
   );
 }

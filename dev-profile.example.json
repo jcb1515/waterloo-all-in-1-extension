@@ -1,0 +1,17 @@
+{
+  "//": "Copy to dev-profile.json (gitignored) and fill in your own values. These merge over DEFAULT_SETTINGS at build time — objects merge, arrays and scalars replace.",
+  "profile": {
+    "sections": { "CS 999": ["LEC 001", "TUT 101"] },
+    "groups": { "CS 999": "42" }
+  },
+  "sources": {
+    "outline": {
+      "urls": { "CS 999": "https://outline.uwaterloo.ca/viewer/view/example" }
+    },
+    "discord": {
+      "watched": {
+        "Example Club": { "focus": ["firmware"], "channels": [] }
+      }
+    }
+  }
+}
