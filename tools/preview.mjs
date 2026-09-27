@@ -95,7 +95,20 @@ const SHOTS_CP2 = [
   { name: "panel-week-light", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [400, 900] },
 ];
 
+const SHOTS_3A = [
+  { name: "panel-item-sheet-light", url: "/src/panel/panel.html?preview=1&item=learn%3Aece105-quiz3", size: [400, 900] },
+  { name: "panel-quickadd-light", url: "/src/panel/panel.html?preview=1&quickadd=1&q=" + encodeURIComponent("Team meeting tomorrow 6-7pm E7 2324"), size: [400, 900] },
+  { name: "panel-teams-light", url: "/src/panel/panel.html?preview=1&tab=teams", size: [400, 900] },
+  { name: "panel-teams-dark", url: "/src/panel/panel.html?preview=1&tab=teams", size: [400, 900], dark: true },
+  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "options-general-hidden-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900] },
+  { name: "options-about-backup-light", url: "/src/options/options.html?preview=1&backup=import#about", size: [1280, 900] },
+  { name: "panel-tabs-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "phase3a" ? SHOTS_3A :
   process.env.WA1_SHOT_DIR === "cp2" ? SHOTS_CP2 :
   process.env.WA1_SHOT_DIR === "phase2c" ? SHOTS_2C :
   process.env.WA1_SHOT_DIR === "phase2b" ? SHOTS_2B :
@@ -234,6 +247,11 @@ async function shots() {
           marks: document.querySelectorAll("mark").length,
           discordCtrls: document.querySelectorAll(".discord-controls button").length,
           numInputs: document.querySelectorAll("input[type=number]").length,
+          teamCards: document.querySelectorAll(".team-card").length,
+          sheetFacts: document.querySelectorAll(".sheet-fact").length,
+          hiddenRows: document.querySelectorAll(".hidden-row").length,
+          backupSummary: document.querySelectorAll(".backup-summary").length,
+          tabs: document.querySelectorAll(".tabs .tab, .segmented button").length,
           text: document.body.innerText.slice(0, 120)
         })`,
       });

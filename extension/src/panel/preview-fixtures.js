@@ -103,6 +103,13 @@ export function previewState(nowD = new Date(), variants = {}) {
     dueAt: nextWeekday(nowD, 5, 23, 59), // Friday
     weight: 4,
     url: "https://learn.uwaterloo.ca/d2l/home/102",
+    details: "30 minutes, on Learn. Closed book; one formula sheet allowed.",
+    meta: {
+      facts: [
+        { label: "Coverage", value: "Ch. 3–4: Thevenin, superposition" },
+        { label: "Attempts", value: "2, best counts" },
+      ],
+    },
     seenIn: seen("learn", "ece105-quiz3", "quizzes", today),
   });
   add("learn:ece190-deliverable1", {
