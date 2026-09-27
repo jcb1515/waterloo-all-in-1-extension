@@ -4,5 +4,8 @@ dist/
 *.crx
 *.pem
 .env
+.dev.vars
 .DS_Store
 Thumbs.db
+.wrangler/
+server/.wrangler/
