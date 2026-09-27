@@ -140,3 +140,41 @@ test("a sync with no intervening observe folds once, in the ingest queue", async
     store.clear();
   }
 });
+
+test("the sync context carries the slim applications view", async () => {
+  /** @type {any} */
+  let seenCtx = null;
+  const adapter = {
+    id: SOURCE,
+    intervalMinutes: 0,
+    async sync(/** @type {any} */ ctx) {
+      seenCtx = ctx;
+      return { items: [], complete: true, session: "signed-in" };
+    },
+  };
+  // Applications live in the merged view, so seed the stored map directly.
+  store.set("applications", {
+    "waterlooworks:1": {
+      id: "waterlooworks:1",
+      employer: "Acme Analog",
+      jobTitle: "Hardware Engineer",
+      jobId: "1",
+      status: "offer",
+      privateNote: "adapters must not see this",
+    },
+  });
+  ADAPTERS.push(/** @type {any} */ (adapter));
+  try {
+    await runSync(SOURCE, "manual");
+    assert.ok(Array.isArray(seenCtx.applications), "ctx.applications is an array");
+    assert.equal(seenCtx.applications.length, 1);
+    assert.deepEqual(
+      Object.keys(seenCtx.applications[0]).sort(),
+      ["employer", "id", "jobId", "jobTitle", "status"],
+      "slim record only — no private fields"
+    );
+  } finally {
+    ADAPTERS.splice(ADAPTERS.indexOf(/** @type {any} */ (adapter)), 1);
+    store.clear();
+  }
+});

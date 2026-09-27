@@ -69,6 +69,21 @@ export function nextReminders(items, userState = {}, settings = {}, now = new Da
     if (!isVisible(eff, nowMs)) continue;
     if (eff.status !== "open") continue;
     if (!rem.includeTentative && eff.confidence === "tentative") continue;
+
+    // A study to-do reminds once, when it opens ("Start studying for…").
+    if (eff.meta && eff.meta.auto === "study" && eff.opensAt) {
+      const openMs = Date.parse(eff.opensAt);
+      if (Number.isNaN(openMs)) continue;
+      const key = `${eff.id}:open:${openMs}`;
+      if (sent[key]) continue;
+      let fireAt = openMs;
+      const until = snoozed[key] ? Date.parse(snoozed[key]) : 0;
+      if (until > nowMs) fireAt = Math.max(fireAt, until);
+      else if (fireAt < nowMs - STALE_MS) continue;
+      out.push({ key, itemId: eff.id, fireAt, lead: Math.round((Date.parse(anchorOf(eff)) - openMs) / MIN) });
+      continue;
+    }
+
     const a = anchorOf(eff);
     if (!a) continue;
     const anchorMs = Date.parse(a);
@@ -153,6 +168,14 @@ function fmtTime(isoOrMs) {
 export function reminderCopy(eff, nowMs) {
   const a = anchorOf(eff);
   const anchorMs = Date.parse(a);
+  if (eff.meta && eff.meta.auto === "study") {
+    const label = eff.meta.parentLabel || "assessment";
+    // "Study for MATH 117 Midterm — the midterm is in 5 days · 4:30 PM"
+    return {
+      title: eff.title,
+      message: `The ${label} is ${fmtLead(anchorMs - nowMs)} · ${fmtTime(anchorMs)}`,
+    };
+  }
   const title = eff.org ? `${eff.org} · ${eff.title}` : eff.title;
   const verb = eff.startAt ? "Starts" : "Due";
   let message = `${verb} ${fmtLead(anchorMs - nowMs)} · ${fmtTime(anchorMs)}`;
@@ -231,8 +254,9 @@ const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  * @param {Record<string, any>} userState
  * @param {Date} now
  * @param {any} [settings]
+ * @param {Record<string, any>} [todos] derived to-dos — counted as "N to-dos"
  */
-export function digestText(items, userState = {}, now = new Date(), settings = {}) {
+export function digestText(items, userState = {}, now = new Date(), settings = {}, todos = {}) {
   const acceptPending = !!(settings.review && settings.review.showPending);
   const nowMs = now.getTime();
   const weekEnd = nowMs + 7 * DAY;
@@ -240,6 +264,17 @@ export function digestText(items, userState = {}, now = new Date(), settings = {
   let heavy = 0;
   let exams = 0;
   let interviews = 0;
+  let todoCount = 0;
+  for (const raw of Object.values(todos || {})) {
+    if (!raw || !raw.id) continue;
+    const eff = effectiveItem(raw, userState[raw.id], { acceptPending });
+    if (!isVisible(eff, nowMs)) continue;
+    if (eff.status !== "open") continue;
+    const a = anchorOf(eff);
+    if (!a) continue;
+    const ms = Date.parse(a);
+    if (!Number.isNaN(ms) && ms >= nowMs && ms < weekEnd) todoCount++;
+  }
   /** @type {Map<number, number>} */
   const dayCounts = new Map();
   for (const raw of Object.values(items || {})) {
@@ -264,13 +299,14 @@ export function digestText(items, userState = {}, now = new Date(), settings = {
       dayCounts.set(p.weekday, (dayCounts.get(p.weekday) || 0) + 1);
     }
   }
-  if (!due && !exams && !interviews) return null;
+  if (!due && !exams && !interviews && !todoCount) return null;
   const parts = [];
   if (due) {
     parts.push(`${due} due${heavy ? ` (${heavy} worth ≥10%)` : ""}`);
   }
   if (exams) parts.push(`${exams} exam${exams === 1 ? "" : "s"}`);
   if (interviews) parts.push(`${interviews} interview${interviews === 1 ? "" : "s"}`);
+  if (todoCount) parts.push(`${todoCount} to-do${todoCount === 1 ? "" : "s"}`);
   let busiest = -1;
   let busiestN = 0;
   for (const [d, n] of dayCounts) {
@@ -318,7 +354,14 @@ export async function rescheduleReminders(deps = {}) {
   const { sent, snoozed } = await reminderStore();
   const mv = await getMergedView();
   const now = new Date();
-  const pending = nextReminders(mv.items, mv.userState, settings, now, sent, snoozed);
+  const pending = nextReminders(
+    { ...mv.items, ...(mv.todos || {}) },
+    mv.userState,
+    settings,
+    now,
+    sent,
+    snoozed
+  );
   const next = pending.find((r) => r.fireAt > now.getTime() - STALE_MS);
   alarm(REMIND_ALARM, next ? next.fireAt : null);
   await rescheduleBriefing(settings, deps);
@@ -393,7 +436,8 @@ export async function fireDueReminders() {
   const now = new Date();
   let mv = await getMergedView();
   let { sent, snoozed } = await reminderStore();
-  let pending = nextReminders(mv.items, mv.userState, settings, now, sent, snoozed);
+  const allItems = () => ({ ...mv.items, ...(mv.todos || {}) });
+  let pending = nextReminders(allItems(), mv.userState, settings, now, sent, snoozed);
   let due = dueNow(pending, now.getTime());
   if (!due.length) {
     await rescheduleReminders();
@@ -403,7 +447,7 @@ export async function fireDueReminders() {
   // Learn submission recheck: if a due reminder is a Learn deadline/quiz,
   // re-sync Learn first (20 s cap) — a submitted item shouldn't nag.
   const needsLearnCheck = due.some((r) => {
-    const it = mv.items[r.itemId];
+    const it = mv.items[r.itemId] || (mv.todos || {})[r.itemId];
     return it && it.source === "learn" && (it.type === "deadline" || it.type === "quiz");
   });
   if (needsLearnCheck) {
@@ -414,7 +458,7 @@ export async function fireDueReminders() {
       ]);
       mv = await getMergedView();
       ({ sent, snoozed } = await reminderStore());
-      pending = nextReminders(mv.items, mv.userState, settings, new Date(), sent, snoozed);
+      pending = nextReminders(allItems(), mv.userState, settings, new Date(), sent, snoozed);
       due = dueNow(pending, Date.now());
     } catch {
       /* recheck is best-effort; fire on last-known state */
@@ -424,9 +468,13 @@ export async function fireDueReminders() {
   const markSent = {};
   const snoozePatch = {};
   for (const r of due) {
-    const eff = effectiveItem(mv.items[r.itemId], mv.userState[r.itemId], {
-      acceptPending: !!(settings.review && settings.review.showPending),
-    });
+    const eff = effectiveItem(
+      mv.items[r.itemId] || (mv.todos || {})[r.itemId],
+      mv.userState[r.itemId],
+      {
+        acceptPending: !!(settings.review && settings.review.showPending),
+      }
+    );
     if (!eff || eff.status !== "open" || !isVisible(eff, Date.now())) {
       markSent[r.key] = new Date().toISOString();
       continue;
@@ -512,7 +560,7 @@ export async function sendDigest() {
   const last = await getLocal(DIGEST_KEY);
   if (last === dayKey) return;
   const mv = await getMergedView();
-  const text = digestText(mv.items, mv.userState, now, settings);
+  const text = digestText(mv.items, mv.userState, now, settings, mv.todos);
   if (text) {
     try {
       await chrome.notifications.create("wa1:digest", {

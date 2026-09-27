@@ -8,6 +8,8 @@
     sourceState   { [source]: { state, lastRunAt, lastOkAt, session, error,
                     complete, failures, backoffUntil, itemCount } }
     items         Record<canonicalId, Item> — the merged view the UI reads
+    todos         Record<id, Item> — derived auto to-dos (core/todos.js);
+                  outside the merge engine's raws
     links         Record<rawItemId, canonicalId>
     uidMap        Record<canonicalId, {uid, seq, hash}> — calendar identity
     applications  Record<id, Application>
@@ -59,6 +61,20 @@ export const DEFAULT_SETTINGS = {
     },
   },
   agenda: { showClasses: "today" },
+  // Derived to-dos (core/todos.js): auto-created tasks that complete on their own.
+  todos: {
+    study: {
+      enabled: true,
+      leadDays: { quiz: 2, midterm: 5, final: 7, exam: 5, presentation: 3 },
+    },
+    coop: true,
+    deadlines: true,
+    replies: true,
+    includeInCalendar: false,
+  },
+  panel: {
+    tabs: null, // null = default order; [{id, visible}] when customised
+  },
   // Review queue: showPending treats text-found dates as accepted without a
   // trip through the Review tab (dismissed items still hide).
   review: { showPending: false },
@@ -233,7 +249,7 @@ export async function mutateKey(key, fn) {
 /** Everything recompute needs in one read. */
 export async function getMergedView() {
   const keys = [
-    "items", "links", "uidMap", "applications", "courses", "terms",
+    "items", "todos", "links", "uidMap", "applications", "courses", "terms",
     "userState", "updates", "sourceState",
     ...SOURCE_IDS.map(rawKey),
   ];
@@ -244,6 +260,7 @@ export async function getMergedView() {
   return {
     raws,
     items: isObj(all.items) ? all.items : {},
+    todos: isObj(all.todos) ? all.todos : {},
     links: isObj(all.links) ? all.links : {},
     uidMap: isObj(all.uidMap) ? all.uidMap : {},
     applications: isObj(all.applications) ? all.applications : {},

@@ -18,6 +18,7 @@ import { orgStyle } from "../../ui/colors.js";
 import {
   typeIcon,
   ExternalLinkIcon,
+  ArrowLeftIcon,
   MapPinIcon,
   CircleDashedIcon,
   EyeOffIcon,
@@ -59,7 +60,8 @@ function whenLabel(item) {
  *   onClose: () => void}} props
  */
 export function ItemSheet({ state, actions, now, itemId, onClose }) {
-  const raw = state.items[itemId];
+  // Derived to-dos live in the separate `todos` map, not `items`.
+  const raw = state.items[itemId] || (state.todos || {})[itemId];
   const us = (state.userState || {})[itemId] || {};
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [notes, setNotes] = useState(us.notes || "");
@@ -165,7 +167,22 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
               "Exact"
             )}
           </dd>
+          {item.meta && item.meta.onCalendar ? (
+            <>
+              <dt>Calendar</dt>
+              <dd>On your Google Calendar — the feed skips it to avoid a duplicate</dd>
+            </>
+          ) : null}
         </dl>
+        {item.meta && item.meta.auto === "study" ? (
+          <StudyTodoCard
+            item={item}
+            us={us}
+            parent={state.items[(item.meta.parentId)] || null}
+            actions={actions}
+            now={now}
+          />
+        ) : null}
         {item.details ? <p class="sheet-details">{item.details}</p> : null}
         {facts.length ? (
           <dl class="sheet-facts">
@@ -304,6 +321,68 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
           ) : null}
         </div>
       </section>
+    </div>
+  );
+}
+
+const LEAD_CHOICES = [1, 2, 3, 5, 7, 10, 14];
+
+/**
+ * The auto-section on a derived study to-do: a link to the parent item and
+ * the lead-time override (userState.override.opensAt = due − lead days).
+ * @param {{item: any, us: any, parent: any, actions: any, now: Date}} p
+ */
+function StudyTodoCard({ item, us, parent, actions, now }) {
+  const dueMs = Date.parse(item.dueAt || item.startAt || "");
+  const openMs = Date.parse(item.opensAt || "");
+  const leadDays =
+    Number.isNaN(dueMs) || Number.isNaN(openMs)
+      ? (item.meta && item.meta.leadDays) || null
+      : Math.max(0, Math.round((dueMs - openMs) / 86400000));
+
+  const setLead = (days) => {
+    if (Number.isNaN(dueMs)) return;
+    const override = { ...(us.override || {}), opensAt: new Date(dueMs - days * 86400000).toISOString() };
+    actions.setUserState(item.id, { override });
+  };
+
+  return (
+    <div class="study-todo">
+      {item.meta && item.meta.completesWhen ? (
+        <p class="help">
+          Auto-created — completes {item.meta.completesWhen}.
+        </p>
+      ) : null}
+      {parent ? (
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={() => actions.openItem(parent)}
+        >
+          <ArrowLeftIcon size={12} /> {parent.title}
+          {parent.dueAt || parent.startAt ? (
+            <span class="help"> · {fmtDay(parent.dueAt || parent.startAt)}</span>
+          ) : null}
+        </button>
+      ) : null}
+      {Number.isNaN(dueMs) ? null : (
+        <div class="study-lead">
+          <span class="sheet-label">Start showing {leadDays != null ? `(currently ${leadDays} day${leadDays === 1 ? "" : "s"} before)` : "…"}</span>
+          <div class="chip-scroll chip-wrap">
+            {LEAD_CHOICES.map((d) => (
+              <button
+                key={d}
+                type="button"
+                class={`chip filter-chip${leadDays === d ? " active" : ""}`}
+                aria-pressed={leadDays === d}
+                onClick={() => setLead(d)}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

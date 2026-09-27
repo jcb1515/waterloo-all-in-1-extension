@@ -14,6 +14,7 @@ import { previewState } from "./preview-fixtures.js";
 
 const KEYS = [
   "items",
+  "todos",
   "userState",
   "sourceState",
   "courses",
@@ -55,6 +56,7 @@ async function readAll() {
   const all = /** @type {Record<string, any>} */ (await chrome.storage.local.get(KEYS));
   return {
     items: isObj(all.items) ? all.items : {},
+    todos: isObj(all.todos) ? all.todos : {},
     userState: isObj(all.userState) ? all.userState : {},
     sourceState: isObj(all.sourceState) ? all.sourceState : {},
     courses: isObj(all.courses) ? all.courses : {},
@@ -71,6 +73,7 @@ async function readAll() {
 function blank() {
   return /** @type {any} */ ({
     items: {},
+    todos: {},
     userState: {},
     sourceState: {},
     courses: {},
@@ -95,10 +98,15 @@ export function useStore() {
     if (IS_PREVIEW) {
       const fx = PREVIEW_EMPTY
         ? emptyPreviewState()
-        : previewState(new Date(), { cal: query.get("cal"), imports: query.has("imports") });
+        : previewState(new Date(), {
+            cal: query.get("cal"),
+            imports: query.has("imports"),
+            mailscan: query.get("mailscan") === "1" || query.get("mailscan") === "panel",
+          });
       setState({
         ready: true,
         items: fx.items,
+        todos: fx.todos || {},
         userState: fx.userState,
         sourceState: fx.sourceState,
         courses: fx.courses,
@@ -197,6 +205,7 @@ export function useStore() {
 function emptyPreviewState() {
   return {
     items: {},
+    todos: {},
     userState: {},
     sourceState: {},
     courses: {},

@@ -6,6 +6,7 @@
 */
 
 import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates, linkEmailItems } from "./merge.js";
+import { deriveTodos } from "./todos.js";
 import { manualUpsertResult, manualDeleteResult } from "./quickadd.js";
 import {
   getSettings,
@@ -451,18 +452,30 @@ export async function handleCapture(msg) {
  */
 export async function recomputeAll(now = new Date(), extraUpdates = []) {
   return enqueue(async () => {
-    const mv = await getMergedView();
+    const [mv, settings] = await Promise.all([getMergedView(), getSettings()]);
+    const applications = mergeApplications(mv.raws);
     const res = recompute({
       raws: mv.raws,
       prevItems: mv.items,
       links: mv.links,
       uidMap: mv.uidMap,
       userState: mv.userState,
+      applications,
       now,
     });
     // Email items link to WaterlooWorks applications at the view level —
     // adapter-persisted application records stay untouched.
-    const linked = linkEmailItems(res.items, mergeApplications(mv.raws));
+    const linked = linkEmailItems(res.items, applications);
+    // Derived to-dos live in their own key — they are not merge raws and the
+    // Agenda never sees them.
+    const todos = deriveTodos({
+      items: linked.items,
+      applications: linked.applications,
+      userState: mv.userState,
+      settings,
+      now,
+      prev: mv.todos,
+    });
     // All writes happen inside this one queued task — a nested enqueue()
     // (pushUpdates/mutateKey) would deadlock against the outer task.
     const cur = await chrome.storage.local.get("updates");
@@ -473,6 +486,7 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
     );
     await chrome.storage.local.set({
       items: linked.items,
+      todos,
       links: res.links,
       uidMap: res.uidMap,
       applications: linked.applications,

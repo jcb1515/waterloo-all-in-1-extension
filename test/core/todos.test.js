@@ -1,0 +1,265 @@
+// @ts-check
+// Derived to-dos: deriveTodos study/co-op rules, autoDoneRule reasons, and
+// the todoSourceItem settings gates.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { deriveTodos, autoDoneRule, todoSourceItem } from "../../extension/src/core/todos.js";
+import { nextReminders } from "../../extension/src/core/remind.js";
+
+const DAY = 86400000;
+const NOW = new Date("2026-01-19T16:00:00.000Z"); // Monday noon EST-ish
+const iso = (ms) => new Date(ms).toISOString();
+const t0 = NOW.getTime();
+
+const SETTINGS = {
+  todos: {
+    study: { enabled: true, leadDays: { quiz: 2, midterm: 5, final: 7, exam: 5, presentation: 3 } },
+    coop: true,
+    deadlines: true,
+    replies: true,
+    includeInCalendar: false,
+  },
+};
+
+const item = (id, over = {}) => ({
+  id,
+  source: "learn",
+  type: "deadline",
+  title: id,
+  status: "open",
+  confidence: "exact",
+  review: "auto",
+  ...over,
+});
+
+/* ------------------------------- study -------------------------------- */
+
+test("deriveTodos: a quiz gets a study to-do due with it, opening leadDays early", () => {
+  const due = t0 + 4 * DAY;
+  const items = { "learn:q1": item("learn:q1", { type: "quiz", title: "Quiz 3", org: "ECE 105", dueAt: iso(due) }) };
+  const todos = deriveTodos({ items, settings: SETTINGS, now: NOW });
+  const todo = todos["todo:study:learn:q1"];
+  assert.ok(todo, "study to-do exists");
+  assert.equal(todo.title, "Study for ECE 105 Quiz 3");
+  assert.equal(todo.type, "task");
+  assert.equal(todo.source, "manual");
+  assert.equal(todo.review, "auto");
+  assert.equal(todo.meta.auto, "study");
+  assert.equal(todo.meta.parentId, "learn:q1");
+  assert.equal(todo.dueAt, iso(due));
+  assert.equal(Date.parse(todo.opensAt), due - 2 * DAY, "quiz lead is 2 days");
+});
+
+test("deriveTodos: per-category leads — midterm 5d, final 7d, exam 5d, presentation 3d", () => {
+  const due = t0 + 30 * DAY;
+  const items = {
+    "o:mid": item("o:mid", { source: "outline", type: "exam", category: "midterm", title: "Midterm", dueAt: iso(due) }),
+    "o:fin": item("o:fin", { source: "outline", type: "exam", category: "final", title: "Final exam", dueAt: iso(due) }),
+    "o:oth": item("o:oth", { source: "outline", type: "exam", category: "make-up", title: "Make-up exam", dueAt: iso(due) }),
+    "o:pres": item("o:pres", { source: "outline", type: "presentation", title: "Design talk", dueAt: iso(due) }),
+  };
+  const todos = deriveTodos({ items, settings: SETTINGS, now: NOW });
+  assert.equal(Date.parse(todos["todo:study:o:mid"].opensAt), due - 5 * DAY);
+  assert.equal(Date.parse(todos["todo:study:o:fin"].opensAt), due - 7 * DAY);
+  assert.equal(Date.parse(todos["todo:study:o:oth"].opensAt), due - 5 * DAY, "generic exam falls back to the exam lead");
+  assert.equal(Date.parse(todos["todo:study:o:pres"].opensAt), due - 3 * DAY);
+  assert.equal(todos["todo:study:o:pres"].title, "Prepare Design talk", "presentation wording");
+});
+
+test("deriveTodos: a passed assessment marks the to-do done, then drops it after 2 days", () => {
+  const past = t0 - 3 * 3600000; // due 3h ago
+  const items = { "l:q": item("l:q", { type: "quiz", title: "Quiz", dueAt: iso(past) }) };
+  const todos = deriveTodos({ items, settings: SETTINGS, now: NOW });
+  assert.equal(todos["todo:study:l:q"].status, "done", "anchor passed -> done");
+
+  const late = deriveTodos({ items, settings: SETTINGS, now: new Date(t0 + 3 * DAY) });
+  assert.equal(late["todo:study:l:q"], undefined, "dropped 2 days after it finished");
+});
+
+test("deriveTodos: dismissed/hidden/cancelled parents produce no to-do", () => {
+  const due = t0 + 4 * DAY;
+  const items = {
+    "l:dismissed": item("l:dismissed", { type: "quiz", dueAt: iso(due) }),
+    "l:hidden": item("l:hidden", { type: "quiz", dueAt: iso(due) }),
+    "l:cancelled": item("l:cancelled", { type: "quiz", dueAt: iso(due), status: "cancelled" }),
+    "l:pending": item("l:pending", { type: "quiz", dueAt: iso(due), review: "pending" }),
+  };
+  const userState = {
+    "l:dismissed": { review: "dismissed" },
+    "l:hidden": { hidden: true },
+  };
+  const todos = deriveTodos({ items, userState, settings: SETTINGS, now: NOW });
+  assert.deepEqual(Object.keys(todos), []);
+});
+
+test("deriveTodos: study.enabled=false makes none; createdAt survives recompute", () => {
+  const due = t0 + 4 * DAY;
+  const items = { "l:q": item("l:q", { type: "quiz", dueAt: iso(due) }) };
+  const off = deriveTodos({ items, settings: { todos: { study: { enabled: false } } }, now: NOW });
+  assert.deepEqual(Object.keys(off), []);
+  const prev = { "todo:study:l:q": { meta: { createdAt: "2026-01-01T00:00:00.000Z" } } };
+  const again = deriveTodos({ items, settings: SETTINGS, now: NOW, prev });
+  assert.equal(again["todo:study:l:q"].meta.createdAt, "2026-01-01T00:00:00.000Z");
+});
+
+/* -------------------------------- co-op ------------------------------- */
+
+const APP = {
+  id: "waterlooworks:1",
+  employer: "Acme Analog",
+  jobTitle: "Hardware Engineer",
+  jobId: "1",
+  status: "offer",
+  history: [{ status: "offer", at: iso(t0 - 3600000) }],
+};
+
+test("deriveTodos: an offered application gets a respond-to-offer to-do at the offer deadline", () => {
+  const items = {
+    "ww:offer-dl": item("ww:offer-dl", {
+      source: "waterlooworks",
+      type: "offer-deadline",
+      title: "Respond",
+      dueAt: iso(t0 + 2 * DAY),
+      meta: { jobId: "1" },
+    }),
+  };
+  const todos = deriveTodos({ items, applications: { [APP.id]: APP }, settings: SETTINGS, now: NOW });
+  const todo = todos[`todo:offer:${APP.id}`];
+  assert.ok(todo);
+  assert.equal(todo.title, "Respond to offer — Acme Analog (Hardware Engineer)");
+  assert.equal(todo.dueAt, iso(t0 + 2 * DAY), "due at the linked offer deadline");
+  assert.equal(todo.meta.applicationId, APP.id);
+  assert.equal(todo.meta.completesWhen, "when WaterlooWorks shows your response");
+});
+
+test("deriveTodos: answering the offer finishes the to-do, which then expires", () => {
+  const prevTodo = { [`todo:offer:${APP.id}`]: { id: `todo:offer:${APP.id}`, meta: { auto: "offer", applicationId: APP.id } } };
+  const answered = { ...APP, status: "ranked", history: [...APP.history, { status: "ranked", at: iso(t0 - 1800000) }] };
+  const todos = deriveTodos({ applications: { [APP.id]: answered }, settings: SETTINGS, now: NOW, prev: prevTodo });
+  assert.equal(todos[`todo:offer:${APP.id}`].status, "done", "answered offer -> done");
+
+  const stale = { ...answered, history: [{ status: "ranked", at: iso(t0 - 3 * DAY) }] };
+  const gone = deriveTodos({ applications: { [APP.id]: stale }, settings: SETTINGS, now: NOW, prev: prevTodo });
+  assert.equal(gone[`todo:offer:${APP.id}`], undefined, "old answered offer drops out");
+});
+
+test("deriveTodos: rankings-due + an in-flight application -> Submit your rankings", () => {
+  const items = {
+    "ww:rank-due": item("ww:rank-due", {
+      source: "waterlooworks",
+      type: "cycle-date",
+      category: "rankings-due",
+      dueAt: iso(t0 + 5 * DAY),
+    }),
+  };
+  const interviewing = { ...APP, status: "interview-scheduled" };
+  const todos = deriveTodos({ items, applications: { [APP.id]: interviewing }, settings: SETTINGS, now: NOW });
+  const todo = todos["todo:rank:ww:rank-due"];
+  assert.ok(todo);
+  assert.equal(todo.title, "Submit your rankings");
+  assert.equal(todo.dueAt, iso(t0 + 5 * DAY));
+
+  // No in-flight applications -> no to-do.
+  const none = deriveTodos({ items, applications: { [APP.id]: { ...APP, status: "applied" } }, settings: SETTINGS, now: NOW });
+  assert.equal(none["todo:rank:ww:rank-due"], undefined);
+});
+
+test("deriveTodos: rankings to-do is done once an app is ranked after rankings opened", () => {
+  const items = {
+    "ww:rank-open": item("ww:rank-open", {
+      source: "waterlooworks",
+      type: "cycle-date",
+      category: "rankings-open",
+      dueAt: iso(t0 - 2 * DAY),
+    }),
+    "ww:rank-due": item("ww:rank-due", {
+      source: "waterlooworks",
+      type: "cycle-date",
+      category: "rankings-due",
+      dueAt: iso(t0 + 5 * DAY),
+    }),
+  };
+  const ranked = { ...APP, status: "ranked", history: [{ status: "ranked", at: iso(t0 - DAY) }] };
+  const todos = deriveTodos({ items, applications: { [APP.id]: ranked }, settings: SETTINGS, now: NOW });
+  assert.equal(todos["todo:rank:ww:rank-due"].status, "done");
+});
+
+/* ----------------------------- autoDoneRule ---------------------------- */
+
+test("autoDoneRule: Learn deadline/quiz is done when submitted", () => {
+  const d = item("l:1", { type: "deadline" });
+  assert.deepEqual(autoDoneRule(d), { done: false, reason: "Submitted on Learn" });
+  assert.deepEqual(autoDoneRule({ ...d, status: "submitted" }), { done: true, reason: "Submitted on Learn" });
+});
+
+test("autoDoneRule: application-deadline completes when the jobId has an application", () => {
+  const d = item("w:1", { type: "application-deadline", meta: { jobId: "9" } });
+  assert.equal(autoDoneRule(d, { applications: {} }).done, false);
+  const apps = { a: { id: "a", jobId: "9" } };
+  assert.deepEqual(autoDoneRule(d, { applications: apps }), { done: true, reason: "Applied on WaterlooWorks" });
+});
+
+test("autoDoneRule: a reply task completes when its status is done", () => {
+  const r = item("o:1", { type: "task", category: "reply" });
+  assert.deepEqual(autoDoneRule(r), { done: false, reason: "You replied" });
+  assert.equal(autoDoneRule({ ...r, status: "done" }).done, true);
+});
+
+test("autoDoneRule: a timeslot pick completes when an interview item exists for the job", () => {
+  const slot = item("w:slot", { source: "waterlooworks", type: "deadline", category: "interview-timeslot", meta: { jobId: "7" } });
+  assert.equal(autoDoneRule(slot, { items: {} }).done, false);
+  const items = { "w:int": item("w:int", { type: "interview", meta: { jobId: "7" } }) };
+  assert.deepEqual(autoDoneRule(slot, { items }), { done: true, reason: "Interview slot booked" });
+});
+
+test("autoDoneRule: userState.done always wins ('Checked off'); plain items have no rule", () => {
+  const m = item("m:1", { source: "manual", type: "task" });
+  assert.equal(autoDoneRule(m), null);
+  assert.deepEqual(autoDoneRule(m, { userState: { done: true } }), { done: true, reason: "Checked off" });
+});
+
+test("autoDoneRule: study to-do is done after the assessment passes", () => {
+  const s = item("todo:study:x", {
+    meta: { auto: "study", parentLabel: "midterm" },
+    dueAt: iso(t0 + DAY),
+  });
+  assert.deepEqual(autoDoneRule(s, { now: NOW }), { done: false, reason: "After the midterm" });
+  assert.equal(autoDoneRule({ ...s, dueAt: iso(t0 - DAY) }, { now: NOW }).done, true);
+});
+
+/* --------------------------- settings gates ---------------------------- */
+
+test("todoSourceItem honours each toggle", () => {
+  const on = SETTINGS;
+  assert.equal(todoSourceItem(item("x", { type: "deadline" }), on), true);
+  assert.equal(todoSourceItem(item("x", { type: "deadline" }), { todos: { deadlines: false } }), false);
+  assert.equal(todoSourceItem(item("x", { type: "task", category: "reply" }), { todos: { replies: false } }), false);
+  assert.equal(todoSourceItem(item("x", { type: "deadline", category: "interview-timeslot" }), { todos: { coop: false } }), false);
+  assert.equal(todoSourceItem(item("x", { type: "meeting" }), on), false, "meetings are not to-dos");
+  assert.equal(todoSourceItem(item("x", { source: "manual", type: "task" }), { todos: {} }), true, "manual tasks always list");
+});
+
+/* ------------------------------ reminders ------------------------------ */
+
+test("nextReminders: a study to-do fires once at opensAt", () => {
+  const due = t0 + 5 * DAY;
+  const open = due - 5 * DAY; // opensAt = now
+  const todos = {
+    "todo:study:m": item("todo:study:m", {
+      meta: { auto: "study", parentId: "x", parentLabel: "midterm" },
+      dueAt: iso(due),
+      opensAt: iso(open + DAY), // opens tomorrow
+      title: "Study for MATH 117 Midterm",
+    }),
+  };
+  const out = nextReminders(todos, {}, { reminders: { enabled: true, leads: {} } }, NOW);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].itemId, "todo:study:m");
+  assert.equal(out[0].fireAt, open + DAY);
+  assert.equal(out[0].lead, 4 * 24 * 60, "lead is the opensAt-to-due gap in minutes");
+
+  // Already sent -> nothing again.
+  const sentKey = out[0].key;
+  assert.equal(nextReminders(todos, {}, { reminders: {} }, NOW, { [sentKey]: "x" }).length, 0);
+});
