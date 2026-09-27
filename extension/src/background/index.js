@@ -27,6 +27,9 @@ import {
   setUserState,
   clearSource,
   mutateSourceState,
+  manualUpsert,
+  manualDelete,
+  manualSetAll,
 } from "../core/scheduler.js";
 import { resetSweep } from "../sources/discord/index.js";
 import { handleDiscoveryMessage } from "../capture/discovery-store.js";
@@ -180,6 +183,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === UI.DISCORD_SWEEP) {
     discordSweep().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.MANUAL_UPSERT) {
+    if (!msg.item) return false;
+    manualUpsert(msg.item).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.MANUAL_DELETE) {
+    if (!msg.id) return false;
+    manualDelete(msg.id).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.MANUAL_SET) {
+    manualSetAll(msg.items).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   return false;

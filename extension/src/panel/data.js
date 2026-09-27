@@ -179,6 +179,13 @@ export function useStore() {
         setState((s) => ({ ...s, updates: [] }));
         if (!IS_PREVIEW) setLocal("updates", []).catch(() => {});
       },
+      /** Quick add / edit: upsert a manual item through the background. */
+      manualUpsert(item) {
+        return send({ type: UI.MANUAL_UPSERT, item });
+      },
+      manualDelete(id) {
+        return send({ type: UI.MANUAL_DELETE, id });
+      },
     }),
     [state.userState]
   );

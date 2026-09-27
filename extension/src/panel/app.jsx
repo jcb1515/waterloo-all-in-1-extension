@@ -7,7 +7,7 @@ import { useStore, query, IS_PREVIEW } from "./data.js";
 import { storeSyncSummary } from "./model/sources.js";
 import { ADAPTERS, stageForAdapter } from "../core/registry.js";
 import { BrandMark } from "../ui/brand.jsx";
-import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon } from "../ui/icons.jsx";
+import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon, PlusIcon } from "../ui/icons.jsx";
 import { Agenda } from "./views/Agenda.jsx";
 import { CalendarView } from "./views/Calendar.jsx";
 import { Coop } from "./views/Coop.jsx";
@@ -16,6 +16,7 @@ import { Sources } from "./views/Sources.jsx";
 import { Review } from "./views/Review.jsx";
 import { Updates } from "./views/Updates.jsx";
 import { ItemSheet } from "./views/ItemSheet.jsx";
+import { QuickAdd } from "./views/QuickAdd.jsx";
 
 const TABS = [
   ["agenda", "Agenda"],
@@ -29,6 +30,7 @@ const OVERLAY_TITLES = {
   updates: "Updates",
   sources: "Sources",
   item: "Item",
+  quickadd: "Quick add",
 };
 
 /** Items still awaiting a review verdict. */
@@ -59,8 +61,10 @@ export function App() {
     return TABS.some(([id]) => id === t) ? /** @type {string} */ (t) : "agenda";
   });
   const [sheetId, setSheetId] = useState(() => query.get("item"));
+  const [qaEditId, setQaEditId] = useState(() => null);
   const [overlay, setOverlay] = useState(() => {
     if (query.get("item")) return "item";
+    if (query.get("quickadd")) return "quickadd";
     const v = query.get("view");
     return v && OVERLAY_TITLES[v] ? v : null;
   });
@@ -96,6 +100,11 @@ export function App() {
         if (!item || !item.id) return;
         setSheetId(item.id);
         setOverlay("item");
+      },
+      /** Open the Quick add form prefilled from a manual item (edit mode). */
+      editManual(item) {
+        setQaEditId(item && item.id ? item.id : null);
+        setOverlay("quickadd");
       },
     }),
     [state.actions]
@@ -153,6 +162,19 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [syncing, overlay]);
 
+  /** Known orgs for quick-add: course codes + watched Discord team names. */
+  const orgs = useMemo(() => {
+    const watched = (state.settings && state.settings.sources && state.settings.sources.discord
+      && state.settings.sources.discord.watched) || {};
+    const guilds = (state.sourceState.discord && state.sourceState.discord.state
+      && state.sourceState.discord.state.guilds) || {};
+    return [
+      ...Object.keys(state.courses || {}),
+      ...Object.keys(watched),
+      ...Object.values(guilds).map((g) => g && g.name).filter(Boolean),
+    ];
+  }, [state.courses, state.settings, state.sourceState]);
+
   const overlayTitle = overlay ? OVERLAY_TITLES[overlay] : null;
 
   return (
@@ -176,6 +198,18 @@ export function App() {
           </div>
         </div>
         <div class="header-actions">
+          <button
+            type="button"
+            class="btn-icon"
+            aria-label="Quick add"
+            title="Quick add"
+            onClick={() => {
+              setQaEditId(null);
+              setOverlay(overlay === "quickadd" ? null : "quickadd");
+            }}
+          >
+            <PlusIcon size={17} />
+          </button>
           {overlay ? null : (
             <button
               type="button"
@@ -250,6 +284,16 @@ export function App() {
             actions={actions}
             now={now}
             itemId={sheetId}
+            onClose={() => setOverlay(null)}
+          />
+        ) : overlay === "quickadd" ? (
+          <QuickAdd
+            state={state}
+            actions={actions}
+            now={now}
+            orgs={orgs}
+            editItem={qaEditId ? state.items[qaEditId] : null}
+            initialText={query.get("q") || ""}
             onClose={() => setOverlay(null)}
           />
         ) : overlay === "updates" ? (

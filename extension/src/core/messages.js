@@ -22,4 +22,10 @@ export const UI = Object.freeze({
   TEST_NOTIFY: "wa1:test-notification",
   /** panel -> background: { type } restart the Discord watched-channel sweep */
   DISCORD_SWEEP: "wa1:discord-sweep",
+  /** panel -> background: { type, item } add/replace a manual item */
+  MANUAL_UPSERT: "wa1:manual-upsert",
+  /** panel -> background: { type, id } delete a manual item */
+  MANUAL_DELETE: "wa1:manual-delete",
+  /** options -> background: { type, items } replace the manual list (import) */
+  MANUAL_SET: "wa1:manual-set",
 });

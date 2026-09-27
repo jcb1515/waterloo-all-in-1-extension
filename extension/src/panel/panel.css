@@ -1387,3 +1387,17 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   font-size: var(--fs-xs);
   font-weight: var(--w-medium);
 }
+
+/* -------------------------------- quick add -------------------------------- */
+
+.quickadd-input { font-size: var(--fs-md); }
+.qa-datetime { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.qa-allday {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.qa-preview { margin: 0; }

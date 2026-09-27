@@ -6,6 +6,7 @@
 */
 
 import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates } from "./merge.js";
+import { manualUpsertResult, manualDeleteResult } from "./quickadd.js";
 import {
   getSettings,
   getLocal,
@@ -519,6 +520,42 @@ export async function refreshBadge() {
   } catch {
     /* badge is best-effort */
   }
+}
+
+/* --------------------------- manual items --------------------------- */
+
+/**
+ * Replace the manual raw with `result`'s full item list (complete semantics)
+ * inside the "manual" ingest queue, then recompute.
+ * @param {(prevRaw: any) => {items: any[], complete: boolean}} fold
+ */
+function manualFold(fold) {
+  return ingest("manual", async () => {
+    const mv = await getMergedView();
+    const raw = applyResult(mv.raws.manual || null, fold(mv.raws.manual), { mode: "sync" });
+    await setLocal(rawKey("manual"), raw);
+    await recomputeAll(new Date());
+  });
+}
+
+/** wa1:manual-upsert — insert or replace one manual item. */
+export async function manualUpsert(item) {
+  if (!item || !item.id) return { ok: false };
+  await manualFold((prevRaw) => manualUpsertResult(prevRaw, item));
+  return { ok: true, id: item.id };
+}
+
+/** wa1:manual-delete — remove one manual item. */
+export async function manualDelete(id) {
+  if (!id) return { ok: false };
+  await manualFold((prevRaw) => manualDeleteResult(prevRaw, id));
+  return { ok: true };
+}
+
+/** Backup import: replace the whole manual list. */
+export async function manualSetAll(items) {
+  await manualFold(() => ({ items: Array.isArray(items) ? items : [], complete: true }));
+  return { ok: true };
 }
 
 /**
