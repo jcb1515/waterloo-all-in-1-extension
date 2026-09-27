@@ -9,6 +9,9 @@ import { send, IS_PREVIEW } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
 import { mutateKey } from "../../core/store.js";
 import { validServiceUrl, FEED_KEY } from "../../calendar/publish.js";
+import { buildFeedPayload } from "../../calendar/payload.js";
+// Pure feed renderers shared with the worker — same UIDs as the live feed.
+import { applyPublish, buildCalendar } from "../../../../server/src/worker.js";
 import {
   ExternalLinkIcon,
   CheckIcon,
@@ -133,6 +136,26 @@ export function CalendarSection({ settings, save, state }) {
   const dismissResubscribe = () => {
     if (IS_PREVIEW) return;
     mutateKey(FEED_KEY, (cur) => (cur ? { ...cur, needsResubscribe: false } : cur)).catch(() => {});
+  };
+
+  const [icsNote, setIcsNote] = useState("");
+  /** One-off .ics export — same payload builder + UID mapping as the feed. */
+  const downloadIcs = () => {
+    const now = new Date();
+    const { payload } = buildFeedPayload(state.items || {}, state.userState || {}, cal, now, {
+      acceptPending: !!(settings.review && settings.review.showPending),
+    });
+    const { state: feedState } = applyPublish(null, payload, now);
+    const ics = buildCalendar(feedState, {});
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `waterloo-all-in-1-${now.toISOString().slice(0, 10)}.ics`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const n = (feedState.events || []).length;
+    setIcsNote(`${n} event${n === 1 ? "" : "s"} exported`);
   };
 
   return (
@@ -322,6 +345,19 @@ export function CalendarSection({ settings, save, state }) {
             </p>
           </>
         ) : null}
+      </Card>
+
+      <Card title="Download a calendar file">
+        <p class="help">
+          For a one-time copy only. Don't import it into the same Google calendar you subscribe
+          to — events would appear twice. The subscription above stays up to date on its own.
+        </p>
+        <div class="inline-row">
+          <button type="button" class="btn" onClick={downloadIcs}>
+            Download .ics
+          </button>
+          {icsNote ? <span class="help">{icsNote}</span> : null}
+        </div>
       </Card>
     </div>
   );
