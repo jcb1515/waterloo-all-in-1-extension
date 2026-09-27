@@ -44,7 +44,9 @@ async function* walk(dir) {
 }
 
 async function copyStaticFile(absPath) {
+  const base = path.basename(absPath).toLowerCase();
   if (absPath.endsWith(".js") || absPath.endsWith(".jsx")) return;
+  if (base === "readme.md" || base === "license" || base === "license.md") return; // docs stay in the repo, not the bundle
   const dest = path.join(DIST, path.relative(SRC, absPath));
   await mkdir(path.dirname(dest), { recursive: true });
   await copyFile(absPath, dest);
