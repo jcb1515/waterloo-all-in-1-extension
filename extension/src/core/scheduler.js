@@ -80,6 +80,66 @@ export function adapterSettings(adapterId, settings) {
   return out;
 }
 
+/**
+ * The next sourceState entry after a read. Two kinds:
+ *
+ *   "sync"     a scheduled/manual adapter.sync — the full status refresh,
+ *              except that a "no-tab"/"signed-out" session keeps the previous
+ *              lastOkAt and complete (nothing was actually read).
+ *   "observe"  a passive T3 payload — if the adapter reports a session, only
+ *              that field moves; a result with readOk entries is a real read
+ *              and refreshes session/lastOkAt/complete/error/itemCount;
+ *              anything else (e.g. an incomplete DOM snapshot) changes only
+ *              the adapter's private state.
+ *
+ * @param {any} prev     previous sourceState entry (or undefined)
+ * @param {any} result   SyncResult (possibly with observe's `scope`)
+ * @param {Date|string} now
+ * @param {"sync"|"observe"} kind
+ * @param {number} [itemCount] items stored under the source's raw key
+ */
+export function nextSourceState(prev, result, now, kind, itemCount) {
+  const p = prev || {};
+  const nowIso = (now instanceof Date ? now : new Date(now)).toISOString();
+
+  if (kind === "observe") {
+    const st = { ...p };
+    if (result.state !== undefined) st.state = result.state;
+    if (result.session) {
+      st.session = result.session;
+    } else if (Array.isArray(result.readOk) && result.readOk.length) {
+      st.session = "signed-in";
+      st.lastOkAt = nowIso;
+      st.complete = !!result.complete;
+      st.error = result.error || null;
+      if (itemCount != null) st.itemCount = itemCount;
+    }
+    return st;
+  }
+
+  const session = result.session || null;
+  const sessionErr = session === "no-tab" || session === "signed-out";
+  const isSessionErr =
+    result.error && (result.error.code === "signed-out" || result.error.code === "no-tab");
+  const failures = result.error ? (p.failures || 0) + 1 : 0;
+  const backoffMs = result.error
+    ? isSessionErr
+      ? Math.min(nextBackoff(failures), 30 * MINUTE)
+      : nextBackoff(failures)
+    : 0;
+  return {
+    state: result.state !== undefined ? result.state : p.state || {},
+    lastRunAt: nowIso,
+    lastOkAt: sessionErr ? p.lastOkAt || null : result.error ? p.lastOkAt || null : nowIso,
+    session,
+    error: result.error || null,
+    complete: sessionErr ? (p.complete ?? false) : !!result.complete,
+    failures,
+    backoffUntil: backoffMs ? new Date(Date.parse(nowIso) + backoffMs).toISOString() : null,
+    itemCount: itemCount ?? p.itemCount ?? 0,
+  };
+}
+
 /* --------------------------- runSync --------------------------- */
 
 let running = 0;
@@ -164,28 +224,10 @@ async function doSync(adapter, settings, reason) {
 
   await setLocal(rawKey(id), applyResult(mv.raws[id] || null, result, { mode: "sync" }));
 
-  const isSessionErr =
-    result.error && (result.error.code === "signed-out" || result.error.code === "no-tab");
-  const failures = result.error ? (prevState && prevState.failures ? prevState.failures + 1 : 1) : 0;
-  const backoffMs = result.error
-    ? isSessionErr
-      ? Math.min(nextBackoff(failures), 30 * MINUTE)
-      : nextBackoff(failures)
-    : 0;
   const rawItems = /** @type {any} */ (await getLocal(rawKey(id))) || { items: [] };
   await mutateKey("sourceState", (cur) => ({
     ...(cur || {}),
-    [id]: {
-      state: result.state !== undefined ? result.state : (prevState && prevState.state) || {},
-      lastRunAt: now.toISOString(),
-      lastOkAt: result.error ? (prevState && prevState.lastOkAt) || null : now.toISOString(),
-      session: result.session || null,
-      error: result.error || null,
-      complete: !!result.complete,
-      failures,
-      backoffUntil: backoffMs ? new Date(now.getTime() + backoffMs).toISOString() : null,
-      itemCount: (rawItems.items || []).length,
-    },
+    [id]: nextSourceState(prevState, result, now, "sync", (rawItems.items || []).length),
   }));
   await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
   await recomputeAll(now, resultUpdates(result));
@@ -235,20 +277,21 @@ export async function handleObserved(payload) {
       return;
     }
     if (!result || !Array.isArray(result.items)) return;
-    // The adapter's private state moves forward on every observe too, so its
-    // next diff/compares start from this read.
-    if (result.state !== undefined) {
-      await mutateKey("sourceState", (cur) => ({
-        ...(cur || {}),
-        [adapter.id]: {
-          ...((cur || {})[adapter.id] || {}),
-          state: result.state,
-          session: result.session || ((cur || {})[adapter.id] || {}).session || null,
-        },
-      }));
-    }
     const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
     await setLocal(rawKey(source), raw);
+    // The adapter's private state moves forward on every observe too, so its
+    // next diff/compares start from this read; the visible status fields move
+    // only per nextSourceState's rules.
+    await mutateKey("sourceState", (cur) => ({
+      ...(cur || {}),
+      [adapter.id]: nextSourceState(
+        (cur || {})[adapter.id],
+        result,
+        new Date(),
+        "observe",
+        (raw.items || []).length
+      ),
+    }));
     await recomputeAll(new Date(), resultUpdates(result));
   });
 }

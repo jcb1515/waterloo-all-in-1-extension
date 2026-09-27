@@ -538,15 +538,6 @@ export function mergeApplications(raws = {}) {
 }
 
 /**
- * Folds newly-produced updates into the newest-first feed: any update whose
- * id is already stored (or already in `incoming`) is dropped — adapter update
- * ids are deterministic, so replayed state must not duplicate.
- * @param {any[]} existing stored feed, newest first
- * @param {any[]} incoming new updates (also newest first)
- * @param {number} cap
- * @returns {any[]}
- */
-/**
  * Feed updates a SyncResult produced itself: `updates` first, with the older
  * `state.lastUpdates` convention as fallback.
  * @param {any} result SyncResult
@@ -559,6 +550,17 @@ export function resultUpdates(result) {
   return [];
 }
 
+const MAX_UPDATES_CAP = 300;
+
+/**
+ * Folds newly-produced updates into the newest-first feed: any update whose
+ * id is already stored (or already in `incoming`) is dropped — adapter update
+ * ids are deterministic, so replayed state must not duplicate.
+ * @param {any[]} existing stored feed, newest first
+ * @param {any[]} incoming new updates (also newest first)
+ * @param {number} cap
+ * @returns {any[]}
+ */
 export function mergeUpdates(existing = [], incoming = [], cap = MAX_UPDATES_CAP) {
   const seen = new Set();
   const out = [];
@@ -576,8 +578,6 @@ export function mergeUpdates(existing = [], incoming = [], cap = MAX_UPDATES_CAP
   }
   return out.slice(0, cap);
 }
-
-const MAX_UPDATES_CAP = 300;
 
 /**
  * Course fields whose newest read replaces the stored value wholesale
