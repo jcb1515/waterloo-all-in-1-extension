@@ -488,3 +488,21 @@ kbd {
 }
 .hidden-main strong { font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .hidden-acts { display: flex; gap: var(--sp-2); flex-shrink: 0; }
+
+/* ------------------------------ backup ------------------------------ */
+
+.backup-summary {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.backup-summary p { margin: 0 0 var(--sp-2); }
+.backup-counts {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-5);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.backup-counts li { margin: 2px 0; }
