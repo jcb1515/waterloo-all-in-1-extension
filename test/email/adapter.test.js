@@ -8,9 +8,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHTML } from "linkedom";
-import adapter from "../../extension/src/sources/email/index.js";
+import adapter, {
+  startMailScan,
+  stopMailScan,
+} from "../../extension/src/sources/email/index.js";
 import { extractFor } from "../../extension/src/sources/email/dom.js";
 import { itemsFromMessage } from "../../extension/src/sources/email/extract.js";
+import {
+  GMAIL_SCAN_QUERY,
+  OUTLOOK_SCAN_QUERY,
+} from "../../extension/src/sources/email/rules.js";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "email");
@@ -286,6 +293,128 @@ test("DOM: gmail message view extracts body, links, receivedAt", () => {
   assert.deepEqual(m.links, ["https://meet.google.com/abc-defg-hij"]); // unwrapped
   assert.ok(m.receivedAt);
   assert.equal(m.fromEmail, "calendar-notification@google.example.com");
+});
+
+test("gmail invite card: date lives in the card, not the .a3s body", async () => {
+  const { document } = parseHTML(html("gmail-invite-card"));
+  const out = extractFor(document, "https://mail.google.com/mail/u/0/#inbox/inv001");
+  assert.equal(out.view, "message");
+  const m = out.messages[0];
+  assert.match(m.invite.whenText, /Sep 29/);
+  assert.equal(m.invite.title, "Chat about robotics at Example Space");
+  assert.equal(m.invite.where, "Microsoft Teams Meeting");
+  assert.equal(m.invite.organizer, "Jane Doe");
+
+  const res = await adapter.observe.parse(payload("gmail", out), ctx({}));
+  assert.equal(res.items.length, 1); // the conflict line must not become an item
+  const i = res.items[0];
+  assert.equal(i.type, "meeting");
+  assert.equal(i.title, "Chat about robotics at Example Space");
+  assert.equal(i.startAt, "2026-09-29T17:00:00.000Z");
+  assert.equal(i.endAt, "2026-09-29T17:30:00.000Z");
+  assert.equal(i.confidence, "exact");
+  assert.equal(i.review, "auto");
+  assert.equal(i.location, "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo");
+  const org = (i.meta.facts || []).find((f) => f.label === "Organizer");
+  assert.equal(org && org.value, "Jane Doe");
+});
+
+test("outlook invite card -> meeting item", async () => {
+  const { document } = parseHTML(html("outlook-invite-card"));
+  const out = extractFor(document, "https://outlook.cloud.microsoft/mail/inbox/id/conv-inv");
+  assert.equal(out.view, "message");
+  assert.equal(out.messages[0].key, "conv-inv");
+  assert.match(out.messages[0].invite.whenText, /9\/29\/2026/);
+  const res = await adapter.observe.parse(payload("outlook", out), ctx({}));
+  assert.equal(res.items.length, 1);
+  const i = res.items[0];
+  assert.equal(i.type, "meeting");
+  assert.equal(i.startAt, "2026-09-29T17:00:00.000Z");
+  assert.equal(i.endAt, "2026-09-29T17:30:00.000Z");
+  assert.equal(i.confidence, "exact");
+  assert.equal(i.review, "auto");
+});
+
+test("rsvp-by keyword -> pending deadline", () => {
+  const [i] = items(
+    msg({
+      from: "CommuniHacks",
+      fromEmail: "hello@communihacks.example.com",
+      subject:
+        "[ACTION REQUIRED] Congratulations, you're in CommuniHacks (MLH) - RSVP by Sept 30!",
+      receivedAt: "2026-09-27T18:01:00.000Z",
+    }),
+  );
+  assert.equal(i.type, "deadline");
+  assert.equal(i.dueAt, "2026-10-01T03:59:00.000Z"); // Sept 30 23:59 Toronto
+  assert.equal(i.confidence, "tentative");
+  assert.equal(i.review, "pending");
+});
+
+test("gmail #search hash: query is folder 'search', never the id", () => {
+  const { document } = parseHTML(
+    `<html><body><h2 class="hP">Result</h2>` +
+      `<div class="adn"><span class="gD" email="a@b.example.com" name="A">A</span>` +
+      `<span class="g3" title="Fri, Sep 25, 2026, 10:18 AM">t</span>` +
+      `<div class="a3s">hi</div></div></body></html>`,
+  );
+  const view = extractFor(document, "https://mail.google.com/mail/u/0/#search/filename%3Aics/abc123");
+  assert.equal(view.folder, "search");
+  assert.equal(view.view, "message");
+  assert.equal(view.messages[0].key, "abc123");
+  const list = extractFor(document, "https://mail.google.com/mail/u/0/#search/filename%3Aics");
+  assert.equal(list.view, "list");
+  assert.equal(list.folder, "search");
+});
+
+test("guided scan: deeplink, queueing, scanned bookkeeping", async () => {
+  const started = startMailScan({}, { provider: "gmail", now: NOW });
+  assert.equal(
+    started.url,
+    "https://mail.google.com/mail/u/0/#search/" + encodeURIComponent(GMAIL_SCAN_QUERY(60)),
+  );
+  assert.equal(started.state.scan.provider, "gmail");
+
+  const rows = [
+    msg({ key: "s1", subject: "Invitation: A" }),
+    msg({ key: "s2", subject: "Invitation: B" }),
+    msg({ key: "s3", subject: "Invitation: C" }),
+  ];
+  const res1 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", rows, "list", "search"), {
+      url: "https://mail.google.com/mail/u/0/#search/q",
+    }),
+    ctx({}, { state: { ...started.state, scanned: { s3: "t" } } }),
+  );
+  assert.deepEqual(res1.state.scanQueue.map((q) => q.key), ["s1", "s2"]);
+  assert.equal(res1.state.scanQueue[0].url, "https://mail.google.com/mail/u/0/#all/s1");
+
+  // Opening a queued thread under "archive" still yields its invite while a
+  // scan is active; the key leaves the queue and is marked scanned.
+  const inv = msg({ key: "s1", subject: GCAL, links: ["https://meet.google.com/abc-defg-hij"] });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [inv], "message", "archive")),
+    ctx({}, { state: res1.state }),
+  );
+  assert.equal(res2.items.length, 1);
+  assert.deepEqual(res2.state.scanQueue.map((q) => q.key), ["s2"]);
+  assert.ok(res2.state.scanned.s1);
+
+  // No active scan -> archive is filtered, nothing is produced.
+  const res3 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [inv], "message", "archive")),
+    ctx({}, { state: {} }),
+  );
+  assert.equal(res3.items.length, 0);
+
+  const stopped = stopMailScan(res2.state);
+  assert.equal(stopped.scan, undefined);
+  assert.equal(stopped.scanQueue, undefined);
+  assert.ok(stopped.scanned.s1);
+
+  const o = startMailScan({}, { provider: "outlook", now: NOW });
+  assert.equal(o.url, null);
+  assert.equal(o.query, OUTLOOK_SCAN_QUERY);
 });
 
 test("DOM: outlook list and message views", () => {

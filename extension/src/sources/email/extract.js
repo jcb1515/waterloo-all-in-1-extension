@@ -17,6 +17,7 @@ import {
   keywordRe,
   mailType,
   MEET_LINK,
+  normCardWhen,
   senderGate,
   WHEN_LINE,
   WHERE_LINE,
@@ -59,10 +60,20 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const whereText = where ? where[1].trim() : undefined;
 
   /* ---- 1. invites -> exact items ---- */
+  // An invite card the client rendered above the message wins over the
+  // Google-Calendar subject, the "When:" line and the link+timed fallback.
+  const card = msg.invite;
   const g = subject.match(GCAL_INVITE_RE);
-  /** @type {{title?: string, whenText?: string, tz?: string, hit?: any}|null} */
+  /** @type {{title?: string, whenText?: string, tz?: string, where?: string, organizer?: string, hit?: any}|null} */
   let invite = null;
-  if (g) {
+  if (card && card.whenText) {
+    invite = {
+      title: card.title,
+      whenText: normCardWhen(card.whenText),
+      where: card.where,
+      organizer: card.organizer,
+    };
+  } else if (g) {
     invite = { title: g[2], whenText: g[3], tz: g[4] };
   } else {
     const w = body.match(WHEN_LINE);
@@ -93,7 +104,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
         title: (invite.title || cleanSubject(subject)).slice(0, 100),
         startAt: hit.startAt,
         endAt: hit.endAt || undefined,
-        location: link || whereText,
+        location: link || invite.where || whereText,
         status: cancelled ? "cancelled" : "open",
         confidence: eastern ? "exact" : "tentative",
         review: eastern ? "auto" : "pending",
@@ -102,8 +113,8 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
           messageKey: msg.key,
           ...(eastern ? {} : { tz: invite.tz }),
           facts: factsOf([
-            ["Organizer", msg.from],
-            ["Where", whereText],
+            ["Organizer", invite.organizer || msg.from],
+            ["Where", invite.where || whereText],
             ["Join", link],
           ]),
         },
