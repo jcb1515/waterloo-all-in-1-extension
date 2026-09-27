@@ -480,12 +480,16 @@ export function applyResult(prevRaw, result, opts = { mode: "sync" }) {
   const prevItems = (prevRaw && Array.isArray(prevRaw.items) && prevRaw.items) || [];
   const newItems = (result && Array.isArray(result.items) && result.items) || [];
   const newIds = new Set(newItems.map((i) => i && i.id));
+  // Scope strings differ in formatting between adapters ("ECE150" vs
+  // "ECE 150") — compare normalised so readOk scope lists always match.
+  const scopeKey = (s) => normCourseCode(s);
   /** @type {any[]} */
   let items;
   if (mode === "scope") {
     // Observed/captured: replace only the items reported under this scope.
+    const want = scopeKey(scope);
     items = [
-      ...prevItems.filter((p) => !newIds.has(p.id) && !(p.seenIn || []).some((s) => s.scope === scope)),
+      ...prevItems.filter((p) => !newIds.has(p.id) && !(p.seenIn || []).some((s) => scopeKey(s.scope) === want)),
       ...newItems,
     ];
   } else if (result && result.complete) {
@@ -493,9 +497,9 @@ export function applyResult(prevRaw, result, opts = { mode: "sync" }) {
   } else if (result && Array.isArray(result.readOk)) {
     // Incomplete read that tells us which scopes did succeed: keep items whose
     // reported scopes all failed (i.e. every seenIn scope is absent from readOk).
-    const ok = new Set(result.readOk);
+    const ok = new Set(result.readOk.map(scopeKey));
     items = [
-      ...prevItems.filter((p) => !newIds.has(p.id) && (p.seenIn || []).some((s) => s.scope && !ok.has(s.scope))),
+      ...prevItems.filter((p) => !newIds.has(p.id) && (p.seenIn || []).some((s) => s.scope && !ok.has(scopeKey(s.scope)))),
       ...newItems,
     ];
   } else {
@@ -513,39 +517,73 @@ export function applyResult(prevRaw, result, opts = { mode: "sync" }) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Folds newly-read applications into the stored map: status changes append to
- * history and produce "status" updates.
- * @param {Record<string, any>} prev
- * @param {Record<string, any>} next
- * @param {Date|string} now
- * @returns {{applications: Record<string, any>, updates: any[]}}
+ * The stored applications map is the union of every source's raw list by id;
+ * the most recently read raw wins. The owning adapter diffs statuses itself
+ * and reports updates via SyncResult.updates.
+ * @param {Record<string, {applications?: any[], updatedAt?: string}>} raws
+ * @returns {Record<string, any>}
  */
-export function diffApplications(prev = {}, next = {}, now) {
-  const at = (now instanceof Date ? now : new Date(now)).toISOString();
+export function mergeApplications(raws = {}) {
   /** @type {Record<string, any>} */
-  const applications = {};
-  /** @type {any[]} */
-  const updates = [];
-  for (const [id, app] of Object.entries(next)) {
-    if (!app) continue;
-    const p = prev[id];
-    const history = Array.isArray(p && p.history) ? [...p.history] : Array.isArray(app.history) ? [...app.history] : [];
-    const merged = { ...(p || {}), ...app, history };
-    if (p && p.status !== app.status) {
-      merged.history.push({ status: app.status, at });
-      updates.push({
-        id: crypto.randomUUID(),
-        at,
-        source: String(id).split(":")[0],
-        kind: "status",
-        text: `${app.employer || ""} ${app.jobTitle || ""} -> ${app.status}`.trim(),
-        refId: id,
-      });
+  const out = {};
+  const recs = Object.values(raws).sort(
+    (a, b) => Date.parse((a && a.updatedAt) || "") - Date.parse((b && b.updatedAt) || "")
+  );
+  for (const rec of recs) {
+    for (const app of (rec && rec.applications) || []) {
+      if (app && app.id) out[app.id] = app;
     }
-    applications[id] = merged;
   }
-  return { applications, updates };
+  return out;
 }
+
+/**
+ * Folds newly-produced updates into the newest-first feed: any update whose
+ * id is already stored (or already in `incoming`) is dropped — adapter update
+ * ids are deterministic, so replayed state must not duplicate.
+ * @param {any[]} existing stored feed, newest first
+ * @param {any[]} incoming new updates (also newest first)
+ * @param {number} cap
+ * @returns {any[]}
+ */
+/**
+ * Feed updates a SyncResult produced itself: `updates` first, with the older
+ * `state.lastUpdates` convention as fallback.
+ * @param {any} result SyncResult
+ * @returns {any[]}
+ */
+export function resultUpdates(result) {
+  if (!result) return [];
+  if (Array.isArray(result.updates)) return result.updates;
+  if (result.state && Array.isArray(result.state.lastUpdates)) return result.state.lastUpdates;
+  return [];
+}
+
+export function mergeUpdates(existing = [], incoming = [], cap = MAX_UPDATES_CAP) {
+  const seen = new Set();
+  const out = [];
+  const storedIds = new Set();
+  for (const u of existing || []) if (u && u.id != null) storedIds.add(u.id);
+  for (const u of incoming || []) {
+    if (!u || u.id == null || seen.has(u.id) || storedIds.has(u.id)) continue;
+    seen.add(u.id);
+    out.push(u);
+  }
+  for (const u of existing || []) {
+    if (u && u.id != null && seen.has(u.id)) continue;
+    if (u && u.id != null) seen.add(u.id);
+    out.push(u);
+  }
+  return out.slice(0, cap);
+}
+
+const MAX_UPDATES_CAP = 300;
+
+/**
+ * Course fields whose newest read replaces the stored value wholesale
+ * (arrays of objects — unioning them would duplicate components).
+ */
+const COURSE_REPLACE_KEYS = new Set(["grades", "syllabusUrls", "assessments", "gradingSchemes"]);
 
 /** Courses merge by code across raws: first non-empty field wins, arrays union. */
 export function mergeCourses(raws = {}) {
@@ -561,7 +599,10 @@ export function mergeCourses(raws = {}) {
       }
       for (const [k, v] of Object.entries(c)) {
         if (v === undefined || v === null || v === "") continue;
-        if (Array.isArray(v)) {
+        if (Array.isArray(v) && v.length === 0) continue;
+        if (COURSE_REPLACE_KEYS.has(k)) {
+          cur[k] = v;
+        } else if (Array.isArray(v)) {
           cur[k] = [...new Set([...(Array.isArray(cur[k]) ? cur[k] : []), ...v])];
         } else if (cur[k] === undefined || cur[k] === null || cur[k] === "") {
           cur[k] = v;

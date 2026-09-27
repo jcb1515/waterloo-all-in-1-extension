@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import {
   recompute,
   applyResult,
-  diffApplications,
+  mergeApplications,
+  mergeUpdates,
   mergeCourses,
   mergeTerms,
   itemRank,
@@ -286,24 +287,23 @@ test("applyResult replaces applications/courses/terms when present", () => {
   assert.deepEqual(out.terms.map((t) => t.termCode), [1269]);
 });
 
-/* ------------------------- diffApplications ------------------------- */
+/* ------------------------- applications / updates ------------------------- */
 
-test("diffApplications appends history and emits a status update", () => {
-  const prev = {
-    "waterlooworks:j1": { id: "waterlooworks:j1", employer: "Acme", jobTitle: "Dev", status: "applied", history: [{ status: "applied", at: "2025-09-01T00:00:00.000Z" }] },
-  };
-  const next = { "waterlooworks:j1": { id: "waterlooworks:j1", employer: "Acme", jobTitle: "Dev", status: "interview" } };
-  const { applications, updates } = diffApplications(prev, next, NOW);
-  assert.equal(applications["waterlooworks:j1"].status, "interview");
-  assert.deepEqual(
-    applications["waterlooworks:j1"].history.map((h) => h.status),
-    ["applied", "interview"]
-  );
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].kind, "status");
+test("mergeApplications unions raws by id; the most recently read raw wins", () => {
+  const older = { applications: [{ id: "waterlooworks:j1", status: "applied" }], updatedAt: "2026-09-20T00:00:00Z" };
+  const newer = { applications: [{ id: "waterlooworks:j1", status: "interview-scheduled" }], updatedAt: "2026-09-25T00:00:00Z" };
+  const out = mergeApplications({ waterlooworks: older, other: { applications: [{ id: "manual:m1", status: "open" }] } });
+  assert.deepEqual(Object.keys(out).sort(), ["manual:m1", "waterlooworks:j1"]);
+  const out2 = mergeApplications({ waterlooworks: newer, stale: older });
+  assert.equal(out2["waterlooworks:j1"].status, "interview-scheduled");
+});
 
-  const same = diffApplications(applications, next, NOW);
-  assert.equal(same.updates.length, 0, "no change, no update");
+test("mergeUpdates dedupes by id and stays newest-first", () => {
+  const existing = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const incoming = [{ id: "x" }, { id: "b" }, { id: "x" }];
+  const out = mergeUpdates(existing, incoming, 10);
+  assert.deepEqual(out.map((u) => u.id), ["x", "a", "b", "c"]);
+  assert.equal(mergeUpdates(existing, incoming, 2).map((u) => u.id).join(","), "x,a");
 });
 
 /* ------------------------- courses / terms ------------------------- */

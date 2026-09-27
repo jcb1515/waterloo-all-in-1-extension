@@ -45,12 +45,23 @@ async function ensureOffscreen() {
   return creating;
 }
 
+const PARSER_NAME = /^[a-z0-9_-]+\/[a-z0-9_-]+$/i;
+
 /**
- * @param {string} html
- * @param {string} parser "<source>/<name>"
+ * Runs a registered parser in the offscreen document and resolves with the
+ * parser's own return value (the `{ok,result}` envelope is unwrapped).
+ * Accepts either argument order — the contract order `(html, parser, opts)`
+ * and the `(parser, html, opts)` order some adapters use.
+ * @param {string} a html or parser name
+ * @param {string} b parser name or html
  * @param {Record<string, any>} [opts]
  */
-export async function parseHtml(html, parser, opts) {
+export async function parseHtml(a, b, opts) {
   await ensureOffscreen();
-  return chrome.runtime.sendMessage({ target: "offscreen", type: "parse", parser, html, opts });
+  const firstIsParser = PARSER_NAME.test(String(a || ""));
+  const parser = firstIsParser ? a : b;
+  const html = firstIsParser ? b : a;
+  const res = await chrome.runtime.sendMessage({ target: "offscreen", type: "parse", parser, html, opts });
+  if (!res || res.ok !== true) throw new Error((res && res.error) || `parse failed: ${parser}`);
+  return res.result;
 }

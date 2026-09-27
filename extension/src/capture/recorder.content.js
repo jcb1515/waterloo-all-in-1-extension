@@ -97,39 +97,42 @@ import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from ".
 
   // Runs fetches the background can't (same-origin session cookies). Only
   // site-relative GET/POST paths — no scheme, no "..", no redirects off host.
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
-    const path = String(msg.path || "");
-    const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
-    if (!path.startsWith("/") || path.includes("..") || (method !== "GET" && method !== "POST")) {
-      sendResponse({ status: 0, error: "not-allowed" });
-      return false;
-    }
-    (async () => {
-      try {
-        /** @type {RequestInit} */
-        const init = { method, credentials: "same-origin", signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) };
-        if (msg.init && msg.init.headers) init.headers = msg.init.headers;
-        if (method === "POST" && msg.init && typeof msg.init.body === "string") init.body = msg.init.body;
-        const res = await fetch(location.origin + path, init);
-        /** @type {Record<string, any>} */
-        const out = { status: res.status, url: res.url, contentType: res.headers.get("content-type") || "" };
-        if (res.status === 401 || LOGIN_URL_RE.test(res.url || "")) out.loginRedirect = true;
-        if (res.ok) {
-          try {
-            out.text = await res.text();
-          } catch {
-            /* body unreadable */
-          }
-        }
-        sendResponse(out);
-      } catch (e) {
-        const err = /** @type {any} */ (e);
-        sendResponse({ status: 0, error: err && err.name === "TimeoutError" ? "timeout" : String((err && err.message) || err) });
+  // On Learn the site content script answers RELAY_FETCH itself (restricted
+  // to GET /d2l/api/); registering here too would race the fetch twice.
+  if (site !== "learn")
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+      if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
+      const path = String(msg.path || "");
+      const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
+      if (!path.startsWith("/") || path.includes("..") || (method !== "GET" && method !== "POST")) {
+        sendResponse({ status: 0, error: "not-allowed" });
+        return false;
       }
-    })();
-    return true;
-  });
+      (async () => {
+        try {
+          /** @type {RequestInit} */
+          const init = { method, credentials: "same-origin", signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) };
+          if (msg.init && msg.init.headers) init.headers = msg.init.headers;
+          if (method === "POST" && msg.init && typeof msg.init.body === "string") init.body = msg.init.body;
+          const res = await fetch(location.origin + path, init);
+          /** @type {Record<string, any>} */
+          const out = { status: res.status, url: res.url, contentType: res.headers.get("content-type") || "" };
+          if (res.status === 401 || LOGIN_URL_RE.test(res.url || "")) out.loginRedirect = true;
+          if (res.ok) {
+            try {
+              out.text = await res.text();
+            } catch {
+              /* body unreadable */
+            }
+          }
+          sendResponse(out);
+        } catch (e) {
+          const err = /** @type {any} */ (e);
+          sendResponse({ status: 0, error: err && err.name === "TimeoutError" ? "timeout" : String((err && err.message) || err) });
+        }
+      })();
+      return true;
+    });
 
   function applySettings(s) {
     enabled = !s || s.enabled !== false;

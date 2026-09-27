@@ -5,7 +5,7 @@
   Pure helpers (nextBackoff, shouldRun) are exported for tests.
 */
 
-import { recompute, applyResult, diffApplications, mergeCourses, mergeTerms } from "./merge.js";
+import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates } from "./merge.js";
 import {
   getSettings,
   getLocal,
@@ -58,6 +58,28 @@ export function shouldRun(state, now, reason, intervalMinutes) {
   return true;
 }
 
+/**
+ * The settings slice an adapter sees: the shared profile (sections, groups)
+ * plus its own `sources[adapterId]` block. Stored shapes are normalised here
+ * so adapters get what they expect — e.g. `sources.outline.urls` is stored
+ * as an object code->url but the adapter iterates it as a URL list.
+ * @param {string} adapterId
+ * @param {Record<string, any>} settings full settings object
+ * @returns {Record<string, any>}
+ */
+export function adapterSettings(adapterId, settings) {
+  const s = settings || {};
+  const src = (s.sources && s.sources[adapterId]) || {};
+  const out = {
+    ...(s.profile ? { sections: s.profile.sections || {}, groups: s.profile.groups || {} } : {}),
+    ...src,
+  };
+  if (out.urls && !Array.isArray(out.urls) && typeof out.urls === "object") {
+    out.urls = Object.values(out.urls).map(String).filter(Boolean);
+  }
+  return out;
+}
+
 /* --------------------------- runSync --------------------------- */
 
 let running = 0;
@@ -85,7 +107,7 @@ export async function runSync(adapterId, reason) {
   running++;
   inFlight.add(adapterId);
   try {
-    await doSync(adapter, srcSettings, reason);
+    await doSync(adapter, settings, reason);
     return { ok: true };
   } finally {
     running--;
@@ -94,11 +116,11 @@ export async function runSync(adapterId, reason) {
 }
 
 /** The SyncContext handed to adapters. */
-function makeCtx(adapter, srcSettings, state, mv) {
+function makeCtx(adapter, settings, state, mv) {
   const id = adapter.id;
   return {
     now: new Date(),
-    settings: srcSettings || {},
+    settings: adapterSettings(id, settings),
     state: state || {},
     courses: Object.values(mv.courses),
     terms: Object.values(mv.terms),
@@ -121,15 +143,15 @@ function safeJson(v) {
 
 /**
  * @param {import("./contract.js").Adapter} adapter
- * @param {Record<string, any>} srcSettings
+ * @param {Record<string, any>} settings full settings object
  * @param {string} reason
  */
-async function doSync(adapter, srcSettings, reason) {
+async function doSync(adapter, settings, reason) {
   const id = adapter.id;
   const now = new Date();
   const prevState = ((await getLocal("sourceState")) || {})[id];
   const mv = await getMergedView();
-  const ctx = makeCtx(adapter, srcSettings, prevState && prevState.state, mv);
+  const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv);
 
   /** @type {any} */
   let result;
@@ -166,7 +188,7 @@ async function doSync(adapter, srcSettings, reason) {
     },
   }));
   await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
-  await recomputeAll(now);
+  await recomputeAll(now, resultUpdates(result));
   return result;
 }
 
@@ -186,7 +208,7 @@ function ingestResult(source, result, scope) {
     const mv = await getMergedView();
     const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope });
     await setLocal(rawKey(source), raw);
-    await recomputeAll(new Date());
+    await recomputeAll(new Date(), resultUpdates(result));
   });
 }
 
@@ -202,20 +224,32 @@ export async function handleObserved(payload) {
   const source = payload.source;
   return ingest(source, async () => {
     const mv = await getMergedView();
-    const srcSettings = ((await getSettings()).sources || {})[adapter.id] || {};
+    const settings = await getSettings();
     const st = ((await getLocal("sourceState")) || {})[adapter.id];
     let result;
     try {
-      result = await parse(payload, makeCtx(adapter, srcSettings, st && st.state, mv));
+      result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv));
     } catch (e) {
       const err = /** @type {any} */ (e);
       await appendLog(source, `observe failed: ${(err && err.message) || err}`);
       return;
     }
     if (!result || !Array.isArray(result.items)) return;
+    // The adapter's private state moves forward on every observe too, so its
+    // next diff/compares start from this read.
+    if (result.state !== undefined) {
+      await mutateKey("sourceState", (cur) => ({
+        ...(cur || {}),
+        [adapter.id]: {
+          ...((cur || {})[adapter.id] || {}),
+          state: result.state,
+          session: result.session || ((cur || {})[adapter.id] || {}).session || null,
+        },
+      }));
+    }
     const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
     await setLocal(rawKey(source), raw);
-    await recomputeAll(new Date());
+    await recomputeAll(new Date(), resultUpdates(result));
   });
 }
 
@@ -239,11 +273,14 @@ export async function handleCapture(msg) {
 /* --------------------------- recompute + badge --------------------------- */
 
 /**
- * Recomputes the merged view (items/links/uidMap), diffs applications, merges
- * courses and terms, records updates, refreshes the badge. Serialised through
- * the store's write queue.
+ * Recomputes the merged view (items/links/uidMap), unions applications from
+ * the raws, merges courses and terms, records updates, refreshes the badge.
+ * Serialised through the store's write queue.
+ * @param {Date} [now]
+ * @param {any[]} [extraUpdates] updates the producing adapter reported
+ *   (SyncResult.updates / state.lastUpdates); deduplicated by id.
  */
-export async function recomputeAll(now = new Date()) {
+export async function recomputeAll(now = new Date(), extraUpdates = []) {
   return enqueue(async () => {
     const mv = await getMergedView();
     const res = recompute({
@@ -254,18 +291,13 @@ export async function recomputeAll(now = new Date()) {
       userState: mv.userState,
       now,
     });
-    const nextApps = {};
-    for (const rec of Object.values(mv.raws)) {
-      for (const app of (rec && rec.applications) || []) {
-        if (app && app.id) nextApps[app.id] = { ...(nextApps[app.id] || {}), ...app };
-      }
-    }
-    const { applications, updates: appUpdates } = diffApplications(mv.applications, nextApps, now);
+    const applications = mergeApplications(mv.raws);
     // All writes happen inside this one queued task — a nested enqueue()
     // (pushUpdates/mutateKey) would deadlock against the outer task.
     const cur = await chrome.storage.local.get("updates");
-    const updates = [...res.updates, ...appUpdates, ...(Array.isArray(cur.updates) ? cur.updates : [])].slice(
-      0,
+    const updates = mergeUpdates(
+      Array.isArray(cur.updates) ? cur.updates : [],
+      [...res.updates, ...(extraUpdates || [])],
       MAX_UPDATES
     );
     await chrome.storage.local.set({

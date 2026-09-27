@@ -104,6 +104,13 @@
  * @property {number} [learnOrgUnitId]
  * @property {string} [outlineUrl]
  * @property {{component: string, weight: number}[]} [weights]
+ * @property {{component: string, category?: string, points?: number, max?: number,
+ *   weight?: number, display?: string}[]} [grades]
+ * @property {{title: string, url: string}[]} [syllabusUrls]
+ * @property {{component: string, weight: number|null, dateText: string,
+ *   itemId: string|null, from: "table"|"chart"}[]} [assessments]
+ * @property {{name: string|null, rows: {component: string, dateText: string,
+ *   location: string, weight: number}[]}[]} [gradingSchemes]
  */
 
 /**
@@ -173,6 +180,7 @@
  * @property {TermInfo[]} [terms]
  * @property {boolean} complete     false if any part failed; the core then keeps items it didn't see
  * @property {string[]} [readOk]    Scopes that read completely this run (items from other scopes are kept)
+ * @property {Update[]} [updates]   Feed entries the adapter detected itself (e.g. application status changes)
  * @property {Record<string, any>} [state]   New private state to persist
  * @property {"signed-in"|"signed-out"|"no-tab"|"unreachable"} [session]
  * @property {{code: string, message: string}} [error]
