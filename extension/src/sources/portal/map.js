@@ -71,7 +71,8 @@ const COMP_TYPE = { TUT: "tutorial", LAB: "lab", TST: "exam" };
  * CourseSchedule rows -> meeting items + course patches. `instructors` is the
  * accumulated {"CODE|section": [{name, email}]} map from enrollments: an
  * Instructor fact only appears when enrollments were observed first.
- * @param {Record<string, InstructorName[]>} [instructors]
+ * @param {any[]} rows
+ * @param {{scope: string, at: string, instructors?: Record<string, InstructorName[]>}} ctx
  * @returns {{items: Item[], patches: {code: string, name?: string, term?: number, sections: string[]}[]}}
  */
 export function mapSchedule(rows, { scope, at, instructors } = {}) {
