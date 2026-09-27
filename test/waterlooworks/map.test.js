@@ -64,7 +64,7 @@ test("interviewItems builds interview Items with contract fields", () => {
     {
       source: "waterlooworks",
       key: "interview:488135",
-      scope: "interviews",
+      scope: "waterlooworks", // unified scope: the adapter's union is authoritative
       at: NOW_ISO,
     },
   ]);
@@ -198,6 +198,13 @@ test("mergeInterviewScopes lets the detail win on shared fields", () => {
   assert.equal(mergedItem.endAt, "2026-10-02T20:30:00.000Z"); // detail adds
   assert.equal(mergedItem.meta.prep.interviewer, "Pat Example"); // detail adds
   assert.equal(mergedItem.title, "Interview: Analog/Mixed-Signal Engineering Co-op"); // list kept
+  // details concatenate: list lines first, then the detail's.
+  assert.match(mergedItem.details, /Type: In-Person/);
+  assert.match(mergedItem.details, /Interviewer: Pat Example/);
+  assert.ok(
+    mergedItem.details.indexOf("Type: In-Person") <
+      mergedItem.details.indexOf("Interviewer: Pat Example")
+  );
   assert.ok(merged.find((i) => i.id === "waterlooworks:interview:488135:2026-11-30"));
 
   // Detail-only items (e.g. timeslots) come through untouched.

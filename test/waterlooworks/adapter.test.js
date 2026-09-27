@@ -61,9 +61,10 @@ test("first applications read stores applications and emits no updates", async (
     payload("applications.html", `${WW}/applications.htm`, "net"),
     ctx
   );
-  assert.equal(result.scope, "applications");
+  assert.equal(result.scope, "waterlooworks");
   assert.equal(result.complete, true);
-  assert.deepEqual(result.readOk, ["applications"]);
+  assert.deepEqual(result.readOk, ["waterlooworks"]);
+  assert.deepEqual(result.state.lastReadOk, ["applications"]);
   assert.equal(result.state.applications.length, 3);
   assert.equal(result.state.applications[0].status, "applied");
   assert.equal(result.state.applications[1].status, "not-selected");
@@ -142,7 +143,7 @@ test("logged-out payload preserves items and marks the session", async () => {
     payload("not-logged-in.html", "https://waterlooworks.uwaterloo.ca/notLoggedIn.htm"),
     makeCtx(first.state)
   );
-  assert.equal(signedOut.scope, "session");
+  assert.equal(signedOut.scope, "waterlooworks");
   assert.equal(signedOut.session, "signed-out");
   assert.equal(signedOut.items.length, 3); // cached items preserved
   assert.equal(signedOut.state.signedOutAt, AT);
@@ -194,8 +195,12 @@ test("incomplete DOM payload does not flag needs-update or drop the cache", asyn
   assert.equal(result.complete, false); // nothing read OK
 });
 
-test("JSON payloads never throw and just record lastJsonAt", async () => {
+test("JSON payloads never throw and return the cached union", async () => {
   const ctx = makeCtx();
+  const first = await adapter.observe.parse(
+    payload("interviews.html", `${WW}/interviews.htm`, "net"),
+    ctx
+  );
   const result = await adapter.observe.parse(
     {
       source: "waterlooworks",
@@ -204,10 +209,11 @@ test("JSON payloads never throw and just record lastJsonAt", async () => {
       body: '{"grid":{"rows":[]}}',
       at: AT,
     },
-    ctx
+    makeCtx(first.state)
   );
-  assert.equal(result.scope, "json");
+  assert.equal(result.scope, "waterlooworks");
   assert.equal(result.complete, false);
+  assert.equal(result.items.length, 3); // cached union, not wiped
   assert.equal(result.state.lastJsonAt, AT);
 });
 
@@ -217,8 +223,9 @@ test("a dashboard fragment can fill several scopes at once", async () => {
     payload("dashboard.html", "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm", "net"),
     ctx
   );
-  assert.equal(result.scope, "events");
-  assert.deepEqual(result.readOk.sort(), ["events", "messages"]);
+  assert.equal(result.scope, "waterlooworks");
+  assert.deepEqual(result.readOk, ["waterlooworks"]);
+  assert.deepEqual(result.state.lastReadOk.sort(), ["events", "messages"]);
   assert.equal(result.complete, true);
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0].type, "event");
@@ -267,19 +274,88 @@ test("booked interview detail merges onto the list item by id", async () => {
   assert.equal(item.meta.term, "2027 - Winter"); // list field kept
 });
 
-test("a booked detail drops the previous timeslot item", async () => {
+test("interview-detail reads accumulate per job", async () => {
   const ctx = makeCtx();
   const first = await adapter.observe.parse(
     payload("interview-detail-unbooked.html", `${WW}/interviews.htm`, "net"),
     ctx
   );
   assert.ok(first.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
+  // A detail for a different job leaves 400001's timeslot item alone.
   const second = await adapter.observe.parse(
     payload("interview-detail-booked.html", `${WW}/interviews.htm`, "net"),
     makeCtx(first.state)
   );
-  assert.ok(!second.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
+  assert.ok(second.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
   assert.ok(second.items.find((i) => i.id === "waterlooworks:interview:488135"));
+  // A booked detail for the SAME job drops that job's timeslot item.
+  const third = await adapter.observe.parse(
+    payload("interview-detail-booked-400001.html", `${WW}/interviews.htm`, "net"),
+    makeCtx(second.state)
+  );
+  assert.ok(!third.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
+  assert.ok(third.items.find((i) => i.id === "waterlooworks:interview:400001"));
+  assert.ok(third.items.find((i) => i.id === "waterlooworks:interview:488135"));
+});
+
+// Mirrors W1's scope-mode fold — extension/src/core/merge.js applyResult
+// (mode:"scope"): stored items whose seenIn scope equals result.scope are
+// dropped unless re-reported, then all result items are appended. Kept as a
+// local copy so the test never imports across worktrees.
+const foldScope = (prev, result) => {
+  const newIds = new Set(result.items.map((i) => i.id));
+  return [
+    ...prev.filter(
+      (p) => !newIds.has(p.id) && !(p.seenIn || []).some((s) => s.scope === result.scope)
+    ),
+    ...result.items,
+  ];
+};
+
+test("the unified scope folds cleanly through W1's scope-mode merge", async () => {
+  const ctx = makeCtx();
+  let stored = [];
+  const r1 = await adapter.observe.parse(
+    payload("interview-detail-unbooked.html", `${WW}/interviews.htm`, "net"),
+    ctx
+  );
+  stored = foldScope(stored, r1);
+  assert.ok(stored.find((i) => i.id === "waterlooworks:timeslot:400001"));
+  const r2 = await adapter.observe.parse(
+    payload("interview-detail-booked-400001.html", `${WW}/interviews.htm`, "net"),
+    makeCtx(r1.state)
+  );
+  stored = foldScope(stored, r2);
+  assert.ok(!stored.find((i) => i.id === "waterlooworks:timeslot:400001"));
+  assert.ok(stored.find((i) => i.id === "waterlooworks:interview:400001"));
+});
+
+test("posting reads accumulate per job and expire per job", async () => {
+  const ctx = makeCtx(); // now = Sep 20, 2026
+  const first = await adapter.observe.parse(
+    payload("posting.html", `${WW}/jobs.htm`, "net"),
+    ctx
+  );
+  assert.equal(first.items.length, 1);
+  assert.equal(first.items[0].id, "waterlooworks:deadline:488135");
+  // Viewing posting B adds its deadline without touching A's.
+  const second = await adapter.observe.parse(
+    payload("posting-divs.html", `${WW}/jobs.htm`, "net"),
+    makeCtx(first.state)
+  );
+  assert.deepEqual(
+    second.items.map((i) => i.id).sort(),
+    ["waterlooworks:deadline:488135", "waterlooworks:deadline:488200"]
+  );
+  // Re-viewing A after its deadline passed removes only A's item.
+  const third = await adapter.observe.parse(
+    payload("posting-past.html", `${WW}/jobs.htm`, "net"),
+    makeCtx(second.state)
+  );
+  assert.deepEqual(
+    third.items.map((i) => i.id),
+    ["waterlooworks:deadline:488200"]
+  );
 });
 
 test("posting pages yield deadline items only while the deadline is future", async () => {
@@ -299,7 +375,8 @@ test("message detail persists privacy-safe metadata only", async () => {
     payload("message-detail.html", `${WW}/messages.htm`, "net"),
     ctx
   );
-  assert.equal(result.scope, "message-detail");
+  assert.equal(result.scope, "waterlooworks");
+  assert.deepEqual(result.state.lastReadOk, ["message-detail"]);
   const details = result.state.messageDetails;
   assert.equal(details.length, 1);
   assert.equal(details[0].subject, "Cycle 1 applications due on WaterlooWorks");
@@ -315,7 +392,7 @@ test("rankings state persists without items", async () => {
     payload("rankings-closed.html", "https://waterlooworks.uwaterloo.ca/myAccount/co-op/rankings.htm", "net"),
     ctx
   );
-  assert.equal(result.scope, "rankings");
+  assert.equal(result.scope, "waterlooworks");
   assert.deepEqual(result.state.rankings, {
     term: "2027 - Winter",
     open: false,

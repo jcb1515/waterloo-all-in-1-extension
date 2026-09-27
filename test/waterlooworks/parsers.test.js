@@ -231,3 +231,21 @@ test("parseAll returns every section present in one fragment", () => {
   assert.equal(result.messages.rows.length, 1);
   assert.equal(result.posting, undefined);
 });
+
+test("a snapshot containing the same table twice yields no duplicates", () => {
+  // content.js can capture a table standalone AND inside a .label parent.
+  const html = readFileSync(
+    path.join(FIXTURES, "interview-detail-unbooked.html"),
+    "utf8"
+  );
+  const doubled = parseHTML(`<div>${html}${html}</div>`).document;
+  const detail = parsers.parseInterviewDetail(doubled);
+  assert.equal(detail.slots.length, 3); // not 6
+  const apps = parsers.parseAll(
+    parseHTML(
+      `<div>${readFileSync(path.join(FIXTURES, "applications.html"), "utf8")}` +
+        `${readFileSync(path.join(FIXTURES, "applications.html"), "utf8")}</div>`
+    ).document
+  );
+  assert.equal(apps.applications.rows.length, 3); // not 6
+});
