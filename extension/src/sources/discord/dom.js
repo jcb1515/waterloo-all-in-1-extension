@@ -455,6 +455,7 @@ export function eventsModalExtract(doc, href) {
   try {
     /** @type {any} */
     let dialog = null;
+    /** @type {"list"|"detail"|null} */
     let modal = null;
     for (const el of doc.querySelectorAll(EVENT_DIALOG_SEL)) {
       const t = textWithBreaks(el);

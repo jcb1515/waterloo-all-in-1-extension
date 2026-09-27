@@ -40,8 +40,15 @@ export function inferIdentity(prev, messages, settings) {
     /** @type {Set<string>|null} */
     let inter = null;
     for (const m of directs) {
-      const ids = new Set(m.mentions.map((u) => String(u?.id)).filter(Boolean));
-      inter = inter === null ? ids : new Set([...inter].filter((id) => ids.has(id)));
+      /** @type {Set<string>} */
+      const ids = new Set(
+        (m.mentions || []).map((u) => String(u?.id)).filter(Boolean)
+      );
+      if (inter === null) {
+        inter = ids;
+      } else {
+        for (const id of [...inter]) if (!ids.has(id)) inter.delete(id);
+      }
       if (inter.size === 0) break;
     }
     if (inter && inter.size === 1) out.selfId = [...inter][0];

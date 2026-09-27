@@ -40,11 +40,14 @@ const READABLE_TYPES = new Set([0, 19]);
  * A forwarded REST body -> a uniform shape. Fail soft: unparseable JSON
  * yields an empty message list, never a throw.
  * @param {string} url @param {string} bodyText
- * @returns {{kind: string, channelId?: string, guildId?: string, messages: any[]}}
+ * @returns {{kind: string, channelId?: string, guildId?: string,
+ *   messages: any[], eventIds?: string[]}}
  */
 export function normalizeRestBody(url, bodyText) {
   const route = REST_ROUTES.find((r) => r.re.test(String(url || "")));
   const kind = route?.kind || "unknown";
+  /** @type {{kind: string, channelId?: string, guildId?: string,
+   *   messages: any[], eventIds?: string[]}} */
   const out = { kind, messages: [] };
   if (route) {
     const m = route.re.exec(String(url || ""));
@@ -322,6 +325,7 @@ export function candidatesForMessage(msg, o) {
   // --- classification, first match wins ---
   /** @type {"task"|"deadline"|"meeting"|"event"|null} */
   let kind = null;
+  /** @type {string|null} */
   let trigger = null;
   if (assignedToMe && taskTrig) {
     kind = "task";

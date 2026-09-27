@@ -111,6 +111,7 @@ export function parseEventDateLine(text, nowMs, tz) {
     start = { y, m: month + 1, d: day, ...time };
   }
   // Optional range tail: " — Thu Oct 1st · 7:00 PM" or "– 7:00 PM".
+  /** @type {{y: number, m: number, d: number, h: number, mi: number}|null} */
   let end = null;
   const rest = String(text).slice(m[0].length);
   const tail = EVENT_RANGE_SEP_RE.test(rest)
@@ -162,6 +163,7 @@ function parseCard(card, nowMs, tz, guildName) {
   /** @type {any[]} */
   const out = [];
   let inSeries = false;
+  /** @type {any} */
   let cur = null;
   const push = () => {
     if (cur?.start) out.push(cur);
@@ -254,8 +256,8 @@ function localDay(iso, tz) {
  * An events-modal extract -> Items.
  * @param {{modal?: string, guildName?: string, tz?: string,
  *   location?: {guildId?: string}, cards?: any[]}} extract
- * @param {object} o
- * @param {Date|number|string} o.now @param {string} o.nowIso
+ * @param {object} [o]
+ * @param {Date|number|string} [o.now] @param {string} [o.nowIso]
  * @param {string} [o.guildId] @param {string} [o.team]
  * @param {Iterable<string>} [o.rsvps]  guild_scheduled_event_ids the user
  *   RSVP'd to (REST /users/@me/scheduled-events) — overrides the button.
@@ -366,7 +368,7 @@ export function parseEventsExtract(extract, o = {}) {
       const key = isSeries
         ? `event:${guildId}:${seriesSlug}:${localDay(occIso, tz)}`
         : `event:${guildId}:${seriesSlug}`;
-      return {
+      return /** @type {Item} */ ({
         ...base,
         id: itemId(SOURCE, key),
         startAt: occIso,
@@ -380,7 +382,7 @@ export function parseEventsExtract(extract, o = {}) {
           pendingSeries:
             isSeries && interested !== true ? true : undefined,
         },
-      };
+      });
     };
 
     if (!isSeries) {

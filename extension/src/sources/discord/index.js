@@ -391,7 +391,9 @@ function outputItems(state, settings, nowMs, nowIso) {
     nowIso,
     teamOf: (gid) => watched[gid]?.team,
   }).filter((s) => {
-    const r = s?.meta?.recurrence;
+    const r = /** @type {{byDay?: string, time?: string}|undefined} */ (
+      s?.meta?.recurrence
+    );
     return !(r && eventSlots.has(`${s.meta?.guildId}|${r.byDay}|${r.time}`));
   });
   return items.concat(recurring);
@@ -515,12 +517,12 @@ export default {
     const now = ctx.now || new Date();
     const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
     const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
-    const state = {
+    const state = /** @type {any} */ ({
       ...prev,
       guilds: JSON.parse(JSON.stringify(prev.guilds || {})),
       lastGood: { ...prev.lastGood },
       watch: { ...prev.watch },
-    };
+    });
     if (prev.sweep) {
       state.sweep = {
         startedAt: prev.sweep.startedAt,
@@ -588,12 +590,13 @@ export default {
       if (payload.kind === "net") {
         const method = String(payload.method || "GET").toUpperCase();
         if (method !== "GET") return finish();
-        if (payload.status === 401) {
+        const status = payload.status ?? 0;
+        if (status === 401) {
           state.signedOutAt = payload.at;
           result.session = "signed-out";
           return finish();
         }
-        if (!(payload.status >= 200 && payload.status < 300)) return finish();
+        if (!(status >= 200 && status < 300)) return finish();
         const norm = normalizeRestBody(payload.url, payload.body);
         if (norm.kind === "mentions") {
           state.identity = inferIdentity(prev.identity, norm.messages, settings);
@@ -640,6 +643,7 @@ export default {
       }
 
       if (payload.kind === "dom") {
+        /** @type {any} */
         let extract = null;
         try {
           extract = JSON.parse(String(payload.body || ""));
