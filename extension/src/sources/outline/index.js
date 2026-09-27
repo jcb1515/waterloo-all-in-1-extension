@@ -110,16 +110,24 @@ const adapter = {
       const state = ctx.state || {};
       const data = await ctx.parseHtml(payload.body, "outline/parseOutline");
       if (!data || !data.code) return { items: [], complete: false, scope: "outline:none", state };
+      // A partial snapshot (mid-render body, truncated DOM) has a header but
+      // no schedule/schemes/tables — don't expand it.
+      if (!(data.schedule?.length || data.schemes?.length || data.tables?.length)) {
+        return { items: [], complete: false, scope: "outline:none", state };
+      }
       const code = normCourseCode(data.code);
       const { items, course } = buildFor(ctx, data, payload.url, readingWeeksFor(ctx, [data]));
+      // Scope-mode merges replace `courses` wholesale — carry every outline
+      // course seen so far, not just this one.
+      const courseMap = { ...(state.courses || {}), [code]: course };
       return {
         items,
-        courses: [course],
+        courses: Object.values(courseMap),
         complete: true,
         readOk: [code],
         scope: code,
         session: "signed-in",
-        state: { ...state, seenUrls: { ...(state.seenUrls || {}), [code]: payload.url } },
+        state: { ...state, seenUrls: { ...(state.seenUrls || {}), [code]: payload.url }, courses: courseMap },
       };
     },
   },
@@ -209,7 +217,8 @@ const adapter = {
     const readingWeeks = readingWeeksFor(ctx, parsed.map((p) => p.data));
 
     const items = [];
-    const courses = [];
+    /** @type {Record<string, any>} — sync owns the whole map, observe patches it. */
+    const courseMap = {};
     const readOk = [];
     const seenCodes = new Set();
     const seenUrls = { ...(state.seenUrls || {}) };
@@ -220,7 +229,7 @@ const adapter = {
       try {
         const built = buildFor(ctx, data, url, readingWeeks);
         items.push(...built.items);
-        courses.push(built.course);
+        courseMap[code] = built.course;
         readOk.push(code);
         if (url) seenUrls[code] = url;
       } catch (e) {
@@ -232,11 +241,12 @@ const adapter = {
       if (!r.code || seenCodes.has(r.code)) continue;
       seenCodes.add(r.code);
       items.push(...r.items);
-      courses.push(r.course);
+      courseMap[r.code] = r.course;
       readOk.push(r.code);
     }
+    const courses = Object.values(courseMap);
     /** @type {SyncResult} */
-    const result = { items, courses, complete, readOk, state: { ...state, seenUrls } };
+    const result = { items, courses, complete, readOk, state: { ...state, seenUrls, courses: courseMap } };
     if (urlOk) result.session = "signed-in";
     else if (sawShell) result.session = "signed-out";
     return result;

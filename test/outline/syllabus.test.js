@@ -65,7 +65,7 @@ test("ENGL192 single-date deliverables are exact 23:59 deadlines", () => {
     [/Syllabus & Assignment Outline Quiz/, "2026-09-14T03:59:00.000Z", 1, "quiz"],
     [/Information Sourcing\/Seeking/, "2026-09-21T03:59:00.000Z", 1, undefined],
     [/Defining an Engineering Problem/, "2026-09-21T03:59:00.000Z", 3, undefined],
-    [/Shark-Tank/, "2026-10-05T03:59:00.000Z", 3, undefined],
+    [/Shark-Tank/, "2026-10-05T03:59:00.000Z", 3, "deadline"], // "Pitch" title, but a single date is a deadline
     [/Technical Manual Analysis/, "2026-11-01T03:59:00.000Z", 3, undefined], // Due Oct 31, not Assigned Oct 19
     [/Report Rationale, Part I/, "2026-11-01T03:59:00.000Z", 3, undefined],
     [/Rationale, Part II/, "2026-11-09T04:59:00.000Z", 3, undefined],

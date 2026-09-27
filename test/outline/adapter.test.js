@@ -148,6 +148,47 @@ test("observe.parse builds items, scope matches seenIn, seenUrls recorded", asyn
   assert.deepEqual(ctx2.calls.fetch, [url]);
 });
 
+test("observe.parse keeps every outline course seen so far", async () => {
+  const ctx = makeCtx({ urls: Object.keys(ROUTES), sections: SECTIONS });
+  // ROUTES: math117 200, ece105 500 — patch ece105 in for this test.
+  const ctx2 = makeCtx(
+    { urls: Object.keys(ROUTES), sections: SECTIONS },
+    {
+      routes: {
+        "https://outline.uwaterloo.ca/viewer/math117": { status: 200, text: html("MATH117") },
+        "https://outline.uwaterloo.ca/viewer/ece105": { status: 200, text: html("ECE105") },
+      },
+    },
+  );
+  const res = await adapter.sync(ctx2);
+  assert.deepEqual(Object.keys(res.state.courses).sort(), ["ECE 105", "MATH 117"]);
+
+  const obs = await adapter.observe.parse(
+    {
+      source: "outline",
+      kind: "dom",
+      url: "https://outline.uwaterloo.ca/viewer/view/math117",
+      body: html("MATH117"),
+      at: NOW.toISOString(),
+    },
+    makeCtx({ sections: SECTIONS }, { state: res.state }),
+  );
+  assert.deepEqual(obs.courses.map((c) => c.code).sort(), ["ECE 105", "MATH 117"]);
+});
+
+test("observe.parse rejects a partial snapshot (code but no content)", async () => {
+  const ctx = makeCtx({});
+  const shell = `<html><body><h1><span class="outline-courses">MATH 117</span></h1>
+    <div class="outline-term">Fall 2026</div></body></html>`;
+  const res = await adapter.observe.parse(
+    { source: "outline", kind: "dom", url: "https://outline.uwaterloo.ca/viewer/view/x", body: shell, at: NOW.toISOString() },
+    ctx,
+  );
+  assert.deepEqual(res.items, []);
+  assert.equal(res.complete, false);
+  assert.equal(res.scope, "outline:none");
+});
+
 test("observe.parse on a non-outline body returns an empty incomplete result", async () => {
   const ctx = makeCtx({});
   const res = await adapter.observe.parse(

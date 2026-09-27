@@ -37,31 +37,39 @@
       lastHash = hash;
       sends++;
       // Mirror of MSG.OBSERVED — literal so this file stays import-free.
-      chrome.runtime.sendMessage({
-        type: "wa1:observed",
-        payload: {
-          source: "outline",
-          kind: "dom",
-          url: location.origin + location.pathname,
-          body,
-          at: new Date().toISOString(),
-        },
-      });
+      Promise.resolve(
+        chrome.runtime.sendMessage({
+          type: "wa1:observed",
+          payload: {
+            source: "outline",
+            kind: "dom",
+            url: location.origin + location.pathname,
+            body,
+            at: new Date().toISOString(),
+          },
+        }),
+      ).catch(() => {});
     } catch {
       // Extension reloads invalidate the context — never throw into the page.
     }
   };
 
+  // Don't snapshot a half-rendered document: nothing is sent before load.
+  let loaded = false;
   const schedule = () => {
-    if (timer !== undefined) return;
+    if (!loaded || timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
       send();
     }, 1500); // outline pages render in bursts
   };
 
-  send();
-  window.addEventListener("load", send);
+  const start = () => {
+    loaded = true;
+    send();
+  };
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start);
   new MutationObserver(schedule).observe(document.documentElement, {
     childList: true,
     subtree: true,

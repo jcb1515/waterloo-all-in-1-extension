@@ -307,12 +307,15 @@ export function parseSyllabusText(text, opts = {}) {
       continue;
     }
 
+    // Windows keep the classify type; a single date is a deadline unless
+    // it's literally a quiz.
+    const isWindow = !!(hit.allDay && hit.endAt);
     const extra = {
-      type: /** @type {Item["type"]} */ (cls.type),
+      type: /** @type {Item["type"]} */ (isWindow ? cls.type : cls.type === "quiz" ? "quiz" : "deadline"),
       category: cls.category || undefined,
       weight: weight ?? undefined,
     };
-    if (hit.allDay && hit.endAt) {
+    if (isWindow) {
       Object.assign(extra, {
         startAt: hit.startAt, endAt: hit.endAt, allDay: true,
         confidence: "tentative", review: "pending", meta: { window: true },
