@@ -12,7 +12,10 @@ import {
   MARKUP_STRIP_RES,
   MEETING_URL_RE,
   BY_BEFORE_DATE_RE,
+  TIME_LINE_RE,
+  LOCATION_LINE_RE,
 } from "./selectors.js";
+import { parseTimeValue } from "./time.js";
 import {
   MEETING_WORDS,
   DEADLINE_WORDS,
@@ -345,6 +348,34 @@ export function candidatesForMessage(msg, o) {
       : firstLine(text).slice(0, SNIPPET_MAX);
 
   const link = MEETING_URL_RE.exec(content)?.[0];
+
+  // Announcement blocks ("Date: / Time: / Location:" lines): an all-day
+  // hit upgrades to a timed, located event. Timezone labels are ignored —
+  // the value is always read as Toronto wall time.
+  /** @type {{startAt: string, endAt?: string}|null} */
+  let timed = null;
+  if (hit?.allDay) {
+    const tline = TIME_LINE_RE.exec(text);
+    const range = tline ? parseTimeValue(tline[1]) : null;
+    if (range) {
+      const p = zonedParts(new Date(hit.startAt));
+      const startAt = zonedIso(p.y, p.m, p.d, range.start.h, range.start.mi);
+      let endAt;
+      if (range.end) {
+        let endMs = Date.parse(
+          zonedIso(p.y, p.m, p.d, range.end.h, range.end.mi)
+        );
+        if (endMs <= Date.parse(startAt)) endMs += DAY_MS; // crosses midnight
+        endAt = new Date(endMs).toISOString();
+      }
+      timed = { startAt, endAt };
+    }
+  }
+  const locLine = LOCATION_LINE_RE.exec(text)?.[1]
+    ?.replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
+
   const titleBase = firstLine(text).slice(0, TITLE_MAX) || "Discord message";
   /** @type {Item} */
   const item = {
@@ -360,7 +391,8 @@ export function candidatesForMessage(msg, o) {
     confidence: undated || !hit?.exact ? "tentative" : "exact",
     review: "pending",
     seenIn: [{ source: SOURCE, key, scope: SCOPE, at: o.nowIso }],
-    location: link || (o.channelName ? `#${o.channelName}` : undefined),
+    location:
+      link || locLine || (o.channelName ? `#${o.channelName}` : undefined),
     evidence: { snippet, url: guildId ? `https://discord.com/channels/${guildId}/${channelId}/${messageId}` : undefined, method: "text" },
     details: snippet || undefined,
     meta: {
@@ -377,10 +409,15 @@ export function candidatesForMessage(msg, o) {
   if (undated) {
     item.dueAt = anchorIso;
     item.details = "No due date in the message; default follow-up in 7 days.";
-  } else if (hit.allDay) {
+  } else if (hit.allDay && !timed) {
     item.startAt = hit.startAt;
     item.allDay = true;
     if (hit.endAt) item.endAt = hit.endAt;
+  } else if (timed && (kind === "deadline" || kind === "task")) {
+    item.dueAt = timed.endAt || timed.startAt;
+  } else if (timed) {
+    item.startAt = timed.startAt;
+    if (timed.endAt) item.endAt = timed.endAt;
   } else if (kind === "deadline" || kind === "task") {
     item.dueAt = hit.startAt;
   } else {

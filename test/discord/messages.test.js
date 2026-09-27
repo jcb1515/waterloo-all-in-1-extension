@@ -133,6 +133,42 @@ test("markup is stripped before extraction (no url/mention/code dates)", () => {
   );
 });
 
+test('"Date:/Time:/Location:" block upgrades an all-day hit; @everyone != me', () => {
+  const [item] = candidatesForMessage(
+    msg(
+      [
+        "CLUB F26 ALL HANDS",
+        "Hey @everyone !",
+        "Come hear about the term plan and grab pizza.",
+        "🗓️ All Hands Meeting",
+        "Date: Monday, Sept 14, 2026",
+        "Time: 5:00 PM EST",
+        "Location: E5 3101",
+      ].join("\n"),
+      { mention_everyone: true, timestamp: "2026-09-10T20:00:00.000Z" }
+    ),
+    O()
+  );
+  assert.equal(item.type, "meeting");
+  assert.equal(item.title, "CLUB F26 ALL HANDS");
+  assert.equal(item.startAt, "2026-09-14T21:00:00.000Z"); // 5pm Toronto (EDT)
+  assert.equal(item.allDay, undefined);
+  assert.equal(item.location, "E5 3101");
+  assert.equal(item.meta.assignedToMe, false);
+});
+
+test("a 'Time: 5:00–7:00 PM' range sets endAt; URLs beat Location:", () => {
+  const [item] = candidatesForMessage(
+    msg(
+      "meeting\nDate: October 12, 2026\nTime: 5:00–7:00 PM\nLocation: Zoom https://x.dev\nhttps://meet.google.com/abc-defg-hij"
+    ),
+    O()
+  );
+  assert.equal(item.startAt, "2026-10-12T21:00:00.000Z");
+  assert.equal(item.endAt, "2026-10-12T23:00:00.000Z");
+  assert.equal(item.location, "https://meet.google.com/abc-defg-hij");
+});
+
 test("meeting links become location; otherwise #channelName", () => {
   const [a] = candidatesForMessage(
     msg(`sync <t:${TS_OCT8_6PM}> in https://meet.google.com/abc-defg-hij`),

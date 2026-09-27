@@ -5,6 +5,7 @@
 
 import { itemId } from "../../core/contract.js";
 import { zonedIso, zonedParts } from "../../lib/textdates/index.js";
+import { parseLooseTime } from "./time.js";
 import { SOURCE, SCOPE } from "./messages.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -46,34 +47,6 @@ export function meetingKey(title) {
     .filter((w) => w && !/\d/.test(w) && !KEY_STOPWORDS.has(w) && !KEY_DATE_WORDS.has(w))
     .slice(0, 4)
     .join(" ");
-}
-
-const TIME_RES = [
-  /\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/i,
-  /\b(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?\b/i,
-  /\b(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)\b/i,
-];
-
-/** @param {string} hs @param {string|undefined} ms @param {string|undefined} ap */
-function toHMI(hs, ms, ap) {
-  let h = Number(hs);
-  const mi = Number(ms || 0);
-  const aps = String(ap || "");
-  if (/p/i.test(aps) && h < 12) h += 12;
-  if (/a/i.test(aps) && h === 12) h = 0;
-  if (!aps && h > 23) return null;
-  if (h > 23 || mi > 59) return null;
-  return { h, mi };
-}
-
-/** "at 6pm" / "6:30 PM" / "18:00" -> {h, mi} or null. */
-export function parseLooseTime(text) {
-  const s = String(text || "");
-  let m;
-  if ((m = TIME_RES[0].exec(s))) return toHMI(m[1], m[2], m[3]);
-  if ((m = TIME_RES[1].exec(s))) return toHMI(m[1], m[2], m[3]);
-  if ((m = TIME_RES[2].exec(s))) return toHMI(m[1], "0", m[2]);
-  return null;
 }
 
 const EVERY_DAY_RE = new RegExp(

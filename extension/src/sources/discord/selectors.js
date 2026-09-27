@@ -89,3 +89,10 @@ export const MEETING_URL_RE =
 
 /** "by <the matched date>" is a deadline signal. */
 export const BY_BEFORE_DATE_RE = /\bby\s*$/i;
+
+/** "Time: 5:00 PM EST" / "when - 6pm" lines in announcement blocks. */
+export const TIME_LINE_RE = /^\s*(?:time|when)\s*[:\-–]\s*(.+)$/im;
+
+/** "Location: E5 3101" / "where: …" / "room: …" lines. */
+export const LOCATION_LINE_RE =
+  /^\s*(?:location|where|room|place)\s*[:\-–]\s*(.+)$/im;
