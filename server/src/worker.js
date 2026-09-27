@@ -8,7 +8,9 @@
 const FEED_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
 const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_STATE_BYTES = 1900000; // D1 rejects rows over ~2,000,000 bytes
-const MAX_EVENTS = 3000;
+const DEFAULT_MAX_EVENTS = 3000;
+const DEFAULT_CREATES_PER_IP_PER_DAY = 10;
+const DEFAULT_RATE_SALT = "waterloo-all-in-1";
 const MAX_SKIPPED = 20;
 const MAX_ALARMS = 3;
 const MAX_ALARM_MINUTES = 40320; // four weeks
@@ -90,7 +92,49 @@ export const SQL = Object.freeze({
     "DELETE FROM calendar_renders WHERE calendar_id = ? AND feed_id != ? " +
     "AND feed_id NOT IN (SELECT id FROM calendar_feed_aliases WHERE feed_id = ?)",
   deleteExpiredRenders: "DELETE FROM calendar_renders WHERE expires_at <= ?",
+  // Per-IP create quota (migration 0004): key is a salted day-scoped hash.
+  selectCreateLimit: "SELECT count FROM create_limits WHERE key = ?",
+  upsertCreateLimit:
+    "INSERT INTO create_limits (key, day, count) VALUES (?, ?, 1) " +
+    "ON CONFLICT(key) DO UPDATE SET count = count + 1",
+  deleteOldCreateLimits: "DELETE FROM create_limits WHERE day < ?",
 });
+
+/**
+ * Optional wrangler `vars` knobs, validated — a missing or invalid value
+ * falls back to the default so a typo can never break the worker.
+ *   MAX_EVENTS              int 1..3000 (default 3000) — publish cap; keep
+ *                           ~600 on the free plan so an oversized publish
+ *                           gets a clean 413 instead of a CPU kill.
+ *   MAX_FEEDS               int ≥1 (default unset = unlimited) — POSTs 503
+ *                           once that many live feeds exist.
+ *   CREATES_PER_IP_PER_DAY  int ≥1 (default 10) — per-IP POST quota.
+ *   RATE_SALT               string — salt for the per-IP hash (set as a
+ *                           secret; a fixed default keeps dev simple).
+ */
+export function serverConfig(env) {
+  const int = (value, { min, max = Infinity, fallback }) => {
+    const n =
+      typeof value === "number" ? value : Number(String(value ?? "").trim());
+    return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
+  };
+  return {
+    maxEvents: int(env?.MAX_EVENTS, {
+      min: 1,
+      max: 3000,
+      fallback: DEFAULT_MAX_EVENTS,
+    }),
+    maxFeeds: int(env?.MAX_FEEDS, { min: 1, fallback: null }),
+    createsPerIpPerDay: int(env?.CREATES_PER_IP_PER_DAY, {
+      min: 1,
+      fallback: DEFAULT_CREATES_PER_IP_PER_DAY,
+    }),
+    rateSalt:
+      typeof env?.RATE_SALT === "string" && env.RATE_SALT
+        ? env.RATE_SALT
+        : DEFAULT_RATE_SALT,
+  };
+}
 
 export default {
   async fetch(request, env, context) {
@@ -107,6 +151,10 @@ export default {
       await env.DB
         .prepare(SQL.deleteExpiredRenders)
         .bind(new Date().toISOString())
+        .run();
+      await env.DB
+        .prepare(SQL.deleteOldCreateLimits)
+        .bind(utcDay())
         .run();
     })());
   }
@@ -132,8 +180,62 @@ async function routeRequest(request, env, context) {
   return jsonResponse({ error: "Method not allowed." }, 405);
 }
 
+const utcDay = (now = new Date()) => now.toISOString().slice(0, 10);
+
+/** Seconds until the next UTC midnight (Retry-After on a 429). */
+function secondsUntilUtcMidnight(now = new Date()) {
+  const next = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1
+  );
+  return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
+}
+
+/**
+ * Per-IP create quota: the key is a salted SHA-256 of the client IP scoped
+ * to the UTC day — raw IPs are never stored. Returns a 429 Response when
+ * the quota is spent, else null after recording this create. No
+ * CF-Connecting-IP header (local dev, tests) means no limit.
+ */
+async function checkCreateLimit(request, env, config) {
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!ip) return null;
+  const day = utcDay();
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(`${ip}|${day}|${config.rateSalt}`)
+  );
+  const key = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+  const row = await env.DB.prepare(SQL.selectCreateLimit).bind(key).first();
+  if ((row?.count ?? 0) >= config.createsPerIpPerDay) {
+    return jsonResponse(
+      { error: "Too many calendars created from this network today." },
+      429,
+      { "Retry-After": String(secondsUntilUtcMidnight()) }
+    );
+  }
+  await env.DB.prepare(SQL.upsertCreateLimit).bind(key, day).run();
+  return null;
+}
+
 async function createFeed(request, env, origin) {
-  const parsed = await readPayload(request);
+  const config = serverConfig(env);
+  const limited = await checkCreateLimit(request, env, config);
+  if (limited) return limited;
+  if (config.maxFeeds != null) {
+    const row = await env.DB.prepare(SQL.countLiveFeeds)
+      .bind(Date.now())
+      .first();
+    if ((row?.n ?? 0) >= config.maxFeeds) {
+      return jsonResponse({ error: "This server is full" }, 503);
+    }
+  }
+
+  const parsed = await readPayload(request, config.maxEvents);
   if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status);
 
   const { state, accepted, skipped } = applyPublish(null, parsed.payload, new Date());
@@ -169,7 +271,8 @@ async function updateFeed(request, feedId, env, origin) {
     return jsonResponse({ error: "Invalid update token." }, 401);
   }
 
-  const parsed = await readPayload(request);
+  const config = serverConfig(env);
+  const parsed = await readPayload(request, config.maxEvents);
   if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status);
   const prevState = stateFromStored(safeJsonParse(record.calendar_json), record.updated_at);
   const { state, accepted, skipped } = applyPublish(prevState, parsed.payload, new Date());
@@ -343,7 +446,7 @@ function groupFeedsResponse(origin, aliases) {
   return groupFeeds;
 }
 
-async function readPayload(request) {
+async function readPayload(request, maxEvents = DEFAULT_MAX_EVENTS) {
   const declaredLength = Number(request.headers.get("content-length") || 0);
   if (declaredLength > MAX_PAYLOAD_BYTES) {
     return { ok: false, status: 413, error: "Calendar payload is too large." };
@@ -367,8 +470,8 @@ async function readPayload(request) {
     events = convertLegacyAssignments(body.assignments);
   }
   if (!events) return { ok: false, status: 400, error: "events must be an array." };
-  if (events.length > MAX_EVENTS) {
-    return { ok: false, status: 413, error: `Too many events; the limit is ${MAX_EVENTS}.` };
+  if (events.length > maxEvents) {
+    return { ok: false, status: 413, error: `Too many events; the limit is ${maxEvents}.` };
   }
   return {
     ok: true,
@@ -1092,12 +1195,13 @@ function corsHeaders() {
   };
 }
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      ...extraHeaders,
       ...corsHeaders()
     }
   });

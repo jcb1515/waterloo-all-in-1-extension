@@ -9,6 +9,7 @@ export function fakeD1() {
   const feeds = new Map(); // id -> { update_token_hash, calendar_json, expires_at, updated_at }
   const aliases = new Map(); // id -> { feed_id, feed_group }
   const renders = new Map(); // feed_id -> { calendar_id, ics, etag, expires_at, updated_at }
+  const createLimits = new Map(); // key -> { day, count }
   const prepares = []; // every SQL string handed to prepare(), in order
 
   const first = (sql, params) => {
@@ -42,6 +43,10 @@ export function fakeD1() {
         return render
           ? { ics: render.ics, etag: render.etag, expires_at: render.expires_at }
           : null;
+      }
+      case SQL.selectCreateLimit: {
+        const row = createLimits.get(params[0]);
+        return row ? { count: row.count } : null;
       }
       case SQL.countLiveFeeds: {
         let n = 0;
@@ -123,6 +128,16 @@ export function fakeD1() {
         for (const [id, render] of renders)
           if (render.expires_at <= params[0]) renders.delete(id);
         return { success: true };
+      case SQL.upsertCreateLimit: {
+        const row = createLimits.get(params[0]);
+        if (row) row.count += 1;
+        else createLimits.set(params[0], { day: params[1], count: 1 });
+        return { success: true };
+      }
+      case SQL.deleteOldCreateLimits:
+        for (const [key, row] of createLimits)
+          if (row.day < params[0]) createLimits.delete(key);
+        return { success: true };
       default:
         throw new Error(`fake-d1: unexpected SQL in run(): ${sql}`);
     }
@@ -132,6 +147,7 @@ export function fakeD1() {
     feeds,
     aliases,
     renders,
+    createLimits,
     prepares,
     prepare(sql) {
       prepares.push(sql);
