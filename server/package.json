@@ -1,6 +1,6 @@
 {
-  "name": "uwlearn-calendar-feed",
-  "version": "1.0.0",
+  "name": "waterloo-all-in-1-feed",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
