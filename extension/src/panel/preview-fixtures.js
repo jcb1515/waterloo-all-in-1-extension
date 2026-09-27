@@ -83,6 +83,7 @@ export function previewState(nowD = new Date(), variants = {}) {
     title: "Reading response worksheet",
     org: "ENGL 192",
     dueAt: dayAt(nowD, -2, 23, 59),
+    weight: 6,
     url: "https://learn.uwaterloo.ca/d2l/home/106",
     seenIn: seen("learn", "engl192-worksheet", "dropbox", today),
   });
@@ -146,11 +147,8 @@ export function previewState(nowD = new Date(), variants = {}) {
     title: "Acme Analog — Hardware Engineer co-op interview",
     org: "Acme Analog",
     category: "interview",
-    startAt: (() => {
-      const d = new Date(nowD.getFullYear(), 9, 2, 16, 0); // Oct 2, 4:00 PM
-      if (d.getTime() <= now) d.setFullYear(d.getFullYear() + 1);
-      return d.toISOString();
-    })(),
+    startAt: dayAt(nowD, 1, 19, 0), // overlaps the WATonomous sync tomorrow
+    endAt: dayAt(nowD, 1, 19, 30),
     location: "WaterlooWorks — video call",
     seenIn: seen("waterlooworks", "int-acme", "interviews", today),
   });
@@ -182,6 +180,75 @@ export function previewState(nowD = new Date(), variants = {}) {
     org: "MATH 115",
     dueAt: dayAt(nowD, -3, 23, 59),
     seenIn: seen("learn", "math115-asn4", "dropbox", today),
+  });
+
+  // Crunch day: three weighted deliverables inside 24 h.
+  add("learn:math115-asn5", {
+    source: "learn",
+    type: "deadline",
+    title: "Assignment 5",
+    org: "MATH 115",
+    dueAt: dayAt(nowD, 2, 23, 59),
+    weight: 8,
+    url: "https://learn.uwaterloo.ca/d2l/home/107",
+    seenIn: seen("learn", "math115-asn5", "dropbox", today),
+  });
+  add("learn:ece198-lab4", {
+    source: "learn",
+    type: "deadline",
+    title: "Lab 4 report",
+    org: "ECE 198",
+    dueAt: dayAt(nowD, 2, 18, 0),
+    weight: 10,
+    url: "https://learn.uwaterloo.ca/d2l/home/105",
+    seenIn: seen("learn", "ece198-lab4", "dropbox", today),
+  });
+
+  // Pending review: a Learn announcement date and a WaterlooWorks message
+  // date. They wait in the Review view and stay out of the agenda.
+  add("learn:ece105-news-quiz4", {
+    source: "learn",
+    type: "quiz",
+    title: "Quiz 4 — moved up",
+    org: "ECE 105",
+    dueAt: nextWeekday(nowD, 5, 23, 59), // Friday 11:59 PM
+    confidence: "tentative",
+    review: "pending",
+    url: "https://learn.uwaterloo.ca/d2l/le/news/102/555/view",
+    evidence: {
+      snippet: "Reminder: Quiz 4 is moved up — it closes Friday at 11:59 PM, not Sunday.",
+      url: "https://learn.uwaterloo.ca/d2l/le/news/102/555/view",
+      method: "text",
+    },
+    seenIn: seen("learn", "102:news:555", "102:news", today),
+  });
+  add("waterlooworks:msg-acme-window", {
+    source: "waterlooworks",
+    type: "deadline",
+    title: "Acme Analog — confirm interview slot",
+    org: "Acme Analog",
+    dueAt: dayAt(nowD, 1, 17, 0), // tomorrow 5 PM
+    confidence: "tentative",
+    review: "pending",
+    evidence: {
+      snippet: "Please confirm your interview slot by tomorrow at 5 PM.",
+      method: "text",
+    },
+    seenIn: seen("waterlooworks", "msg:99", "messages", today),
+  });
+  add("learn:engl192-old-news", {
+    source: "learn",
+    type: "event",
+    title: "Library orientation replay",
+    org: "ENGL 192",
+    startAt: dayAt(nowD, -4, 14, 0),
+    confidence: "tentative",
+    review: "pending",
+    evidence: {
+      snippet: "The library orientation replay ran last week at 2 PM.",
+      method: "text",
+    },
+    seenIn: seen("learn", "106:news:12", "106:news", today),
   });
 
   const userState = {
@@ -307,5 +374,58 @@ export function previewState(nowD = new Date(), variants = {}) {
     },
   };
 
-  return { items, userState, sourceState, courses, applications: {}, terms: {}, settings, discovery, calendarFeed, outlineFiles };
+  // The updates feed: one of each kind, newest first. updatesSeenAt leaves
+  // the newest two unread so the bell badge shows a count.
+  const updates = [
+    {
+      id: "u1",
+      at: iso(now - 30 * MIN),
+      source: "learn",
+      kind: "new",
+      text: "New: Quiz #3 — DC circuits",
+      refId: "learn:ece105-quiz3",
+    },
+    {
+      id: "u2",
+      at: iso(now - 3 * HOUR),
+      source: "learn",
+      kind: "moved",
+      text: "Moved: Project 1 — Battleship milestone",
+      refId: "learn:ece150-project1",
+    },
+    {
+      id: "u3",
+      at: iso(now - 5 * HOUR),
+      source: "waterlooworks",
+      kind: "status",
+      text: "Acme Analog — Hardware Engineer: applied → selected for interview",
+      refId: "waterlooworks:int-acme",
+    },
+    {
+      id: "u4",
+      at: iso(now - DAY),
+      source: "learn",
+      kind: "review",
+      text: "Found a date in an ECE 105 announcement — review it",
+      refId: "learn:ece105-news-quiz4",
+    },
+    {
+      id: "u5",
+      at: iso(now - 2 * DAY),
+      source: "learn",
+      kind: "cancelled",
+      text: "Removed: ENGL 192 participation check",
+      refId: "learn:engl192-worksheet",
+    },
+    {
+      id: "u6",
+      at: iso(now - 3 * DAY),
+      source: "waterlooworks",
+      kind: "new",
+      text: "New application tracked: Northwind Optics — Photonics intern",
+    },
+  ];
+  const updatesSeenAt = iso(now - 4 * HOUR);
+
+  return { items, userState, sourceState, courses, applications: {}, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
 }

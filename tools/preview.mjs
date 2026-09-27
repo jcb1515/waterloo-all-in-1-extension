@@ -65,7 +65,18 @@ const SHOTS_2A = [
   { name: "options-welcome-light", url: "/src/options/options.html?preview=empty#welcome", size: [1280, 900] },
 ];
 
-const SHOTS = process.env.WA1_SHOT_DIR === "phase2a" ? SHOTS_2A : [
+const SHOTS_2B = [
+  { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-review-light", url: "/src/panel/panel.html?preview=1&view=review", size: [400, 900] },
+  { name: "panel-review-edit-light", url: "/src/panel/panel.html?preview=1&view=review&edit=1", size: [400, 900] },
+  { name: "panel-updates-dark", url: "/src/panel/panel.html?preview=1&view=updates", size: [400, 900], dark: true },
+  { name: "options-reminders-light", url: "/src/options/options.html?preview=1#reminders", size: [1280, 900] },
+  { name: "options-calendar-published-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
+];
+
+const SHOTS =
+  process.env.WA1_SHOT_DIR === "phase2b" ? SHOTS_2B :
+  process.env.WA1_SHOT_DIR === "phase2a" ? SHOTS_2A : [
   { name: "panel-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
   { name: "panel-light-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
   { name: "panel-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
@@ -184,6 +195,14 @@ async function shots() {
           groups: document.querySelectorAll(".agenda-group").length,
           cards: document.querySelectorAll(".card").length,
           overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          badges: document.querySelectorAll(".badge").length,
+          priHigh: document.querySelectorAll(".pri-high").length,
+          summaryLines: document.querySelectorAll(".summary-extra, .summary-nextup").length,
+          iconBadges: document.querySelectorAll(".icon-badge").length,
+          reviewCards: document.querySelectorAll(".review-card").length,
+          updateRows: document.querySelectorAll(".update-row").length,
+          leadRows: document.querySelectorAll(".lead-row").length,
+          marks: document.querySelectorAll("mark").length,
           text: document.body.innerText.slice(0, 120)
         })`,
       });
