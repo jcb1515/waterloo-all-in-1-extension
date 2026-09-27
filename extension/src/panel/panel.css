@@ -459,6 +459,20 @@ html[data-density="compact"] .item-title {
   color: var(--text-2);
 }
 
+/* Discord sweep controls on the Sources card. */
+.discord-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.discord-unread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+}
+.discord-channel { font-weight: var(--w-medium); }
+
 /* --------------------------- header icon badges --------------------------- */
 
 .btn-icon.has-badge {

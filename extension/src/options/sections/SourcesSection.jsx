@@ -6,7 +6,7 @@ import { Card, Field, Toggle } from "../bits.jsx";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { normCourseCode } from "../../core/contract.js";
 import { mutateKey } from "../../core/store.js";
-import { send, IS_PREVIEW } from "../../panel/data.js";
+import { send, IS_PREVIEW, query } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
 import { fileToEntry, OUTLINE_FILES_KEY } from "../outline-import.js";
 import { pdfToText, base64ToBytes } from "../pdf-text.js";
@@ -57,7 +57,12 @@ export function SourcesSection({ settings, save, state }) {
                 <OutlineFiles files={(state && state.outlineFiles) || []} />
               </>
             ) : null}
-            {a.id === "discord" ? <DiscordWatched src={src.discord || {}} save={save} /> : null}
+            {a.id === "discord" ? (
+              <>
+                <DiscordWatched src={src.discord || {}} save={save} />
+                <DiscordAdvanced src={src.discord || {}} save={save} />
+              </>
+            ) : null}
           </Card>
         );
       })}
@@ -330,5 +335,48 @@ function DiscordWatched({ src, save }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Discord Advanced: identity overrides and extra trigger words, saved under
+ * sources.discord. The adapter infers these on its own; these correct it.
+ * @param {{src: any, save: (patch: any) => void}} p
+ */
+function DiscordAdvanced({ src, save }) {
+  const csv = (v) => (Array.isArray(v) ? v.join(", ") : "");
+  const list = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const patch = (p) => save({ sources: { discord: { ...(src || {}), ...p } } });
+  // ?adv=1 opens the section for screenshots/previews.
+  const open = query.get("adv") === "1";
+
+  return (
+    <details class="src-sub discord-advanced" open={open || undefined}>
+      <summary class="label">Advanced</summary>
+      <Field label="Your Discord user id" help="Overrides the id inferred from your Mentions inbox.">
+        <input
+          class="input"
+          defaultValue={src.userId || ""}
+          placeholder="e.g. 123456789012345678"
+          onBlur={(e) => patch({ userId: /** @type {any} */ (e.target).value.trim() })}
+        />
+      </Field>
+      <Field label="Role ids" help="Comma-separated. Extends the roles inferred from role pings.">
+        <input
+          class="input"
+          defaultValue={csv(src.roleIds)}
+          placeholder="1234…, 5678…"
+          onBlur={(e) => patch({ roleIds: list(/** @type {any} */ (e.target).value) })}
+        />
+      </Field>
+      <Field label="Keywords" help="Comma-separated words that count as meeting triggers (e.g. scrum, standup).">
+        <input
+          class="input"
+          defaultValue={csv(src.keywords)}
+          placeholder="standup, retro"
+          onBlur={(e) => patch({ keywords: list(/** @type {any} */ (e.target).value) })}
+        />
+      </Field>
+    </details>
   );
 }

@@ -396,6 +396,24 @@ export async function handleObserved(payload) {
 }
 
 /**
+ * Run `fn` over a source's stored adapter state inside its ingest queue, then
+ * save. Bumps the state version so an in-flight sync re-runs on the result.
+ * @param {string} sourceId
+ * @param {(state: any) => any} fn returns the next adapter state
+ */
+export async function mutateSourceState(sourceId, fn) {
+  const adapter = adapterForSource(sourceId);
+  const id = adapter ? adapter.id : sourceId;
+  return ingest(id, async () => {
+    await mutateKey("sourceState", (cur) => {
+      const prev = (cur || {})[id] || {};
+      return { ...(cur || {}), [id]: { ...prev, state: fn(prev.state || {}) } };
+    });
+    bumpStateVersion(id);
+  });
+}
+
+/**
  * wa1:capture — a content script (or the panel) hands in already-parsed items.
  * @param {{source:string, scope:string, items:any[], applications?:any[], complete?:boolean}} msg
  */

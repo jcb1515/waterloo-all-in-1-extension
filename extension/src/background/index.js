@@ -26,7 +26,9 @@ import {
   handleCapture,
   setUserState,
   clearSource,
+  mutateSourceState,
 } from "../core/scheduler.js";
+import { resetSweep } from "../sources/discord/index.js";
 import { handleDiscoveryMessage } from "../capture/discovery-store.js";
 import {
   publishFeed,
@@ -176,8 +178,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     testNotification().then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
+  if (msg.type === UI.DISCORD_SWEEP) {
+    discordSweep().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   return false;
 });
+
+/**
+ * "Start sweep" on the Discord source card: reset the sweep inside the
+ * source's ingest queue, then resync so the adapter rebuilds sweepQueue and
+ * unread summaries from the fresh watch state.
+ */
+async function discordSweep() {
+  await mutateSourceState("discord", (state) => resetSweep(state, new Date()));
+  await runSync("discord", "manual");
+  return { ok: true };
+}
 
 /** Settings -> Reminders "Send test notification". */
 async function testNotification() {

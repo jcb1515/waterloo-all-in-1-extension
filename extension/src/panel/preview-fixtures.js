@@ -363,8 +363,42 @@ export function previewState(nowD = new Date(), variants = {}) {
       failures: 0,
       itemCount: 1,
     },
-    // Portal is "soon"-stage and has never run: no sourceState entry, so the
-    // card shows neither a synced line nor Clear data.
+    portal: {
+      lastRunAt: iso(now - 45 * MIN),
+      lastOkAt: iso(now - 45 * MIN),
+      session: "signed-in",
+      error: null,
+      complete: true,
+      failures: 0,
+      itemCount: 24,
+      state: {},
+    },
+    discord: {
+      lastRunAt: iso(now - 20 * MIN),
+      lastOkAt: iso(now - 20 * MIN),
+      session: "signed-in",
+      error: null,
+      complete: false,
+      failures: 0,
+      itemCount: 3,
+      state: {
+        guilds: {
+          "9102": { name: "WATonomous", unread: 0, mentions: 0, channels: {} },
+          "8804": { name: "ECE 2027", unread: 1, mentions: 0, channels: {} },
+        },
+        sweep: { startedAt: iso(now - 2 * DAY), done: { "9911": iso(now - DAY) } },
+        sweepQueue: [
+          { guildId: "9102", guildName: "WATonomous", channelId: "9912", name: "electrical", url: "https://discord.com/channels/9102/9912" },
+          { guildId: "9102", guildName: "WATonomous", channelId: "9913", name: "meetings", url: "https://discord.com/channels/9102/9913" },
+          { guildId: "8804", guildName: "ECE 2027", channelId: "9814", name: "announcements", url: "https://discord.com/channels/8804/9814" },
+        ],
+        unreadWatched: [
+          { guildId: "9102", guildName: "WATonomous", channelId: "9915", name: "general", url: "https://discord.com/channels/9102/9915", mentions: 0 },
+          { guildId: "8804", guildName: "ECE 2027", channelId: "9816", name: "labs", url: "https://discord.com/channels/8804/9816", mentions: 1 },
+        ],
+        unreadGuilds: [{ guildId: "8804", name: "ECE 2027", mentions: 0 }],
+      },
+    },
   };
 
   const courses = {
@@ -604,7 +638,15 @@ export function previewState(nowD = new Date(), variants = {}) {
     density: "comfortable",
     termCode: 1269,
     agenda: { showClasses: "today" },
-    sources: {},
+    sources: {
+      discord: {
+        enabled: true,
+        watched: { WATonomous: { focus: ["electrical"], channels: [] }, "ECE 2027": { focus: [], channels: [] } },
+        userId: "416820311045488640",
+        roleIds: ["8804112233", "9102445566"],
+        keywords: ["standup", "retro"],
+      },
+    },
     calendar: {
       enabled: published,
       serviceUrl: published ? "https://waterloo-all-in-1-feed.example.workers.dev" : "",
@@ -662,6 +704,15 @@ export function previewState(nowD = new Date(), variants = {}) {
           kind: "pdf",
           size: 96_214,
           addedAt: iso(now - 6 * HOUR),
+          text: "MATH 117 Calculus 1 — extracted text (preview fixture)",
+        },
+        {
+          id: "p4r5s6-t7u8v9",
+          name: "ENGL 192 syllabus.pdf",
+          kind: "pdf",
+          size: 61_802,
+          addedAt: iso(now - 30 * MIN),
+          text: "ENGL 192 — extracted text (preview fixture)",
         },
       ]
     : [];
@@ -718,6 +769,13 @@ export function previewState(nowD = new Date(), variants = {}) {
       kind: "review",
       text: "Found a date in an ECE 105 announcement — review it",
       refId: "learn:ece105-news-quiz4",
+    },
+    {
+      id: "u4b",
+      at: iso(now - 26 * HOUR),
+      source: "outline",
+      kind: "review",
+      text: "Portal lists ECE 105 LEC 002, TUT 103 but your profile says LEC 001, TUT 101; using Portal's.",
     },
     {
       id: "u5",

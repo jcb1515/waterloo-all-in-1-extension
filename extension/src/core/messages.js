@@ -20,4 +20,6 @@ export const UI = Object.freeze({
   CALENDAR_STOP: "wa1:calendar-stop",
   /** options -> background: { type } fire a sample reminder notification */
   TEST_NOTIFY: "wa1:test-notification",
+  /** panel -> background: { type } restart the Discord watched-channel sweep */
+  DISCORD_SWEEP: "wa1:discord-sweep",
 });

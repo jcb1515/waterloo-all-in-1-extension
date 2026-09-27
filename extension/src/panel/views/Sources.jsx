@@ -1,12 +1,21 @@
 // Sources view: one status card per adapter, with sync/open/clear actions and
 // a footer link to the privacy & discovery settings.
 
-import { useMemo } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
-import { IS_PREVIEW } from "../data.js";
-import { RefreshIcon, ExternalLinkIcon, TrashIcon, ShieldIcon } from "../../ui/icons.jsx";
+import { IS_PREVIEW, send } from "../data.js";
+import { UI } from "../../core/messages.js";
+import { inventoryReport } from "../../sources/discord/index.js";
+import {
+  RefreshIcon,
+  ExternalLinkIcon,
+  TrashIcon,
+  ShieldIcon,
+  ArrowRightIcon,
+  ClipboardCheckIcon,
+} from "../../ui/icons.jsx";
 
 const TONE_BADGE = { ok: "badge-ok", warn: "badge-warn", danger: "badge-danger", muted: "badge-muted" };
 
@@ -76,6 +85,7 @@ export function Sources({ state, actions, now }) {
           {!(adapter.intervalMinutes > 0) ? (
             <p class="source-detail">Updates while you browse {adapter.label}.</p>
           ) : null}
+          {adapter.id === "discord" ? <DiscordControls st={st} /> : null}
           <div class="source-actions">
             {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 ? (
               <button
@@ -114,6 +124,83 @@ export function Sources({ state, actions, now }) {
       <button type="button" class="btn btn-ghost sources-privacy" onClick={openPrivacy}>
         <ShieldIcon size={14} /> Privacy &amp; discovery settings
       </button>
+    </div>
+  );
+}
+
+/**
+ * Discord sweep controls. Everything is click-driven — the adapter never
+ * navigates on its own. State lives in sourceState.discord.state.
+ * @param {{st: any}} p
+ */
+function DiscordControls({ st }) {
+  const [copied, setCopied] = useState(false);
+  const state = (st && st.state) || {};
+  const queue = Array.isArray(state.sweepQueue) ? state.sweepQueue : [];
+  const unread = Array.isArray(state.unreadWatched) ? state.unreadWatched : [];
+  const next = queue[0] || null;
+
+  // Reuse an open Discord tab when there is one; otherwise open a new one.
+  const openChannel = async (url) => {
+    if (IS_PREVIEW) return;
+    try {
+      const tabs = await chrome.tabs.query({ url: "https://discord.com/*" });
+      const tab = (tabs || []).find((t) => t.id != null && !t.discarded);
+      if (tab) await chrome.tabs.update(tab.id, { url, active: true });
+      else await chrome.tabs.create({ url });
+    } catch {
+      /* no tabs permission path — try a plain window open */
+      window.open(url, "_blank");
+    }
+  };
+
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(inventoryReport(state), null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  return (
+    <div class="discord-controls">
+      {unread.length ? (
+        <div class="discord-unread">
+          <p class="source-detail">
+            {unread.length} watched channel{unread.length === 1 ? "" : "s"} have new messages
+          </p>
+          {unread.map((ch) => (
+            <button
+              key={ch.channelId}
+              type="button"
+              class="btn btn-sm btn-ghost discord-channel"
+              onClick={() => openChannel(ch.url)}
+            >
+              #{ch.name} · {ch.guildName}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div class="source-actions">
+        <button type="button" class="btn btn-sm" onClick={() => send({ type: UI.DISCORD_SWEEP })}>
+          <RefreshIcon size={13} /> Start sweep
+        </button>
+        {next ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            title={`${next.url} · ${queue.length} left`}
+            onClick={() => openChannel(next.url)}
+          >
+            <ArrowRightIcon size={13} /> #{next.name} · {next.guildName} ({queue.length} left)
+          </button>
+        ) : null}
+        <button type="button" class="btn btn-sm btn-ghost" onClick={copyReport}>
+          <ClipboardCheckIcon size={13} /> {copied ? "Copied" : "Copy Discord report"}
+        </button>
+      </div>
     </div>
   );
 }
