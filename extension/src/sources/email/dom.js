@@ -7,7 +7,14 @@
 */
 
 import { extractDates } from "../../lib/textdates/index.js";
-import { GMAIL, OUTLOOK } from "./selectors.js";
+import { CARD, GMAIL, OUTLOOK } from "./selectors.js";
+import {
+  CARD_CUE_RE,
+  CARD_ORG_RE,
+  CARD_STOP_RE,
+  CARD_UI_RE,
+  CARD_WHEN_RE,
+} from "./rules.js";
 
 /**
  * @typedef {Object} Msg
@@ -21,6 +28,8 @@ import { GMAIL, OUTLOOK } from "./selectors.js";
  * @property {string} [receivedAt]   ISO, Toronto-parsed
  * @property {string} [body]         message view only, <=20000 chars
  * @property {string[]} links        meeting/co-op links found in the body
+ * @property {{whenText: string, title?: string, where?: string, organizer?: string}} [invite]
+ *   the invite card the client renders above the message (first Msg only)
  */
 
 const BODY_CAP = 20000;
@@ -47,7 +56,7 @@ export function textWithBreaks(el) {
         walk(child);
         if (
           out.length > before &&
-          /^(DIV|P|LI|H[1-6]|SECTION|ARTICLE|TR|PRE|BLOCKQUOTE)$/.test(
+          /^(DIV|P|LI|H[1-6]|SECTION|ARTICLE|TR|PRE|BLOCKQUOTE|BUTTON)$/.test(
             String(child.nodeName || "").toUpperCase(),
           ) &&
           !out.endsWith("\n")
@@ -97,6 +106,68 @@ function parseReceived(text) {
   }
 }
 
+/* --------------------------- invite cards --------------------------- */
+
+// Loose prefilter so textWithBreaks only runs on elements that could hold a
+// card date line (class names are obfuscated, so there is nothing else to
+// select on).
+const CARD_MAYBE =
+  /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+[A-Z][a-z]{2,8}|\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2}/i;
+
+const linesOf = (el) =>
+  textWithBreaks(el)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+/**
+ * The invite card a client renders above a Teams/Calendar mail: the smallest
+ * element inside `[role="main"]` (Gmail falls back to the document) whose
+ * lines hold a CARD_WHEN_RE date plus a response cue or "- Organizer" line.
+ * Gmail bodies (.a3s) never count — a card is chrome, not message text.
+ * Returns {whenText, title?, where?, organizer?} or null.
+ * @param {any} doc @param {boolean} gmail
+ */
+function inviteCard(doc, gmail) {
+  const scope = (doc.querySelector && doc.querySelector(CARD.main)) || (gmail ? doc : null);
+  if (!scope) return null;
+  /** @type {any} */ let best = null;
+  let bestLen = Infinity;
+  for (const el of scope.querySelectorAll("*")) {
+    if (gmail && el.closest && el.closest(GMAIL.msgBody)) continue;
+    const tc = String(el.textContent || "");
+    if (!CARD_MAYBE.test(tc)) continue;
+    const lines = linesOf(el);
+    if (!lines.some((l) => CARD_WHEN_RE.test(l))) continue;
+    if (!lines.some((l) => CARD_CUE_RE.test(l) || CARD_ORG_RE.test(l))) continue;
+    if (tc.length < bestLen) {
+      best = el;
+      bestLen = tc.length;
+    }
+  }
+  if (!best) return null;
+
+  // Parse the card's lines in order; conflict notices end the card.
+  const lines = [];
+  for (const l of linesOf(best)) {
+    if (CARD_STOP_RE.test(l)) break;
+    lines.push(l);
+  }
+  const whenText = lines.find((l) => CARD_WHEN_RE.test(l));
+  if (!whenText) return null;
+  const junk = (l) => CARD_CUE_RE.test(l) || CARD_ORG_RE.test(l) || CARD_UI_RE.test(l);
+  const rest = lines.slice(lines.indexOf(whenText) + 1);
+  const title = rest.find((l) => !junk(l));
+  const where = title ? rest.slice(rest.indexOf(title) + 1).find((l) => !junk(l)) : undefined;
+  const orgLine = lines.map((l) => CARD_ORG_RE.exec(l)).find(Boolean);
+  /** @type {{whenText: string, title?: string, where?: string, organizer?: string}} */
+  const invite = { whenText };
+  if (title) invite.title = title;
+  if (where) invite.where = where;
+  if (orgLine) invite.organizer = orgLine[1].trim();
+  return invite;
+}
+
 /**
  * @param {any} doc
  * @param {string} href
@@ -129,6 +200,10 @@ function gmailExtract(doc, href) {
   if (segs[0] === "label") {
     folder = segs[1] || null;
     msgId = segs[2];
+  } else if (segs[0] === "search") {
+    // #search/<query>[/<id>] — segment 1 is the query, never the id.
+    folder = "search";
+    msgId = segs[2];
   } else {
     folder = segs[0] || "inbox";
     msgId = segs[1];
@@ -158,6 +233,20 @@ function gmailExtract(doc, href) {
         body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
+    }
+    const card = inviteCard(doc, true);
+    if (card) {
+      if (!messages.length) {
+        messages.push({
+          key: String(key || ""),
+          url: urlFor(key),
+          from: "",
+          fromEmail: "",
+          subject,
+          links: linksOf(doc.querySelector(CARD.main) || doc),
+        });
+      }
+      messages[0].invite = card;
     }
   } else {
     for (const tr of doc.querySelectorAll(GMAIL.listRow)) {
@@ -232,6 +321,8 @@ function outlookExtract(doc, href) {
         body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
+      const card = inviteCard(doc, false);
+      if (card) messages[0].invite = card;
     }
   } else {
     let rows = [...doc.querySelectorAll(OUTLOOK.listRow)];

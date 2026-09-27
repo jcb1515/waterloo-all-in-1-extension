@@ -27,3 +27,9 @@ export const OUTLOOK = {
   sentTime: '[data-testid="SentReceivedSavedTime"]',
   selected: '[data-convid][aria-selected="true"]',
 };
+
+// Invite cards have no stable classes — they are found by line shape
+// (CARD_*_RE in rules.js) inside this scope; `.a3s` is excluded on Gmail.
+export const CARD = {
+  main: '[role="main"]',
+};

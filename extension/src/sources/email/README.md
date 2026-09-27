@@ -21,11 +21,14 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
   `links` = Teams/Zoom/Meet/WaterlooWorks hrefs with Google `url?q=` wrappers
   unwrapped.
 - `rules.js` + `extract.js` — `itemsFromMessage(msg, …)` (pure):
-  - **Invites → exact items.** Google-Calendar subjects
+  - **Invites → exact items.** Checked in order: the rendered **invite card**
+    (`msg.invite`, when the client drew the RSVP card whose date Gmail/Outlook
+    put outside the body), the Google-Calendar subject
     (`Invitation:|Updated invitation|Canceled event|Cancelled event( with note)?: <title> @ <when> (<tz>) (<email>)`),
     a `When:` body line, or a meeting link + timed date. The when-text is
-    parsed with `textDates` (Toronto wall time); an absent or Eastern zone is
-    `exact`/`auto`, anything else `tentative`/`pending` with `meta.tz`.
+    parsed with `textDates` (Toronto wall time; card separators `·`/`•`/`|` and
+    `M/D/YYYY`/`YYYY-MM-DD` dates are normalised first); an absent or Eastern
+    zone is `exact`/`auto`, anything else `tentative`/`pending` with `meta.tz`.
     `Canceled event:` keeps `status "cancelled"`. "interview" in the subject
     or a WaterlooWorks sender makes it an `interview`. `meta.facts` carries
     Organizer/Where/Join; `id = <provider>:invite:<key>:<startAt>`.
@@ -34,7 +37,8 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
     subject, or `settings.teams`/`settings.senders` substrings — OR a keyword
     in the subject. Keyword set: interview, offer, rank(ing), deadline, due,
     extension, midterm, exam, room change, cance(l)led, rescheduled, meeting,
-    tapeout, design review ∪ `settings.keywords`. Date hits come from
+    tapeout, design review, rsvp, invited, invitation, register, registration,
+    event ∪ `settings.keywords`. Date hits come from
     `textDates(subject + "\n" + body|preview)`, confidence ≥0.6, not ended
     before `receivedAt − 1d`, and inside a keyword sentence; max 3 per
     message, one per Toronto day. Type maps off the keyword (interview,
@@ -54,6 +58,40 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
 - `senders` / `teams` — case-insensitive substrings matched against the
   sender name/email for the gate; `teams` also supplies `org` fallback.
 - `keywords` — extra word-bounded keywords for the hit filter and typing.
+
+## Invite cards
+
+Gmail and Outlook draw a Teams/Calendar invite card *above* the message — its
+date never appears in the `.a3s`/message body, so without the card those mails
+produce nothing. `dom.js` finds the smallest element inside `[role="main"]`
+(Gmail falls back to the document, `.a3s` excluded) whose line text has a
+`CARD_WHEN_RE` date plus a response cue (`Yes/No/Maybe/RSVP/Accept/…` button
+text or a `<name> – Organizer` line). Lines are read in order; `On your Google
+Calendar`/`Conflict with`/`Based on this email` stop the card — those describe
+OTHER events and must never become items. First line after the when-line that
+isn't UI/button text is the title; the next is the location. The result goes
+to `messages[0].invite` (one card per thread).
+
+## Guided mail scan ("scan my mail")
+
+`startMailScan(state, {provider, now, days = 60, account = 0})` →
+`{state, url, query}`. For Gmail `url` is a `#search/<query>` deeplink the UI
+opens in the user's tab; Outlook web has no working search deeplink so `url`
+is `null` and the UI shows `query` to paste. `stopMailScan(state)` clears
+`scan`/`scanQueue` and keeps `scanned`.
+
+While `state.scan` is for this provider and <24 h old:
+
+- a `search` **list** view queues rows whose keys aren't in `state.scanned` or
+  already queued → `{provider, key, subject ≤ 80 chars, url}` (cap 200; Gmail
+  urls are `#all/<key>` deeplinks, Outlook `/mail/[0/]id/<key>`),
+- **any** message view is allowed regardless of folder (the user opens queued
+  threads from wherever they live).
+
+Any message view, scan or not, drops its keys from the queue and records
+`state.scanned[key] = at` (newest 1000 kept). Folder `"search"` is always
+allowed. State grows only by `{scan, scanQueue, scanned}` — no content beyond
+the 80-char queue subjects.
 
 ## Scope semantics
 
@@ -81,8 +119,15 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   (name attr or text), subject `.bog`, preview `.y2` (leading `" - "` cut),
   time `.xW span[title]`; message view `h2.hP`, `div.adn` /
   `[data-legacy-message-id]`, sender `.gD[email]`, time `.g3[title]`,
-  body `.a3s`; folder/view from `#<folder>/<id>` hash segments; item URL
-  rebuilt as `mail/u/<n>/#<folder>/<key>`.
+  body `.a3s`; folder/view from `#<folder>/<id>` hash segments
+  (`#search/<q>[/<id>]` → folder "search", id is the third segment; `#label/<n>[/<id>]`
+  → label name); item URL rebuilt as `mail/u/<n>/#<folder>/<key>`.
+- Invite cards: scope `[role="main"]`, detection regexes `CARD_WHEN_RE`,
+  `CARD_CUE_RE`, `CARD_ORG_RE`, `CARD_UI_RE`, `CARD_STOP_RE`, the `M/D/YYYY`
+  US-order assumption, one card per thread on the first Msg, and
+  `<button>` counting as a line boundary.
+- Scan: `GMAIL_SCAN_QUERY`/`OUTLOOK_SCAN_QUERY` strings, the 24 h scan TTL,
+  `#all/<key>` and `/mail/[0/]id/<key>` queue deeplinks, 200/1000 caps.
 - Outlook rows `[data-convid]` (prefer `[role=option]`), sender
   `span[title*="@"]`, time `time[datetime]` or a time-ish text line, subject
   = first non-sender/non-time line; message view `[role="main"]` with

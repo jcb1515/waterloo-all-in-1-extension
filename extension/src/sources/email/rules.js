@@ -24,6 +24,65 @@ export const EASTERN_TZ = /^(E[SD]?T|Eastern|America\/Toronto|GMT-0?[45])/i;
 export const MEET_LINK =
   /teams\.microsoft\.com\/l\/meetup-join|zoom\.us\/j\/|meet\.google\.com\/|waterlooworks\.uwaterloo\.ca/i;
 
+/* ---- invite cards (the RSVP card the client renders above a message) ---- */
+
+/**
+ * A card date line, one of:
+ *   "Tue, Sep 29 · 1:00 PM – 1:30 PM"
+ *   "Tue 9/29/2026 1:00 PM - 1:30 PM"
+ *   "2026-09-29 13:00"
+ */
+export const CARD_WHEN_RE = new RegExp(
+  [
+    "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\\s+[A-Z][a-z]{2,8}\\.?\\s+\\d{1,2}(?:,\\s*\\d{4})?\\s*[·•|,-]?\\s*\\d{1,2}(?::\\d{2})?\\s*[AP]M",
+    "(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\s+)?\\d{1,2}\\/\\d{1,2}\\/\\d{4}\\s+\\d{1,2}:\\d{2}\\s*[AP]M",
+    "\\d{4}-\\d{2}-\\d{2}\\s+\\d{1,2}:\\d{2}",
+  ].join("|"),
+  "i",
+);
+
+/** Response buttons / RSVP cues that mark an element as an invite card. */
+export const CARD_CUE_RE =
+  /^(Yes|No|Maybe|RSVP|Propose a new time|Add note|Accept|Decline|Tentative)$/i;
+
+/** "<name> - Organizer" — both the detection line and the name capture. */
+export const CARD_ORG_RE = /^(.+?)\s*[-–]\s*Organizer$/i;
+
+/** Card chrome that is neither the title nor the location. */
+export const CARD_UI_RE =
+  /^(Directions|Open in Google Maps?|Add to calendar|More details|Join (now|with Google Meet)|Going\??|View on Google Maps)$/i;
+
+/** Conflict notices describe OTHER events — parsing stops at these lines. */
+export const CARD_STOP_RE =
+  /^(On your (Google )?Calendar|Conflict with|Based on this email)/i;
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * Card when-text for textdates: `·`, `•` and `|` are separators, `M/D/YYYY`
+ * (US order) and `YYYY-MM-DD` become "Month D, YYYY".
+ * @param {string} s
+ */
+export function normCardWhen(s) {
+  let t = String(s || "").replace(/[·•|]/g, " ").replace(/\s+/g, " ").trim();
+  t = t.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/, (_m, mo, d, y) =>
+    `${MONTH_NAMES[Number(mo) - 1]} ${Number(d)}, ${y}`);
+  t = t.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/, (_m, y, mo, d) =>
+    `${MONTH_NAMES[Number(mo) - 1]} ${Number(d)}, ${y}`);
+  return t;
+}
+
+/* ---- guided scan ---------------------------------------------------- */
+
+/** @param {number} days */
+export const GMAIL_SCAN_QUERY = (days) =>
+  `(filename:ics OR subject:(invitation OR invite OR invited OR meeting OR interview OR rsvp)) newer_than:${days}d`;
+export const OUTLOOK_SCAN_QUERY =
+  "invitation OR invite OR invited OR meeting OR interview OR rsvp";
+
 /** Words that make a mail date-worthy (word-bounded; multi-word ok). */
 export const KEYWORDS = [
   "interview",
@@ -42,6 +101,12 @@ export const KEYWORDS = [
   "meeting",
   "tapeout",
   "design review",
+  "rsvp",
+  "invited",
+  "invitation",
+  "register",
+  "registration",
+  "event",
 ];
 
 const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
@@ -59,6 +124,7 @@ export const TYPE_RULES = [
   [/interview/i, "interview"],
   [/offer/i, "offer-deadline"],
   [/rank(ing)?/i, "cycle-date"],
+  [/\b(rsvp|register|registration|sign\s*up|apply)\b[^.!?\n]{0,25}\b(by|before|deadline)\b/i, "deadline"],
   [/mid-?terms?|exams?/i, "exam"],
   [/meetings?|design reviews?|tapeout/i, "meeting"],
   [/due|deadlines?|extensions?/i, "deadline"],
