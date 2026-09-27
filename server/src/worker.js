@@ -565,7 +565,7 @@ function pushEvent(lines, event, meta, timeZone) {
 function pushEventDates(lines, event, timeZone) {
   if (event.allDay) {
     const startDay = localDay(event.startAt || event.dueAt, timeZone);
-    let endDay = event.endAt ? addDays(localDay(event.endAt, timeZone), 1) : null;
+    let endDay = event.endAt ? allDayEndDay(event.endAt, timeZone) : null;
     if (!endDay || endDay <= startDay) endDay = addDays(startDay, 1);
     lines.push(`DTSTART;VALUE=DATE:${startDay}`, `DTEND;VALUE=DATE:${endDay}`);
     return;
@@ -625,6 +625,35 @@ function eventSources(event) {
     sources.push(Object.hasOwn(SOURCE_LABELS, source) ? SOURCE_LABELS[source] : source);
   }
   return sources;
+}
+
+/**
+ * All-day DTEND day (YYYYMMDD). The extension convention is an EXCLUSIVE end:
+ * a full timestamp at exactly local midnight already means "the day after the
+ * last day" and is used verbatim. Anything else — a date-only "YYYY-MM-DD" or
+ * a non-midnight timestamp — is an inclusive last day, so DTEND is day + 1.
+ */
+function allDayEndDay(endAt, timeZone) {
+  const text = String(endAt);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) && isLocalMidnight(text, timeZone)) {
+    return localDay(text, timeZone);
+  }
+  return addDays(localDay(text, timeZone), 1);
+}
+
+/** True when the timestamp's wall clock in `timeZone` reads exactly 00:00:00. */
+function isLocalMidnight(value, timeZone) {
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms) || ms % 1000 !== 0) return false;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(new Date(ms));
+  const get = (type) => Number(parts.find((part) => part.type === type).value);
+  return get("hour") % 24 === 0 && get("minute") === 0 && get("second") === 0;
 }
 
 /** YYYYMMDD in the feed timezone; date-only input is taken literally. */

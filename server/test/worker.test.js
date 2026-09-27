@@ -164,6 +164,41 @@ test("all-day events use VALUE=DATE with an exclusive DTEND", () => {
   );
 });
 
+test("all-day endAt at local midnight is exclusive; non-midnight stays inclusive", () => {
+  const events = [
+    // Oct 10 00:00 -> Oct 19 00:00 Toronto (textdates convention): the
+    // midnight endAt is already exclusive, so DTEND is Oct 19 verbatim.
+    ev({ id: "excl", allDay: true, title: "Excl", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-19T04:00:00.000Z" }),
+    // A non-midnight timestamp is an inclusive last day: Oct 19 -> +1.
+    ev({ id: "incl", allDay: true, title: "Incl", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-19T15:00:00.000Z" }),
+    // No endAt: single day, DTEND is start + 1.
+    ev({ id: "one", allDay: true, title: "One", dueAt: undefined,
+      startAt: "2026-10-10T04:00:00.000Z" })
+  ];
+  const ics = buildCalendar(applyPublish(null, payload(events), T1).state);
+  const excl = blockFor(ics, "excl@waterloo-all-in-1");
+  assert.equal(prop(excl, "DTSTART"), "DTSTART;VALUE=DATE:20261010");
+  assert.equal(prop(excl, "DTEND"), "DTEND;VALUE=DATE:20261019");
+  const incl = blockFor(ics, "incl@waterloo-all-in-1");
+  assert.equal(prop(incl, "DTEND"), "DTEND;VALUE=DATE:20261020");
+  const one = blockFor(ics, "one@waterloo-all-in-1");
+  assert.equal(prop(one, "DTEND"), "DTEND;VALUE=DATE:20261011");
+});
+
+test("an exclusive endAt equal to startAt still yields DTEND > DTSTART", () => {
+  const ics = buildCalendar(
+    applyPublish(null, payload([
+      ev({ id: "zero", allDay: true, title: "Zero", dueAt: undefined,
+        startAt: "2026-10-10T04:00:00.000Z", endAt: "2026-10-10T04:00:00.000Z" })
+    ]), T1).state
+  );
+  const block = blockFor(ics, "zero@waterloo-all-in-1");
+  assert.equal(prop(block, "DTSTART"), "DTSTART;VALUE=DATE:20261010");
+  assert.equal(prop(block, "DTEND"), "DTEND;VALUE=DATE:20261011");
+});
+
 test("timed events: due-only has no DTEND, start-only gets +60m, start+end respected", () => {
   const events = [
     ev({ id: "due", title: "Due only" }),

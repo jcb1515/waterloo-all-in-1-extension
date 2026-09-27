@@ -121,8 +121,12 @@ filtered. An event lands in: its valid `feedGroup`, else `waterlooworks` →
   `startAt`) implies `allDay` — as an instant it would land on UTC midnight,
   i.e. the previous evening in local time.
 - `allDay` → `DTSTART;VALUE=DATE` is the local (feed timezone) date of
-  `startAt || dueAt`; `DTEND` is the local date of `endAt` + 1 day (inclusive
-  end) or start + 1 day.
+  `startAt || dueAt`. `DTEND` follows the extension's exclusive-end
+  convention: a full timestamp `endAt` at exactly local midnight already
+  means "the day after the last day" and is used verbatim; a date-only
+  `YYYY-MM-DD` `endAt` or any non-midnight timestamp is an inclusive last
+  day, so `DTEND` is that local date + 1 day. `DTEND` is always after
+  `DTSTART` (a zero-length range becomes start + 1 day).
 - `startAt` present → `DTEND` = `endAt` if later, else `dueAt` if later, else
   start + 60 minutes.
 - `dueAt` only → `DTSTART` at the due time with no `DTEND` (a deadline, not a
