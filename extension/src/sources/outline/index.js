@@ -13,6 +13,7 @@
 import { normCourseCode } from "../../core/contract.js";
 import { extractDates } from "../../lib/textdates/index.js";
 import { buildOutline, readingWeeksOf } from "./expand.js";
+import { parseSyllabusText } from "./syllabus.js";
 
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 /** @typedef {import("../../core/contract.js").FetchResult} FetchResult */
@@ -172,8 +173,26 @@ const adapter = {
       urlOk = true;
       parsed.push({ data, url });
     }
+    /** Syllabus ({name, text}) results — already expanded, bypass buildFor. */
+    const direct = [];
     for (const file of files) {
       try {
+        if (typeof file.text === "string") {
+          const probe = parseSyllabusText(file.text, { now: ctx.now });
+          if (!probe) {
+            complete = false;
+            ctx.log(`outline: file ${file.name} is not a syllabus text`);
+            continue;
+          }
+          const sections = (settings.sections || {})[probe.code] || [];
+          const r =
+            (sections.length &&
+              parseSyllabusText(file.text, { now: ctx.now, sections, officeHours: !!settings.officeHours })) ||
+            probe;
+          if (r.skippedClasses) ctx.log(`outline: ${r.code} syllabus classes skipped (section not selected)`);
+          direct.push({ ...r, code: normCourseCode(r.code) });
+          continue;
+        }
         const data = await ctx.parseHtml(String(file.html || ""), "outline/parseOutline");
         if (!data || !data.code) {
           complete = false;
@@ -208,6 +227,13 @@ const adapter = {
         complete = false;
         ctx.log(`outline: ${code} failed to expand (${errMsg(e)})`);
       }
+    }
+    for (const r of direct) {
+      if (!r.code || seenCodes.has(r.code)) continue;
+      seenCodes.add(r.code);
+      items.push(...r.items);
+      courses.push(r.course);
+      readOk.push(r.code);
     }
     /** @type {SyncResult} */
     const result = { items, courses, complete, readOk, state: { ...state, seenUrls } };

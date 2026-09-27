@@ -1,0 +1,360 @@
+University of  Waterloo 
+ENGL 192: Communication in the Engineering Profession 
+Fall 2026 | Section 008 | Room: DWE 1515 
+Contact Information 
+Instructor: 	 Instructor
+Ofﬁce: 	 	 PAS 2224  
+Class Hours: 	 T/Th, 1:00pm-2:20pm 
+Ofﬁce Hours:	Tuesdays & Thursdays, 10:00am to 11:00am, by appointment only . 
+e-mail: 		 {email} 
+Course Description 
+This course will teach written and oral communication in electrical and computer engineering. 
+Students will practice the major genres of  communication relevant to internal and external 
+groups that might include clients, peers, technical staff, public audiences, and policy-focused 
+stakeholders. Students will enhance their critical thinking skills and creative competencies to 
+better understand the complex systems-level structures of  communication from project ideation, 
+workﬂows, and document design to audience reception, presentation, and reﬂection. Through 
+iterative communication design processes that emphasize student agency and con ﬁdence, 
+students will craft audience-speciﬁc messages through research, writing, & presenting. 
+Learning Outcomes 
+By the end of  this course, students should be able to do the following: 
+1.     Explain the role of  reports, the press, advertising, video and other communications media in 
+engineering [Comm] 
+2.     Demonstrate command of  appropriate writing skills and style [Comm] 
+3.     Demonstrate good literature research skills (gathering data or relevant information, 
+analyzing the results of  research efforts in terms of  data and argument, and assessing the 
+credibility and applicability of  information) [Comm] 
+4.     Construct a persuasive technical argument [Comm] 
+5.     Write an effective engineering report by attending to context, audience, and genre [Comm] 
+6.     Organize and deliver a persuasive oral presentation [Comm] 
+Textbook and Reading 
+Although a textbook is not strictly required for this course, a small selection  
+of  readings and reference materials will be provided from Graves and Graves’s 
+/A Strategic Guide to Technical Communication/. If  you wish to have a 
+physical edition, order directly from Broadview press or via 3rd party . 
+ 
+Graves, Heather and Roger Graves. A Strategic Guide to T echnical  
+Communication. 2nd Edition. 
+
+ENGL 191 Syllabus—Fall 2026 2
+Course Delivery 
+This course will be delivered in-person. Y ou will access and complete key components of  the 
+course on a week-to-week basis. Course materials will be made available via LEARN. Content 
+will be delivered in the form of  modules. Classes will begin with a presentation to introduce main 
+topics; exercises related to topics will follow . Readings will be assigned either ad hoc or from 
+textbook selections. Plan to do 2-3 hours of  work for each hour of  in-class time we have. In 
+addition to lectures, readings, and mini-assignments, you will complete three main assignments 
+which function as parts of  a whole: the pitch email, the technical report, and the presentation 
+form a course-long project whose theme and structure you will consider from the start.  
+Communication with your Instructor 
+This course is designed to develop your proﬁciency in the major communicative genres used in 
+the engineering profession. Ofﬁce hours are Tuesdays & Thursdays, by appointment, from 
+10:00am to 11:00am. I am always available via email ({email}) to answer any 
+questions or to clarify concepts. I will communicate with you regularly via LEARN and/or email 
+to help keep you focussed each week. Please do not hesitate to contact me at any time. I am 
+happy to hear from you and will try to respond as promptly and fully as possible. If  you have a 
+question about your assignments, it is best to ask about it right away . As in the workplace, so too 
+in this class: last-minute inquiries are unlikely to yield promising results. Stay organized.  
+Progression of  Assignments 
+Although the Technical Report is not worked on in earnest until after midterms, it represents the 
+summative assessment for this course. The report—in addition to being a well-conceived, clearly 
+structured, and persuasive document—is intended to solve an engineering problem you wish to 
+explore, an idea you will ﬁrst present in your pitch email. Y our idea should respond to an existing 
+problem in a speciﬁc area/discipline of  engineering focus. 
+Our relationship in this course is both academic and professional. Y ou are junior engineers. I am 
+your professor, supervisor, ﬁnancier, advisor, and technical expert. In the Pitch, you will propose 
+an engineering idea you’re interested in applying. Y our Technical Report will showcase how your 
+project works and why your project is important and deserving of  funds/resources. Y our 
+presentations—both the in-class and the Engineering Winter Showcase—are an opportunity to 
+show your unique work to technical and non-technical publics/persons of  interest. Mini-
+assignments are designed to develop your proﬁciency as a professional communicator. 
+Each project in this course is connected to the others. This is meant to represent the iterative 
+function of  writing, idea production, research, and the professional cycle of  communication. It is 
+highly advisable that you begin thinking about your Technical Report right from the 
+start of the course. Each assignment builds towards the achievement of  this major goal.  
+Course Assignments Grade Breakdown 
+1.Assignment 1: Project Pitch & Presentation (15%) 
+2.Assignment 2: Technical Report (35%) 
+3.Assignment 3: Engineering Presentation (10%)                 
+4.Contributions: Mini-Assignments, Participation, Attendance, Showcase (40%) 
+ENGL 191 Syllabus—Fall 2026 3
+How and Where to Submit Assignments 
+Electronic format: PDF , online via LEARN dropbox. Emailed assignments will not be graded.  
+Assignment Project Phases 
+Assignments in this course build on your project idea from your pitch and form the major stages 
+of  how one would undertake the proposal of  a project as a professional engineer. I will provide 
+you with detailed project sheets for each of  your assignments, all of  which are designed to guide 
+you through this process with as much ease and clarity as possible. From time to time, we will 
+complete project analyses, which will help you contextualize how to produce these deliverables. 
+The pitch assignment requires that you pitch a project idea to me. This assignment will test 
+your knowledge of  the conventions of  email communication as well as your ability to present 
+idea(s) persuasively in front of  an audience of  peers. 
+The technical report functions as the centrepiece of  the course and develops in stages. Y ou 
+will begin individually in Part I with a technical report rationale, setting out your objectives, 
+milestones, and work plan for the project. Y ou will then be placed in a group of  two or three, 
+where you will select one of  your projects to carry forward. This is where you will write Part II of  
+the rationale, accounting for the work completed, work remaining, and current status of  the 
+project. Y our group then continues its research and drafts the full technical report, which you will 
+circulate for peer review before submitting the ﬁnal version and presenting. The report explains 
+what is known about a problem, supports that account with credible research, establishes why the 
+problem matters, and proposes a credible solution grounded in existing engineering knowledge. 
+The presentations translate your written technical report into spoken and visual forms. Y ou 
+will present your technical report to the class as a slideshow and you will design a research-style 
+poster to display at the Engineering Showcase. The technical report, presentation, and poster 
+form a persuasive set; your audience is composed of  potential investors, shareholders, and other 
+professional non-engineers—the language of  your written, oral, visual work should reﬂect that. 
+These assignments are structured to simulate the professional work ﬂow of  proposing 
+engineering projects—pitching, reporting, presenting—to engineering supervisors, investors, 
+shareholders, and other business-oriented individuals, all of  whom comprise the key decision-
+makers about whether or not projects become approved in professional settings. This course is 
+designed to teach you the communicative and persuasive strategies that will help you in your 
+careers as junior engineers in training in alignment with Canadian Engineering Accreditation 
+Board (CEAB) outcomes and expectations. 
+Assessments & Accommodations 
+Although you will have until the very last minute of  assignment deadlines to submit your work, you 
+are encouraged to finish assignment in advance of  due dates to mitigate unexpected interruptions. 
+If  you require accommodation, please let me know ahead of  time. Late assignments will be 
+penalized 5% per day with no exceptions unless appropriate documentation is submitted. 
+ENGL 191 Syllabus—Fall 2026 4
+Outline of Assignments 
+Assignment 1: Project Pitch & Presentation—15% (Individual) | Due: Oct. 5-8 
+Y ou will write an e-mail message in the form of  a pitch addressed to me, your supervisor, that 
+demonstrates your knowledge of  email authoring as well as project presentation. Y our objective is 
+to communicate a tentative idea for an engineering project. Y our job is to convince your 
+audience, in writing and orally , that your project is worth the investment of  company resources. 
+Assignment 2: Technical Report—35% (Individual & Group) | Due: Nov. 29 
+Y ou will draft a technical report for an engineering project of  your own design. Y our report will 
+1) explain known information about a problem, 2) support this description with research from 
+credible sources, and 3) articulate why the problem is important and how you intend to solve it. 
+Y ou will demonstrate your awareness of  existing engineering know-how about the issue and you 
+will propose a credible solution. Y our concepts and report must show speci ﬁc research and 
+original work. Y our idea can evolve over time, but your objective is to meet the emerging needs 
+of  your ﬁeld of  engineering. 
+Assignment 3: Engineering Presentation—10% (Group, in class) | Due: Nov. 30-Dec. 6 
+Once you have submitted your Technical Report in written form, you will present the contents of  
+your technical report in class in front of  your peers through a presentation. To do this, you will 
+translate the main aspects of  your report in a powerpoint; in parallel, you will create a poster—
+separate from the in-class presentation—for public display during our Engineering Showcase.  
+Contributions—40% (ongoing) 
+Engineers work in teams to review each other’s work and suggest improvements to one another. 
+In this course you will be expected to do the same. Each week you will contribute to lessons and 
+participate in course-related activities. Y ou will complete mini-assignments, modules, grading 
+alignments, and work/peer-review periods throughout the course, all of  which are designed to 
+help you learn skills and strategies applicable to the completion of  your major course 
+assignments. Participating in discussion, showing courtesy to colleagues, reviewing others’ work, 
+and helping others succeed are the expected qualities of  engineering professionals; we will strive 
+to emulate these ideals as much as possible. Grading for contributions proceeds as follows: 
+Attendance (10%): in-class, on-time, ready to learn; 0.5% each, for 17 sessions; perfect = full 10% 
+Worksheets (~15%): mini-assignments graded for quality (1=minimal; 2=sufﬁcient; 3=excellent) 
+Modules & Quizzes (~5%): either complete or incomplete; each item worth 1-2% 
+Poster Design & Showcase (10%): poster design (5%) + (5%) for winter showcase (Dec 7/8). 
+**Note: Y our instructor may (or may not) make grading adjustments (rounding up or down) at the 
+end of  the course. The instructor reserves the right to round student grades based on the 
+student’s quality of  engagement, attitude, and willingness to learn as expressed during the term.  
+*Last chance to submit outstanding assignments: December 9, 2026 (before 11:59pm) 
+Any work submitted after this time will be automatically graded as incomplete unless 1) an 
+extension has been granted, 2) formal arrangements have been made with the instructor ahead 
+of  time, or, 3) a valid university-standard accommodation is in place. 
+ENGL 191 Syllabus—Fall 2026 5
+Course Schedule 
+WEEK 1: INTRODUCTIONS 
+For September 9 through September 13, complete the following tasks: 
+	 Attend Lecture(s): “Communication in the Engineering Profession” 
+	 Read “ Assignment Outline” 
+	 Read Graves & Graves Ch. 7: “Writing Email and Letters for the Workplace” (LEARN) 
+	 Read “Loss Control Bulletin” & “Savings E-mails” (LEARN)	      	       
+	 Complete Quiz: “Syllabus & Assignment Outline Quiz” (Sept. 13 (1%)) 
+WEEK 2: COMMUNICATING PROBLEMS & INFO-SEEKING IN ENGINEERING 
+For September 14 through September 20, complete the following tasks: 
+	 Attend Lecture(s): “The Swales CARS Model of  Engineering Articles” & “Info-Seeking” 
+	 Read 2 Engineering Articles of  your choice (LEARN)	 	 	      
+	 Complete Module: “Information Sourcing/Seeking” (Sept. 20 (1%)) 
+	 Complete Worksheet: “Deﬁning an Engineering Problem” (Sept. 20 (3%)) 
+WEEK 3: ENGINEERING DOCUMENTS: WRITING REQUESTS, REPORTS, PROPOSALS	  
+For September 21 through September 27, complete the following tasks: 
+	 Attend Lecture(s): “Technical Reports & Proposal Elements” & “ Assignments I, II, & III” 
+WEEK 4: PITCHING IDEAS WITH PROCEDURE 
+For September 28 through October 4, complete the following tasks: 
+	 Attend Lecture(s): “The Art of  the Pitch” & “Pitch Practice (Makes Pitch Perfect)” 
+	 Complete: Pitch & Procedure: “The Swales x Shark-Tank Analysis” (Oct. 4 (3%)) 
+WEEK 5: PITCH PRESENTATIONS 
+For October 5 through October 11, complete the following tasks: 
+	 Attend Lecture: “Pitch Presentations” 
+	 Complete: Pitch Presentations | In class (Oct. 5-8 (15%—10% written, 5% oral)) 
+WEEK 6: READING WEEK 
+October 12 through October 18: Reading Week (no class) 
+WEEK 7 (PART 1): TECHNICAL MANUALS 
+For October 19 & 20, complete the following tasks: 
+	 Attend Lecture(s): “Technical/Instructional Manuals” & “How To ‘How To’” 
+	 Read: Ch. 10 “Writing how-to Documents” (p. 233-255, LEARN). 
+	 Complete: Technical Manual Analysis (Assigned Oct. 19, Due Oct. 31 (3%)) 
+WEEK 7 (INTERIM) 
+For October 21 through 27: Midterms—No classes 
+ENGL 191 Syllabus—Fall 2026 6
+WEEK 7 (PART 2): WHITE PAPERS 
+For October 28 through 31, complete the following tasks: 
+	 Attend Lecture(s): “White Papers” & “Rationale I” 
+	 Read: Chapter 9, p. 193-198; 200-207 (LEARN) 
+	 Complete: Report Rationale, Part I: Objectives, Milestones, Work Plan (Oct. 31 (3%)) 
+WEEK 8: REQUESTS FOR PROPOSALS 
+For November 1 through November 8, complete the following tasks:	  
+	 Attend Lecture(s): “Engineering Proposals” & “Rationale II” 
+	 Read: Ch. 8 “Writing Winning Proposals” p. 165-192 (LEARN) 
+	 Complete: Rationale, Part II: Work Completed, Work Remaining, & Status (Nov. 8 (3%)) 
+WEEK 9: ENGINEERING PERSUASIVE REPORTS 
+For November 9 through November 15, complete the following tasks: 
+	 Attend Lecture(s): “What Makes Technical Reports Persuasive?” 
+	 *no deliverable this week | time to work on technical reports 
+	  
+WEEK 10: DESIGNING DOCUMENTS & LAYOUTS 
+For November 16 through November 22, complete the following tasks: 
+	 Attend Lecture(s): “Writing Winning Proposals” & “Reports” 
+	 Read: “Designing Documents and Page Layout” 
+	 Complete: Technical Report Draft (for Peer Review | Nov. 22 - LEARN) 
+WEEK 11: PEER REVIEW 
+For November 23 through November 29, complete the following tasks: 
+	 Attend Lecture(s): “Peer Review: Tips and Techniques” & “Peer Review” 
+	 Read: Peer Review: Best Practices (LEARN) 
+	 Complete: Peer Reviews (Nov. 26 (2%)) 
+	 Complete: Technical Report (Nov. 29 (35%))  
+	  
+WEEK 12: PRESENTATIONS 
+For November 30 through December 6, complete the following tasks: 
+	 Attend Lecture(s): “Presentations” 
+	 Complete: Technical Report Presentations (in class (10%))	  
+	 Complete: Posters (Submit electronically & print by/before Dec. 6th (5%)) 
+WEEK 13: SHOWCASE (FINAL CLASS) 
+For December 7/8, complete the following tasks: 
+	 Attend: Engineering Winter Showcase Poster Presentation (5%, contributions) 
+	 Complete: End of course quiz (Due Dec. 8 (1%)) 
+*Our course calendar is subject to occasional changes. Although there is no intention to deviate 
+from the above schedule of  topics, adjustments will be made to the course as necessary to 
+accommodate unforeseeable interruptions or to address instructional necessities. If  and when 
+changes are required, you will be notiﬁed via email or LEARN or both. 
+ENGL 191 Syllabus—Fall 2026 7
+Course Policies 
+Equipment you need: 
+Pen/Pad/Paper, laptop with internet access; access to LEARN 
+Professional Behaviour 
+1.Participation: Every lesson, task, and assessment speciﬁcally supports your program and 
+career; participation in each aspect of  the course is like participation in tasks at a job.  
+2.Emergencies & Expected Disruptions: Please communicate with me as soon as possible. 
+3.E-mail: all email must come from your @uwaterloo.ca address. Please do not solicit email 
+from other addresses. Y our subject line must begin with “ENGL 191”. Be sure to use a 
+professional salutation, write a speciﬁc message, and sign your name as you would a letter. 
+Expect a formal reply to your queries within twenty-four hours between Monday and Friday . 
+Last-minute questions are unlikely to produce timely responses.  
+Course Policy on Late Assignments and Rewrites 
+  
+Assignments submitted anytime after syllabus-prescribed times will be penalized 5% per day , 
+including weekend days, unless students either arrange a valid extension or possess a valid 
+exemption. Extensions on assignments will not be granted unless arranged at least 72 hours in 
+advance of  due date, notwithstanding those reasons outlined in the UW Policy Regarding Illness 
+and Missed Tests. Outside of  cases of  academic misconduct, a failing assignment may be 
+reattempted once—after consultation with me—to raise the mark to a pass if  achieved. 
+Otherwise, rewrites or resubmissions of  graded work will not be permitted.    
+UW Policy Regarding Illness and Missed Tests 
+The University of  Waterloo Examination Regulations state that:  
+- A medical certiﬁcate presented in support of  an of ﬁcial petition for relief  from normal 
+academic requirements must provide all of  the information requested on the “University of  
+Waterloo V eriﬁcation of  Illness” form or it will not be accepted. This form can be obtained from 
+Health Services or at VIF.  
+- If  a student has a test/examination deferred due to acceptable medical evidence, he/she 
+normally will write the test/examination at a mutually convenient time, to be determined by the 
+course instructor.  
+- The University acknowledges that, due to the pluralistic nature of  the University community , 
+some students may on religious grounds require alternative times to write tests and examinations.  
+-Elective arrangements (such as travel plans) are not considered acceptable grounds for granting 
+an alternative examination time. 
+ENGL 191 Syllabus—Fall 2026 8
+USE OF GENERATIVE ARTIFICIAL INTELLIGENCE 
+This is no more of  a surprise to me than it will be to you: generative AI is here to stay .  
+Generative artiﬁcial intelligence trained using large language models (LLMs) or other methods to 
+produce text, images, music, code, etc.—especially GPT , DALL-E, Co-Pilot, Gemini, etc.—may 
+not be used during class unless explicitly permitted by your instructor. The use of  AI tools to 
+complete assignments—if  permitted—must be done in accordance with Policy 71. If  you decide 
+to use AI tools, please keep the following in mind: 
+1)AI tools must not be used to plagiarize: Using AI to generate text (whole or modiﬁed) 
+that is presented as your own represents a Policy 71 violation. If  you don’t know that 
+something you’re doing is considered plagiarism, ask your instructor or librarian. Excuses 
+like: “I didn’t know I was plagiarizing” are not considered a defence. When in doubt, cite. 
+Always remember: a case of  academic misconduct can get you removed from your program.  
+2)If using AI generated text, remember to cite: this is consistent with any other academic 
+practice. Although attribution rules continue to evolve, you should use APA guidelines to 
+correctly format your work in this course.  
+3)Be prepared to show your work: If  the use of  GenAI is suspected where not permitted, 
+you may be asked to meet with your instructor to provide evidence that your work is indeed 
+yours. When working on assignments, document your process and make notes as you go. If  
+there remain questions about whether or not you’ve submitted original work, academic 
+misconduct allegations may be brought to the Associate Dean. 
+4)Be aware that generative AI is not always “right”: keep in mind that GenAI is liable 
+(and likely) to make slight or egregious errors (or anything in between). It also generalizes 
+important particulars, which skews the information it produces. GenAI is known to falsify 
+references to other work and inaccurately express ideas. Y ou are accountable for the content 
+and accuracy of  the work you produce in this course, including any supported by GenAI. Be 
+aware that the legal/copyright status of  GenAI inputs and outputs is unclear. For more 
+information, see the following: “Copyright Advisory Committee”. 
+Notes on Short-T erm Absences  
+Students may be required to complete the following academic obligations during a short-term 
+absence: 
+• Attend scheduled course meet times that are listed in their class schedule with one of  the 
+following component types: Clinic (CLN), Field Studies (FLD), Laboratory (LAB), or 
+Studio (STU) 
+• Complete other requirements, as speciﬁed in the course outline, for classes including meet 
+times with a component type of  Clinic (CLN) 
+• Attend deferred, rescheduled, or supplemental ﬁnal examinations 
+• Write a summative test, equivalent in scope and format to a ﬁnal examination, for a 
+course scheduled for less than the full Formal Lecture Period (e.g., a block course offered 
+over six weeks), as speciﬁed in the course outline 
+ENGL 191 Syllabus—Fall 2026 9
+• Participate in scheduled presentations and symposia, as speciﬁed in the course outline 
+• Submit deliverables related to group projects or involving peer review , as speciﬁed in the 
+course outline 
+• Short-term absences cannot be used for graded course components that involve a formally 
+scheduled presentation or are part of  a symposium, colloquium, or showcase. They also 
+cannot be used for graded components requiring live, in-person group work, such as peer 
+review workshops. These assignments involve singular events that cannot be rescheduled 
+and may depend on the participation of  classmates during class time. It is the student’s 
+responsibility to review the deadlines for these in-person assessments at the start of  the 
+term and to contact the instructor within the ﬁrst two weeks of  class if  they anticipate a 
+conﬂict with a scheduled event. This policy does not override university-wide policies (e.g., 
+National Day for Truth and Reconciliation), absences due to religious observance, 
+documented extenuating circumstances, accommodations through AccessAbility Services, 
+or VOC requirements. 
+Additional Course & Course Support Information 
+Academic Integrity  
+In order to maintain a culture of  academic integrity , members of  the University of  Waterloo and 
+its Federated University and Afﬁliated Colleges are expected to promote honesty , trust, fairness, 
+respect and responsibility .  
+All students registered in courses at UW are expected to know what constitutes academic 
+integrity , to avoid committing academic offences, and to take responsibility for their actions. A 
+student who is unsure whether an action constitutes an offence, or who needs help in learning 
+how to avoid offences (e.g., plagiarism, cheating) or about “rules” for group work/collaboration 
+should seek guidance from the course professor, academic advisor, or the Associate Dean. When 
+misconduct has been found to have occurred, disciplinary penalties will be imposed under 
+University Academic Discipline Policy and UW Policy 71 – Student Discipline. 
+Academic Integrity website (Arts) 
+http://arts.uwaterloo.ca/arts/ugrad/academic_responsibility .html 
+Academic Integrity Ofﬁce (UW) 
+http://uwaterloo.ca/academicintegrity/ 
+Counselling Services  
+Counselling Services provides support free of  charge and protects your privacy . Find them at 
+https://uwaterloo.ca/counselling-services/. 
+Student Success Ofﬁce 
+The Student Success Ofﬁce also provides support free-of-charge and protects your privacy . This 
+ofﬁce provides academic and personal development services, resources for international students, 
+as well as study abroad and exchange support. They are located at South Campus Hall, second 
+ﬂoor. Ofﬁce hours: Monday , Wednesday , Friday , 8:30am-4:30pm; Tues/Thurs, 8:30am-6pm.  
+ENGL 191 Syllabus—Fall 2026 10
+The Writing and Communications Centre 
+The Writing and Communications Centre works with students as they develop their ideas, draft, 
+and revise. Writing and Communications specialists offer one-on-one support in planning 
+assignments, synthesizing and citing research, organizing papers and reports, designing 
+presentations and e-portfolios, and revising for clarity and coherence. Y ou can make multiple 
+appointments throughout the term or drop in at the library for quick questions or feedback.   
+Accommodations for students with learning challenges  
+The AccessAbility Services (AS) Ofﬁce, located in Needles Hall, Room 1132, collaborates with all 
+academic departments to arrange appropriate accommodations for students with learning 
+challenges without compromising the academic integrity of  the curriculum. If  you require 
+academic accommodations to lessen the impact of  your learning challenge, please register with 
+the AS Ofﬁce at the beginning of  each academic term.

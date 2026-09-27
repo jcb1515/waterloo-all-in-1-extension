@@ -168,6 +168,21 @@ test("isLoginShell flags SSO shells, not real pages or plain errors", () => {
   assert.equal(isLoginShell(null), false);
 });
 
+test("sync accepts {name, text} syllabus files", async () => {
+  const text = fs.readFileSync(path.join(DIR, "ENGL192-syllabus.txt"), "utf8");
+  const ctx = makeCtx({ files: [{ name: "ENGL192.txt", text }] });
+  const res = await adapter.sync(ctx);
+  assert.ok(res.readOk.includes("ENGL 192"));
+  assert.equal(res.items.filter((i) => i.type === "class").length, 22);
+  assert.equal(res.items.filter((i) => i.type !== "class").length, 16);
+  assert.equal(res.courses[0].code, "ENGL 192");
+  // Unparseable text degrades instead of throwing.
+  const ctx2 = makeCtx({ files: [{ name: "junk.txt", text: "not a syllabus" }] });
+  const res2 = await adapter.sync(ctx2);
+  assert.equal(res2.complete, false);
+  assert.deepEqual(res2.readOk, []);
+});
+
 test("no fixture leaks @uwaterloo.ca", () => {
   for (const f of fs.readdirSync(DIR).filter((f) => f.endsWith(".html"))) {
     assert.ok(!fs.readFileSync(path.join(DIR, f), "utf8").includes("@uwaterloo.ca"), f);
