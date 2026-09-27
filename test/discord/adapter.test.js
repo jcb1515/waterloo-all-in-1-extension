@@ -9,8 +9,8 @@ import adapter from "../../extension/src/sources/discord/index.js";
 
 const NOW = new Date("2026-10-01T20:00:00.000Z");
 const AT = NOW.toISOString();
-const G = "1000000000000000001"; // WATonomous
-const G2 = "1000000000000000002"; // UWHPC
+const G = "1000000000000000001"; // Robotics Club
+const G2 = "1000000000000000002"; // Rocket Team
 const CH = "2000000000000000002"; // pcb-design
 const CH_DEAD = "2000000000000000005"; // deadlines
 const CH_MEMES = "2000000000000000006"; // memes (never watched)
@@ -20,11 +20,19 @@ const TS_OCT8_6PM = 1791496800; // 2026-10-08T22:00Z
 
 const API = "https://discord.com/api/v10";
 
+/** Explicit settings — tests never rely on blank defaults. */
+const SETTINGS = {
+  watched: {
+    "Robotics Club": { focus: ["electrical"] },
+    "Rocket Team": {},
+  },
+};
+
 function makeCtx(state = {}, extras = {}) {
   return {
     state,
     now: NOW,
-    settings: extras.settings || {},
+    settings: extras.settings ?? SETTINGS,
     textDates: extractDates,
     log() {},
   };
@@ -50,15 +58,15 @@ const restMsg = (id, channelId, content, extra = {}) => ({
   ...extra,
 });
 
-/** Inventory extract covering WATonomous: pcb-design + deadlines + memes. */
+/** Inventory extract covering Robotics Club: pcb-design + deadlines + memes. */
 const inventory = {
   v: 1,
   type: "inventory",
   location: { guildId: G, channelId: CH },
   guilds: [
-    { guildId: G, name: "WATonomous", unread: false, mentions: 0 },
-    { guildId: G2, name: "UWHPC", unread: true, mentions: 4 },
-    { guildId: "999", name: "Random Fan Server", unread: true, mentions: 9 },
+    { guildId: G, name: "Robotics Club", unread: false, mentions: 0 },
+    { guildId: G2, name: "Rocket Team", unread: true, mentions: 4 },
+    { guildId: "999", name: "Fan Community", unread: true, mentions: 9 },
   ],
   channels: [
     {
@@ -91,7 +99,7 @@ test("REST read before inventory: stored, hidden until the channel maps", async 
 
   const r2 = await adapter.observe.parse(dom(inventory), makeCtx(r1.state));
   assert.equal(r2.items.length, 1);
-  assert.equal(r2.items[0].org, "WATonomous"); // resolved at output
+  assert.equal(r2.items[0].org, "Robotics Club"); // resolved at output
   assert.equal(
     r2.items[0].url,
     `https://discord.com/channels/${G}/${CH}/9101`
@@ -373,7 +381,7 @@ test("a settings.watched change applies without a new inventory", async () => {
   const r3 = await adapter.observe.parse(
     net(`${API}/channels/${CH}/messages?limit=50`, []),
     makeCtx(r2.state, {
-      settings: { watched: { WATonomous: { channels: ["memes"] } } },
+      settings: { watched: { "Robotics Club": { channels: ["memes"] } } },
     })
   );
   assert.deepEqual(r3.state.watch[G].channelIds, [CH_MEMES]);

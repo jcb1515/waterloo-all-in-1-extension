@@ -17,10 +17,10 @@
 
 import { OBSERVE_URL_PATTERNS } from "./selectors.js";
 import {
-  SERVERS,
-  serverFor,
+  watchConfig,
   watchForGuild,
   channelScore,
+  compareGuildNames,
   MEETING_WORDS,
   wordTrigger,
 } from "./rules.js";
@@ -82,26 +82,18 @@ function locateChannel(state, channelId) {
 }
 
 /**
- * Watched guilds: SERVERS matches plus settings.watched additions.
+ * Watched guilds. The user's list is settings.watched: a non-empty list is
+ * exclusive; empty/missing means every guild in the rail is watched.
  * @returns {Record<string, {team: string, focus: string[], settings?: any}>}
  */
 function watchedGuilds(state, settings) {
   /** @type {Record<string, any>} */
   const out = {};
   for (const [guildId, g] of Object.entries(state.guilds || {})) {
-    const srv = serverFor(g?.name || "", settings?.watched);
-    if (srv) out[guildId] = srv;
+    const cfg = watchConfig(g?.name || "", settings?.watched);
+    if (cfg) out[guildId] = cfg;
   }
   return out;
-}
-
-/** Guild's position in SERVERS order (unknown guilds sort last). */
-function guildOrder(state, guildId) {
-  const lower = String(state.guilds?.[guildId]?.name || "").trim().toLowerCase();
-  const i = SERVERS.findIndex((s) =>
-    s.names.some((n) => n.trim().toLowerCase() === lower)
-  );
-  return i === -1 ? SERVERS.length : i;
 }
 
 /**
@@ -243,7 +235,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
     const loc = locateChannel(state, channelId);
     const guildId = loc?.guildId || msg?.guild_id || src.guildId;
     const guild = guildId ? state.guilds?.[guildId] : null;
-    const srv = guild ? serverFor(guild.name, settings.watched) : null;
+    const srv = guild ? watchConfig(guild.name, settings.watched) : null;
     const watch = guildId ? state.watch?.[guildId] : null;
     const watched = Boolean(watch?.channelIds?.includes(channelId));
 
@@ -405,7 +397,6 @@ function recomputeWatch(state, settings, nowIso) {
     if (g.unread || g.mentions) {
       unreadGuilds.push({ guildId, name: g.name, mentions: g.mentions || 0 });
     }
-    const orderBase = guildOrder(state, guildId);
     for (const channelId of watch.channelIds) {
       const c = g.channels?.[channelId];
       const url = `https://discord.com/channels/${guildId}/${channelId}`;
@@ -419,15 +410,19 @@ function recomputeWatch(state, settings, nowIso) {
         queue.push({
           guildId, guildName: g.name, channelId,
           name: c?.name || channelId, url,
-          order: orderBase,
           score: c ? channelScore(c, srv.focus) : 0,
           chOrder: c?.order ?? 0,
         });
       }
     }
   }
-  queue.sort((a, b) => a.order - b.order || b.score - a.score || a.chOrder - b.chOrder);
-  state.sweepQueue = queue.map(({ order, score, chOrder, ...rest }) => rest);
+  // Guild order: settings.watched insertion order, then alphabetical.
+  const cmp = compareGuildNames(settings?.watched);
+  queue.sort(
+    (a, b) =>
+      cmp(a.guildName, b.guildName) || b.score - a.score || a.chOrder - b.chOrder
+  );
+  state.sweepQueue = queue.map(({ score, chOrder, ...rest }) => rest);
   state.unreadWatched = unreadWatched;
   state.unreadGuilds = unreadGuilds;
 }

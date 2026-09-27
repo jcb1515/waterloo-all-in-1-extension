@@ -23,7 +23,7 @@ const O = (over = {}) => ({
   channelId: "2001",
   guildId: "1001",
   channelName: "elec-general",
-  team: "WATonomous",
+  team: "Robotics Club",
   watched: true,
   ...over,
 });
@@ -59,7 +59,7 @@ test("meeting trigger + exact <t:> -> meeting item, pending review", () => {
   assert.equal(item.startAt, "2026-10-08T22:00:00.000Z");
   assert.equal(item.confidence, "exact");
   assert.equal(item.review, "pending");
-  assert.equal(item.org, "WATonomous");
+  assert.equal(item.org, "Robotics Club");
   assert.equal(item.url, "https://discord.com/channels/1001/2001/9001");
   assert.ok(item.evidence.snippet.length <= 300);
 });

@@ -38,10 +38,10 @@ test("readGuilds strips unread/mention prefixes from aria-labels", () => {
   const guilds = readGuilds(doc("sidebar.html"));
   const byId = Object.fromEntries(guilds.map((g) => [g.guildId, g]));
   assert.deepEqual(byId["1000000000000000001"], {
-    guildId: "1000000000000000001", name: "WATonomous", unread: false, mentions: 0,
+    guildId: "1000000000000000001", name: "Robotics Club", unread: false, mentions: 0,
   });
   assert.deepEqual(byId["1000000000000000002"], {
-    guildId: "1000000000000000002", name: "UWHPC", unread: true, mentions: 3,
+    guildId: "1000000000000000002", name: "Rocket Team", unread: true, mentions: 3,
   });
   assert.ok(!guilds.some((g) => g.guildId === "home")); // DM rail excluded
 });

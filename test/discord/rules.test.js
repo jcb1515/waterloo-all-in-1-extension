@@ -1,30 +1,50 @@
 // @ts-check
-// Server matching + channel scoring + watch selection.
+// Watch config + channel scoring + watch selection.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  serverFor,
+  watchConfig,
+  compareGuildNames,
   channelScore,
   watchForGuild,
 } from "../../extension/src/sources/discord/rules.js";
 
-test("SERVERS match guild names case-insensitively after trim", () => {
-  assert.equal(serverFor("  watonomous ")?.team, "WATonomous");
-  assert.equal(serverFor("WARG")?.team, "WARG");
-  assert.equal(
-    serverFor("Waterloo Aerial Robotics Group")?.team,
-    "WARG"
-  );
-  assert.equal(serverFor("ECE Waterloo '31")?.team, "ECE '31");
-  assert.equal(serverFor("Random Fan Server"), null);
+const WATCHED = {
+  "Robotics Club": { focus: ["electrical"] },
+  "Rocket Team": {},
+};
+
+test("empty/missing settings.watched watches every guild, no focus", () => {
+  assert.deepEqual(watchConfig("Robotics Club", {}), {
+    team: "Robotics Club",
+    focus: [],
+  });
+  assert.deepEqual(watchConfig("Fan Community", undefined), {
+    team: "Fan Community",
+    focus: [],
+  });
 });
 
-test("a settings.watched guild outside SERVERS becomes watched", () => {
-  const srv = serverFor("My Capstone Group", {
-    "My Capstone Group": { focus: ["electrical"] },
-  });
-  assert.equal(srv?.team, "My Capstone Group");
+test("a non-empty watched list is exclusive, matched case-insensitively", () => {
+  const srv = watchConfig("  robotics club ", WATCHED);
+  assert.equal(srv?.team, "Robotics Club"); // name as written in settings
   assert.deepEqual(srv?.focus, ["electrical"]);
+  const rocket = watchConfig("ROCKET TEAM", WATCHED);
+  assert.equal(rocket?.team, "Rocket Team");
+  assert.deepEqual(rocket?.focus, []);
+  assert.equal(watchConfig("Fan Community", WATCHED), null);
+  assert.equal(watchConfig("Class Server", WATCHED), null);
+});
+
+test("sweep order: settings insertion order, then the rest alphabetically", () => {
+  const cmp = compareGuildNames(WATCHED);
+  const names = ["Zeta Club", "Robotics Club", "Alpha Club", "Rocket Team"];
+  assert.deepEqual(names.sort(cmp), [
+    "Robotics Club",
+    "Rocket Team",
+    "Alpha Club",
+    "Zeta Club",
+  ]);
 });
 
 test("electrical guild: elec words outrank subteam words; off-topic sinks", () => {
@@ -36,6 +56,19 @@ test("electrical guild: elec words outrank subteam words; off-topic sinks", () =
   assert.ok(elec >= 3);
   assert.ok(mech < 3); // -2 subteam, below the suggestion bar
   assert.ok(off < 0);
+});
+
+test("a non-electrical focus boosts itself and is never penalised", () => {
+  const focus = ["mechanical"];
+  const mech = channelScore({ name: "mech-cad", category: "mechanical" }, focus);
+  assert.ok(mech >= 5); // +3 name +2 category, no -2 subteam penalty
+  const fw = channelScore({ name: "firmware-team" }, ["firmware"]);
+  assert.ok(fw >= 3);
+});
+
+test("no focus: no subteam penalty at all", () => {
+  const mech = channelScore({ name: "mech-cad", category: "mechanical" });
+  assert.ok(mech >= 0);
 });
 
 test("voice/stage channels are never suggested", () => {

@@ -59,22 +59,34 @@ omitted for DOM payloads. `sync()` returns the cached union with
 
 ## Watched servers and channels
 
-`rules.js` `SERVERS`: UWASIC, UWHPC, WATonomous (focus: electrical),
-Waterloo Aerial Robotics Group / WARG (focus: electrical), ECE Waterloo '31.
-Matched by guild name, case-insensitive exact match.
+There is no built-in server list — the adapter works for any student's
+servers. The watched set comes entirely from settings:
+
+- `settings.watched` empty/missing → **every** guild seen in the rail is
+  watched, no focus (channel suggestions + pings only; team = guild name).
+- `settings.watched` non-empty → **only** those guilds are watched. Guild
+  names match case-insensitively after trimming; `team` = the name as
+  written in settings; `focus` comes from the entry. The user's own list
+  lives in the gitignored dev-profile as
+  `sources.discord.watched = {"<guild name>": {focus: [...], channels: []}}`.
 
 Channel score (name + category words): announcements/events/meetings/
-schedule/deadlines/tasks/todo +3, general +2, electrical words +3 (+2 more
-when the category also matches) for electrical-focus guilds, other subteam
-words −2, off-topic/memes/bots/etc −5, voice/stage never suggested.
-Suggested = score ≥ 3, top 12 per guild by score then sidebar order.
+schedule/deadlines/tasks/todo +3, general +2, focus words +3 (+2 more
+when the category also matches) for focused guilds, other-subteam words
+−2 (a word the guild focuses on is never penalised — `focus:
+["mechanical"]` boosts mech channels), off-topic/memes/bots/etc −5,
+voice/stage never suggested. `focus: ["electrical"]` expands to a
+vocabulary (elec, ee, hardware, pcb, embedded, firmware, …); any other
+focus word matches itself. Suggested = score ≥ 3, top 12 per guild by
+score then sidebar order. Sweep order: `settings.watched` insertion
+order, then the remaining guilds alphabetically.
 
 Settings (`ctx.settings`, W1's `wa1Settings.sources.discord`):
 
 | Key | Effect |
 |---|---|
 | `enabled` | `false` disables output entirely |
-| `watched` | `{[guildName]: {focus?, channels?}}` — a listed guild is watched even if not in SERVERS (team = guild name); a non-empty `channels` list REPLACES suggestions for that guild (names or ids) |
+| `watched` | `{[guildName]: {focus?, channels?}}` — non-empty = exclusive watch list (see above); a non-empty `channels` list REPLACES suggestions for that guild (names or ids) |
 | `userId` | overrides inferred self id |
 | `roleIds` | extends inferred role ids |
 | `keywords` | extra trigger words (act as meeting triggers) |

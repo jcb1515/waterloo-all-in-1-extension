@@ -3,56 +3,60 @@
 // task vocabulary. Pure; no DOM, no chrome APIs.
 
 /**
- * Design-team servers, matched by guild name (exact, case-insensitive,
- * after trim). `focus` biases channel scoring toward that subteam.
- * @type {{names: string[], team: string, focus?: string[]}[]}
- */
-export const SERVERS = [
-  { names: ["UWASIC"], team: "UWASIC" },
-  { names: ["UWHPC"], team: "UWHPC" },
-  { names: ["WATonomous"], team: "WATonomous", focus: ["electrical"] },
-  {
-    names: ["Waterloo Aerial Robotics Group", "WARG"],
-    team: "WARG",
-    focus: ["electrical"],
-  },
-  { names: ["ECE Waterloo '31"], team: "ECE '31" },
-];
-
-/**
- * Server config for a guild name — a SERVERS entry, or a settings.watched
- * key the user added themselves (team = guild name).
+ * Whether a guild is watched, and with what config. The user's list lives
+ * entirely in settings (dev-profile): `sources.discord.watched =
+ * {"<guild name>": {focus?: string[], channels?: string[]}}`.
+ *
+ * - `watched` with >= 1 entry: only listed guilds are watched (name match
+ *   is case-insensitive, trimmed); team = the name as written in settings;
+ *   focus from the entry.
+ * - `watched` empty/missing: EVERY guild seen in the rail is watched with
+ *   no focus — channel suggestions + pings still work.
+ *
  * @param {string} guildName
  * @param {Record<string, {focus?: string[], channels?: string[]}>} [watched]
  * @returns {{team: string, focus: string[], settings?: {focus?: string[], channels?: string[]}}|null}
  */
-export function serverFor(guildName, watched) {
+export function watchConfig(guildName, watched) {
   const name = String(guildName || "").trim();
-  const lower = name.toLowerCase();
-  for (const srv of SERVERS) {
-    if (srv.names.some((n) => n.trim().toLowerCase() === lower)) {
-      return {
-        team: srv.team,
-        focus: [...(srv.focus || [])],
-        settings: watched ? findWatched(name, watched) : undefined,
-      };
+  if (!name) return null;
+  const entries = Object.entries(watched || {});
+  if (entries.length) {
+    const lower = name.toLowerCase();
+    for (const [key, entry] of entries) {
+      if (key.trim().toLowerCase() === lower) {
+        return {
+          team: key.trim(),
+          focus: [...(entry?.focus || [])],
+          settings: entry || {},
+        };
+      }
     }
+    return null; // a non-empty list is exclusive
   }
-  const entry = watched ? findWatched(name, watched) : undefined;
-  if (entry) {
-    // A settings.watched guild that isn't a known server is watched too.
-    return { team: name, focus: [...(entry.focus || [])], settings: entry };
-  }
-  return null;
+  return { team: name, focus: [] };
 }
 
-/** Case-insensitive key lookup in a settings.watched map. */
-function findWatched(guildName, watched) {
-  const lower = guildName.trim().toLowerCase();
-  for (const [key, entry] of Object.entries(watched || {})) {
-    if (key.trim().toLowerCase() === lower) return entry;
-  }
-  return undefined;
+/**
+ * Sweep ordering comparator: settings.watched insertion order first, then
+ * the rest alphabetically by guild name.
+ * @param {Record<string, any>} [watched]
+ * @returns {(a: string, b: string) => number} compares two guild names
+ */
+export function compareGuildNames(watched) {
+  const keys = Object.keys(watched || {}).map((k) => k.trim().toLowerCase());
+  return (a, b) => {
+    const al = String(a || "").trim().toLowerCase();
+    const bl = String(b || "").trim().toLowerCase();
+    const ai = keys.indexOf(al);
+    const bi = keys.indexOf(bl);
+    if (ai !== -1 || bi !== -1) {
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    }
+    return al.localeCompare(bl);
+  };
 }
 
 /* Channel scoring ---------------------------------------------------- */
@@ -65,13 +69,21 @@ export const CHANNEL_POSITIVE = {
   general: 2,
 };
 
-/** Electrical subteam words (only when the guild focus includes it). */
-export const ELECTRICAL_WORDS = [
-  "electrical", "elec", "ee", "hardware", "hw", "pcb", "embedded",
-  "firmware", "power", "analog", "digital", "circuits", "ecad", "altium",
-];
+/**
+ * Known focus vocabularies: a focus word expands to related channel-name
+ * words. Anything not listed here matches only itself.
+ */
+export const FOCUS_VOCAB = {
+  electrical: [
+    "electrical", "elec", "ee", "hardware", "hw", "pcb", "embedded",
+    "firmware", "power", "analog", "digital", "circuits", "ecad", "altium",
+  ],
+  mechanical: ["mechanical", "mech", "cad"],
+  software: ["software", "sw"],
+  firmware: ["firmware", "fw", "embedded"],
+};
 
-/** Other-subteam words — pushed down for an electrical-focused guild. */
+/** Other-subteam words — pushed down for a guild with any focus. */
 export const OTHER_SUBTEAM_WORDS = [
   "mechanical", "mech", "software", "sw", "perception", "controls",
   "autonomy", "business", "marketing", "sponsorship", "finance",
@@ -107,14 +119,25 @@ export function channelScore(channel, focus = []) {
   let score = 0;
   for (const w of nameWords) score += CHANNEL_POSITIVE[w] || 0;
   for (const w of catWords) score += CHANNEL_POSITIVE[w] || 0;
-  if (focus.some((f) => f.toLowerCase() === "electrical")) {
-    if (intersects(nameWords, ELECTRICAL_WORDS)) {
+  const focusSet = new Set((focus || []).map((f) => String(f).toLowerCase()));
+  for (const f of focusSet) {
+    const vocab = FOCUS_VOCAB[f] || [f];
+    if (intersects(nameWords, vocab)) {
       score += 3;
-      // The category matching too means the channel sits under an
-      // electrical header — double the confidence.
-      if (intersects(catWords, ELECTRICAL_WORDS)) score += 2;
+      // The category matching too means the channel sits under a focused
+      // header — double the confidence.
+      if (intersects(catWords, vocab)) score += 2;
     }
-    if (intersects(nameWords, OTHER_SUBTEAM_WORDS)) score -= 2;
+  }
+  if (focusSet.size) {
+    // Other subteams are deprioritised — but a word the guild focuses on
+    // is never penalised (focus ["mechanical"] boosts mech channels).
+    const penalized = OTHER_SUBTEAM_WORDS.filter(
+      (w) =>
+        !focusSet.has(w) &&
+        ![...focusSet].some((f) => (FOCUS_VOCAB[f] || []).includes(w))
+    );
+    if (intersects(nameWords, penalized)) score -= 2;
   }
   if (
     intersects(nameWords, CHANNEL_NEGATIVE) ||
