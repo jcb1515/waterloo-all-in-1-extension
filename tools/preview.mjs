@@ -107,7 +107,18 @@ const SHOTS_3A = [
   { name: "panel-tabs-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
 ];
 
+const SHOTS_3B = [
+  { name: "panel-header-360", url: "/src/panel/panel.html?preview=1", size: [360, 520] },
+  { name: "panel-header-400", url: "/src/panel/panel.html?preview=1", size: [400, 520] },
+  { name: "panel-header-480", url: "/src/panel/panel.html?preview=1", size: [480, 520] },
+  { name: "panel-item-sheet-light", url: "/src/panel/panel.html?preview=1&item=learn%3Aece105-quiz3", size: [400, 900] },
+  { name: "panel-sources-permission-light", url: "/src/panel/panel.html?preview=1&view=sources&noperms=discord", size: [400, 900] },
+  { name: "options-sources-permission-light", url: "/src/options/options.html?preview=1&noperms=discord#sources", size: [1280, 900] },
+  { name: "options-calendar-download-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "phase3b" ? SHOTS_3B :
   process.env.WA1_SHOT_DIR === "phase3a" ? SHOTS_3A :
   process.env.WA1_SHOT_DIR === "cp2" ? SHOTS_CP2 :
   process.env.WA1_SHOT_DIR === "phase2c" ? SHOTS_2C :
@@ -252,6 +263,7 @@ async function shots() {
           hiddenRows: document.querySelectorAll(".hidden-row").length,
           backupSummary: document.querySelectorAll(".backup-summary").length,
           tabs: document.querySelectorAll(".tabs .tab, .segmented button").length,
+          needsPerm: document.body.innerText.includes("Needs permission"),
           text: document.body.innerText.slice(0, 120)
         })`,
       });

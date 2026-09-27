@@ -29,14 +29,23 @@ No passwords, session tokens or credentials are stored.
 
 ## What it sends
 
-- **Today: nothing.** No data leaves your device.
+- **By default: nothing.** No data leaves your device.
 - **Discord is read-only and passive**: the extension makes no requests to
   Discord and never accesses your account token. It only notes dated
   messages in servers you already read while browsing.
-- **Calendar sync (when it ships) is opt-in.** If you turn it on, only
-  event data — titles, times, locations — is sent to the calendar feed
-  server you configure (self-hosted; see `server/`). Nothing else is
-  transmitted.
+- **Calendar sync is opt-in.** If you turn it on, only event data —
+  titles, times, locations — is sent to the calendar feed server you
+  configure (self-hosted; see `server/`). Nothing else is transmitted.
+
+## Optional permissions
+
+Discord and the email sites (Outlook, Gmail) are **optional host
+permissions**. The browser asks for them only when you enable those
+sources — in Settings → Sources, the panel's Sources overlay or the
+Welcome checklist. Without the grant, the extension simply doesn't read
+those sites; everything else keeps working. Revoking a grant in the
+browser's extension details stops the reading; clearing the source in
+Settings → Sources removes its stored data.
 
 ## Third parties
 

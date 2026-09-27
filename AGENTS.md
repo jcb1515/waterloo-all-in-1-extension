@@ -14,6 +14,7 @@ WaterlooWorks, Discord, Outlook, Gmail) and publishes it to one Google Calendar 
 - `npm run dev`: rebuild on change
 - `npm test`: `node --test` over `test/**/*.test.js`, plus the server tests in `server/`
 - `npm run typecheck`: `tsc --noEmit`. Files opt in with `// @ts-check`; all new files should opt in.
+- `npm run package`: release build into `dist/` + a verified zip in `release/`. Release builds set `WA1_RELEASE=1`, which ignores `dev-profile.json` (personal defaults must never ship), minifies, and must pass the dist checks (no dev-profile strings, no upstream names outside `licenses/`, no localhost feed URL). Rebuild a dev `dist/` afterwards.
 - Load in Edge: `edge://extensions` → Developer mode → Load unpacked → `<root>/dist`. After a rebuild: Reload the card, then refresh site tabs.
 
 ## File ownership (parallel work)

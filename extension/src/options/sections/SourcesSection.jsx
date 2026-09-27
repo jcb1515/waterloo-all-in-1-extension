@@ -14,6 +14,7 @@ import {
   OPTIONAL_PERMISSION_GROUPS,
   requestSourceAccess,
 } from "../../core/permissions.js";
+import { AllowSourceButton, useSourceAccess } from "../../ui/permissions.jsx";
 import { ExternalLinkIcon, TrashIcon, PlusIcon, FileTextIcon } from "../../ui/icons.jsx";
 
 const STAGE_BADGE = { live: "badge-ok", soon: "badge-muted" };
@@ -86,6 +87,9 @@ export function SourcesSection({ settings, save, state }) {
                 access to {a.origins[0].replace("https://", "")}; allow it, then toggle again.
               </p>
             ) : null}
+            {optional && enabledOf(a.id) && !denied[a.id] ? (
+              <PermNotice id={a.id} label={a.label} />
+            ) : null}
             {optional && !denied[a.id] ? (
               <p class="help">
                 Optional permission: your browser asks for {a.origins[0].replace("https://", "")}{" "}
@@ -108,6 +112,22 @@ export function SourcesSection({ settings, save, state }) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Shown under an enabled optional-permission source that lacks its grant —
+ * e.g. permission revoked in the browser, or enabled before the grant flow.
+ * @param {{id: string, label: string}} p
+ */
+function PermNotice({ id, label }) {
+  const granted = useSourceAccess(id);
+  if (granted !== false) return null;
+  return (
+    <p class="help status-err">
+      Needs permission to read {label}.{" "}
+      <AllowSourceButton sourceId={id} className="btn btn-sm" label="Allow" />
+    </p>
   );
 }
 
