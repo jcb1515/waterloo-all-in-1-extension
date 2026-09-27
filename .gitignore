@@ -9,3 +9,7 @@ dist/
 Thumbs.db
 .wrangler/
 server/.wrangler/
+dev-profile.json
+captures/
+*.har
+coverage/

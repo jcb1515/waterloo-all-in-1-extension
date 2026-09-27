@@ -31,6 +31,18 @@ const fixture = (dir, name) => readFileSync(path.join(dir, name), "utf8");
 
 const NOW = new Date("2026-09-26T16:00:00.000Z");
 
+// DEFAULT_SETTINGS ships blank; the test supplies the profile a dev-profile
+// would carry.
+const TEST_SETTINGS = {
+  profile: { sections: { "ECE 150": ["LEC 002"] }, groups: { "ECE 190": "5" } },
+  sources: {
+    outline: {
+      enabled: true,
+      urls: { "ECE 150": "https://outline.uwaterloo.ca/viewer/view/npch7t" },
+    },
+  },
+};
+
 // Same order-agnostic (html, parser) | (parser, html) convention as
 // capture/parse.js — the offscreen dispatch in miniature.
 const PARSER_NAME = /^[a-z0-9_-]+\/[a-z0-9_-]+$/i;
@@ -48,7 +60,7 @@ function makeParseHtml(extra = {}) {
 /* ------------------- 1. outline adapter over the ECE 150 fixture ------------------- */
 
 test("outline adapter: ECE 150 fixture yields LEC 002 classes only", async () => {
-  const settings = adapterSettings("outline", DEFAULT_SETTINGS);
+  const settings = adapterSettings("outline", TEST_SETTINGS);
   assert.ok(Array.isArray(settings.urls), "urls normalised to a list");
   const ece150 = fixture(OUTLINE_DIR, "ECE150.html");
   const ctx = {
@@ -158,11 +170,16 @@ test("application status change yields exactly one deduplicated update", async (
 /* --------------------------- 4. adapterSettings --------------------------- */
 
 test("adapterSettings merges profile and source settings; object urls -> list", () => {
-  const outline = adapterSettings("outline", DEFAULT_SETTINGS);
+  const outline = adapterSettings("outline", TEST_SETTINGS);
   assert.equal(outline.enabled, true);
   assert.deepEqual(outline.urls, ["https://outline.uwaterloo.ca/viewer/view/npch7t"]);
   assert.equal(outline.sections["ECE 150"][0], "LEC 002");
   assert.equal(outline.groups["ECE 190"], "5");
+
+  // Blank shipped defaults stay blank.
+  const blank = adapterSettings("outline", DEFAULT_SETTINGS);
+  assert.deepEqual(blank.urls, []);
+  assert.deepEqual(blank.sections, {});
 
   // Arrays pass through untouched.
   const arr = adapterSettings("outline", {
@@ -174,6 +191,6 @@ test("adapterSettings merges profile and source settings; object urls -> list", 
   assert.equal(arr.files.length, 1);
 
   // A source with no block still sees the profile slice.
-  const ww = adapterSettings("waterlooworks", DEFAULT_SETTINGS);
+  const ww = adapterSettings("waterlooworks", TEST_SETTINGS);
   assert.equal(ww.sections["ECE 150"][0], "LEC 002");
 });

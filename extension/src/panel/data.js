@@ -8,7 +8,7 @@
 */
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { DEFAULT_SETTINGS, SETTINGS_KEY } from "../core/store.js";
+import { resolveSettings, SETTINGS_KEY } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
 
@@ -28,24 +28,14 @@ export const query = new URLSearchParams(location.search);
 export const IS_PREVIEW =
   query.has("preview") || typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local;
 
+/** ?preview=empty renders an empty-ish first-run state (blank settings, no source status). */
+const PREVIEW_EMPTY = query.get("preview") === "empty";
+
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
-/** Settings deep-merged over DEFAULT_SETTINGS (one level is enough here). */
+/** Stored settings resolved over DEFAULT_SETTINGS + the baked-in dev profile. */
 export function mergeSettings(saved) {
-  const s = isObj(saved) ? saved : {};
-  const out = { ...DEFAULT_SETTINGS, ...s };
-  out.profile = { ...DEFAULT_SETTINGS.profile, ...(isObj(s.profile) ? s.profile : {}) };
-  out.profile.sections = {
-    ...DEFAULT_SETTINGS.profile.sections,
-    ...(isObj(s.profile) && isObj(s.profile.sections) ? s.profile.sections : {}),
-  };
-  out.profile.groups = {
-    ...DEFAULT_SETTINGS.profile.groups,
-    ...(isObj(s.profile) && isObj(s.profile.groups) ? s.profile.groups : {}),
-  };
-  out.agenda = { ...DEFAULT_SETTINGS.agenda, ...(isObj(s.agenda) ? s.agenda : {}) };
-  out.sources = { ...DEFAULT_SETTINGS.sources, ...(isObj(s.sources) ? s.sources : {}) };
-  return out;
+  return resolveSettings(saved);
 }
 
 /** Push theme/density onto <html>. ?theme= and ?density= override for previews. */
@@ -91,7 +81,7 @@ export function useStore() {
 
   useEffect(() => {
     if (IS_PREVIEW) {
-      const fx = previewState(new Date());
+      const fx = PREVIEW_EMPTY ? emptyPreviewState() : previewState(new Date());
       setState({
         ready: true,
         items: fx.items,
@@ -165,6 +155,19 @@ export function useStore() {
   );
 
   return { ...state, actions };
+}
+
+/** Empty-ish state for first-run screenshots: blank tables, no source status. */
+function emptyPreviewState() {
+  return {
+    items: {},
+    userState: {},
+    sourceState: {},
+    courses: {},
+    applications: {},
+    terms: {},
+    settings: null,
+  };
 }
 
 /**

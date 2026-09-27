@@ -12,5 +12,5 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
-  "include": ["extension/src/**/*.js", "extension/src/**/*.jsx"]
+  "include": ["extension/src/**/*.js", "extension/src/**/*.jsx", "extension/src/**/*.d.ts"]
 }

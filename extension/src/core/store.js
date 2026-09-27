@@ -37,36 +37,40 @@ export const DEFAULT_SETTINGS = {
   density: "comfortable",
   termCode: 1269,
   profile: {
-    sections: {
-      "MATH 117": ["LEC 002"],
-      "MATH 115": ["LEC 002"],
-      "ECE 105": ["LEC 002"],
-      "ECE 150": ["LEC 002"],
-      "ECE 190": ["LEC 002"],
-      "ECE 198": ["LEC 002"],
-      "ENGL 192": ["LEC 008"],
-      "GENE 119": ["SEM 003"],
-    },
-    groups: { "ECE 190": "5" },
+    sections: {},
+    groups: {},
   },
   sources: {
     outline: {
       enabled: true,
-      urls: { "ECE 150": "https://outline.uwaterloo.ca/viewer/view/npch7t" },
+      urls: {},
     },
     discord: {
       enabled: true,
-      watched: {
-        UWASIC: { focus: [], channels: [] },
-        UWHPC: { focus: [], channels: [] },
-        WATonomous: { focus: ["electrical"], channels: [] },
-        "Waterloo Aerial Robotics Group": { focus: ["electrical"], channels: [] },
-        "ECE Waterloo '31": { focus: [], channels: [] },
-      },
+      watched: {},
     },
   },
   agenda: { showClasses: "today" },
 };
+
+/*
+  Local developer profile: when a dev-profile.json exists at the repo root,
+  tools/build.mjs bakes it into the bundle as __WA1_DEV_PROFILE__. It sits
+  between DEFAULT_SETTINGS and the stored wa1Settings, so personal defaults
+  (sections, outline URLs, watched servers) stay out of the shipped source.
+*/
+const DEV_PROFILE =
+  typeof __WA1_DEV_PROFILE__ === "undefined" ? null : __WA1_DEV_PROFILE__;
+
+/**
+ * `defaults` deep-merged with a developer profile: plain objects merge,
+ * arrays and scalars replace. Pure — used by getSettings and the UI client.
+ * @param {Record<string, any>} defaults
+ * @param {Record<string, any> | null | undefined} profile
+ */
+export function withDevProfile(defaults, profile) {
+  return deepMerge(defaults, isObj(profile) ? profile : {});
+}
 
 /* --------------------------- write queue --------------------------- */
 
@@ -83,21 +87,41 @@ export function enqueue(fn) {
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+/**
+ * Keys holding whole user-edited tables (course -> value maps): a stored
+ * value replaces the inherited one outright, so deleting a row in the UI
+ * doesn't resurrect the default/dev-profile row.
+ */
+const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched"]);
+
 /** Recursive merge for plain-object values; arrays and scalars overwrite. */
 function deepMerge(base, patch) {
   const out = { ...(isObj(base) ? base : {}) };
   for (const [k, v] of Object.entries(patch || {})) {
-    out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+    if (REPLACE_KEYS.has(k) && isObj(v)) {
+      out[k] = v;
+    } else {
+      out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+    }
   }
   return out;
 }
 
 /* --------------------------- settings --------------------------- */
 
-/** Settings deep-merged over DEFAULT_SETTINGS. */
+/**
+ * Effective settings for `saved`: DEFAULT_SETTINGS + the baked-in developer
+ * profile (if any) + the user's stored settings, in that order.
+ * @param {any} saved raw wa1Settings value
+ */
+export function resolveSettings(saved) {
+  return deepMerge(withDevProfile(DEFAULT_SETTINGS, DEV_PROFILE), isObj(saved) ? saved : {});
+}
+
+/** Settings deep-merged over DEFAULT_SETTINGS (+ dev profile). */
 export async function getSettings() {
   const { [SETTINGS_KEY]: saved } = await chrome.storage.local.get(SETTINGS_KEY);
-  return deepMerge(DEFAULT_SETTINGS, isObj(saved) ? saved : {});
+  return resolveSettings(saved);
 }
 
 /**
