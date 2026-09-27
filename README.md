@@ -15,20 +15,23 @@ passwords, no OAuth setup.
 
 - **Learn** — deadlines, announcements and class items, read with your own
   Learn session.
-- **Course outlines** — paste an `outline.uwaterloo.ca` URL per course and
-  the dated deliverables show up in the agenda.
+- **Course outlines** — paste an `outline.uwaterloo.ca` URL per course, or
+  import a saved outline page (Ctrl+S), and the dated deliverables show up
+  in the agenda.
 - **WaterlooWorks** — applications and interview times update automatically
   while you browse the site (no sync button — just use WaterlooWorks).
 - **Agenda panel** — click the toolbar icon for today's classes and
   deadlines, what's next, and a searchable, filterable list. Press `/` to
   search.
+- **Google Calendar feed** — publish the agenda to a private iCal feed
+  (opt-in, self-hosted server — see below) and subscribe from Google
+  Calendar, Apple Calendar or Outlook.
 
 **In progress**
 
 - Portal (auto-detected sections, tutorials and exam seats)
 - Outlook / Gmail events
 - Discord (dated messages in servers you choose — read-only, passive)
-- The Google Calendar feed
 - Reminders
 - Week / month views
 
@@ -58,9 +61,9 @@ your site tabs.
 
 On install, the options page opens on a **Welcome** checklist that walks you
 through the six setup steps: sign in to Learn in a tab, add your sections
-under **Profile** (until Portal fills them in automatically), paste your
-course-outline URLs under **Sources**, browse WaterlooWorks, and pick any
-Discord servers to watch. Each step shows live status as it completes.
+under **Profile** (until Portal fills them in automatically), paste outline
+URLs or import saved outline pages (Ctrl+S) under **Sources**, browse
+WaterlooWorks, and pick any Discord servers to watch. Each step shows live status as it completes.
 
 ## Privacy
 
@@ -120,6 +123,10 @@ courses/sections/servers by copying `dev-profile.example.json` to
 `dev-profile.json` (gitignored) at the repo root and rebuilding — the
 values are baked into the bundle and merged over `DEFAULT_SETTINGS`. Your
 saved settings still win over both.
+
+A released build can also ship a hosted feed server as the default:
+set `WA1_CALENDAR_SERVICE_URL` in the environment at build time and it's
+baked in as `calendar.serviceUrl`. Again, the user's saved setting wins.
 
 ## Disclaimer
 
