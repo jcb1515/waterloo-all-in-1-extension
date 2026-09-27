@@ -15,21 +15,32 @@
 const OBSERVER = "src/capture/observer.main.js";
 const RECORDER = "src/capture/recorder.content.js";
 
-/** Optional host groups, keyed by the adapter id they gate. */
+/**
+ * Optional host groups, keyed by grant — granting Outlook and Gmail are
+ * separate browser prompts; both feed the email adapter (id "outlook").
+ */
 export const OPTIONAL_PERMISSION_GROUPS = Object.freeze({
   discord: ["https://discord.com/*"],
   outlook: [
     "https://outlook.office.com/*",
     "https://outlook.cloud.microsoft/*",
     "https://outlook.live.com/*",
-    "https://mail.google.com/*",
   ],
+  gmail: ["https://mail.google.com/*"],
+});
+
+/** Button label per group. */
+export const GROUP_LABELS = Object.freeze({
+  discord: "Discord",
+  outlook: "Outlook",
+  gmail: "Gmail",
 });
 
 /** The source content script bundled with the recorder per group. */
 const GROUP_SOURCE_SCRIPT = {
   discord: "src/sources/discord/content.js",
   outlook: "src/sources/email/content.js",
+  gmail: "src/sources/email/content.js",
 };
 
 /** Script ids we manage; anything else registered is left alone. */
@@ -70,9 +81,35 @@ export function scriptsForGrants(grantedOrigins) {
   return out;
 }
 
-/** The adapter ids whose sources sit behind optional permissions. */
+/** The group keys whose sources sit behind optional permissions. */
 export function optionalSourceIds() {
   return Object.keys(OPTIONAL_PERMISSION_GROUPS);
+}
+
+/**
+ * Every permission group an adapter may need, regardless of settings.
+ * @param {string} adapterId
+ * @returns {string[]}
+ */
+export function adapterGroups(adapterId) {
+  if (adapterId === "discord") return ["discord"];
+  if (adapterId === "outlook") return ["outlook", "gmail"];
+  return [];
+}
+
+/**
+ * The permission groups an adapter needs given its settings slice: the
+ * master `enabled` flag gates everything, then each group is gated by the
+ * same-named flag in the source's settings (`sources.outlook.gmail` turns
+ * off just Gmail). Unset flags count as on.
+ * @param {string} adapterId
+ * @param {any} sourceSettings `settings.sources[adapterId]`
+ * @returns {string[]} group keys, e.g. ["outlook", "gmail"]
+ */
+export function neededGroups(adapterId, sourceSettings) {
+  const s = sourceSettings || {};
+  if (s.enabled === false) return [];
+  return adapterGroups(adapterId).filter((g) => s[g] !== false);
 }
 
 /**

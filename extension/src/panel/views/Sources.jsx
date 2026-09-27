@@ -7,8 +7,8 @@ import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
 import { IS_PREVIEW, send } from "../data.js";
 import { UI } from "../../core/messages.js";
-import { OPTIONAL_PERMISSION_GROUPS } from "../../core/permissions.js";
-import { AllowSourceButton, useSourceAccess } from "../../ui/permissions.jsx";
+import { GROUP_LABELS, neededGroups } from "../../core/permissions.js";
+import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
 import { inventoryReport } from "../../sources/discord/index.js";
 import {
   RefreshIcon,
@@ -87,17 +87,21 @@ export function Sources({ state, actions, now }) {
  *   actions: any, now: Date}} p
  */
 function SourceCard({ adapter, stage, st, status, state, actions, now }) {
-  const optional = !!(OPTIONAL_PERMISSION_GROUPS /** @type {any} */)[adapter.id];
-  const granted = useSourceAccess(adapter.id);
-  const enabled = !(
-    state.settings &&
-    state.settings.sources &&
-    state.settings.sources[adapter.id] &&
-    state.settings.sources[adapter.id].enabled === false
+  const needed = neededGroups(
+    adapter.id,
+    state.settings && state.settings.sources && state.settings.sources[adapter.id]
   );
-  const needsPerm = optional && enabled && granted === false;
+  const access = useAccessMap(needed);
+  const missing = needed.filter((g) => access[g] === false);
+  const needsPerm = missing.length > 0;
   const shown = needsPerm
-    ? { label: "Needs permission", tone: "warn", detail: `Allow access to ${adapter.origins[0].replace("https://", "")} so ${adapter.label} can read while you browse.` }
+    ? {
+        label: "Needs permission",
+        tone: "warn",
+        detail: `Allow ${missing
+          .map((g) => GROUP_LABELS[g] || g)
+          .join(" and ")} access so ${adapter.label} can read while you browse.`,
+      }
     : status;
 
   return (
@@ -129,9 +133,13 @@ function SourceCard({ adapter, stage, st, status, state, actions, now }) {
       ) : null}
       {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
       <div class="source-actions">
-        {needsPerm ? (
-          <AllowSourceButton sourceId={adapter.id} />
-        ) : null}
+        {missing.map((g) => (
+          <AllowSourceButton
+            key={g}
+            sourceId={g}
+            label={`Allow ${GROUP_LABELS[g] || g}`}
+          />
+        ))}
         {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
           <button
             type="button"

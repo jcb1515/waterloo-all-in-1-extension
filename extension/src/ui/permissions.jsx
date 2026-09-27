@@ -15,7 +15,7 @@ const previewDenied = (sourceId) =>
 
 /**
  * Granted state for a source's optional host group.
- * @param {string} sourceId
+ * @param {string} sourceId group key ("discord" | "outlook" | "gmail")
  * @returns {boolean|null} null while unknown; true when the source needs no
  *   optional grant or already has it.
  */
@@ -59,6 +59,56 @@ export function useSourceAccess(sourceId) {
     };
   }, [sourceId]);
   return granted;
+}
+
+/**
+ * Granted state for several groups at once — for cards that need per-group
+ * checks without one hook per group (email's Outlook + Gmail).
+ * @param {string[]} groupIds
+ * @returns {Record<string, boolean|null>}
+ */
+export function useAccessMap(groupIds) {
+  const key = (groupIds || []).slice().sort().join(",");
+  const [map, setMap] = useState(/** @type {Record<string, boolean|null>} */ ({}));
+  useEffect(() => {
+    const ids = key ? key.split(",") : [];
+    if (!ids.length) {
+      setMap({});
+      return undefined;
+    }
+    if (IS_PREVIEW) {
+      setMap(Object.fromEntries(ids.map((id) => [id, !previewDenied(id)])));
+      return undefined;
+    }
+    let live = true;
+    const refresh = () =>
+      Promise.all(ids.map(async (id) => /** @type {const} */ ([id, await hasSourceAccess(id)]))).then(
+        (entries) => {
+          if (live) setMap(Object.fromEntries(entries));
+        },
+      );
+    refresh();
+    let onAdd;
+    let onRem;
+    try {
+      onAdd = chrome.permissions.onAdded;
+      onRem = chrome.permissions.onRemoved;
+      onAdd.addListener(refresh);
+      onRem.addListener(refresh);
+    } catch {
+      /* permissions API unavailable */
+    }
+    return () => {
+      live = false;
+      try {
+        if (onAdd) onAdd.removeListener(refresh);
+        if (onRem) onRem.removeListener(refresh);
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [key]);
+  return map;
 }
 
 /**

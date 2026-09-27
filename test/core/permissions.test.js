@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
   OPTIONAL_PERMISSION_GROUPS,
+  neededGroups,
   scriptsForGrants,
 } from "../../extension/src/core/permissions.js";
 
@@ -38,19 +39,47 @@ test("scriptsForGrants: discord grant registers observer + recorder", () => {
   assert.equal(rec.world, undefined); // isolated, like the static entries
 });
 
-test("scriptsForGrants: email group keeps all four hosts together", () => {
-  const list = scriptsForGrants(ALL_OPTIONAL);
-  assert.equal(list.length, 4);
-  const recMail = list.find((s) => s.id === "wa1:rec:outlook");
-  assert.ok(recMail);
-  assert.deepEqual(recMail.matches, OPTIONAL_PERMISSION_GROUPS.outlook);
-  assert.ok(recMail.js.includes("src/sources/email/content.js"));
+test("scriptsForGrants: outlook-only grant registers only the outlook group", () => {
+  const list = scriptsForGrants(OPTIONAL_PERMISSION_GROUPS.outlook);
+  assert.equal(list.length, 2);
+  const obs = list.find((s) => s.id === "wa1:obs:outlook");
+  const rec = list.find((s) => s.id === "wa1:rec:outlook");
+  assert.ok(obs && rec);
+  assert.deepEqual(obs.matches, OPTIONAL_PERMISSION_GROUPS.outlook);
+  assert.deepEqual(rec.js, [
+    "src/capture/recorder.content.js",
+    "src/sources/email/content.js",
+  ]);
 });
 
-test("scriptsForGrants: a partial grant registers only the granted hosts", () => {
+test("scriptsForGrants: gmail-only grant registers only the gmail group", () => {
   const list = scriptsForGrants(["https://mail.google.com/*"]);
   assert.equal(list.length, 2);
-  for (const s of list) assert.deepEqual(s.matches, ["https://mail.google.com/*"]);
+  for (const s of list) {
+    assert.deepEqual(s.matches, ["https://mail.google.com/*"]);
+    assert.ok(s.id.endsWith(":gmail"));
+  }
+  const rec = list.find((s) => s.id === "wa1:rec:gmail");
+  assert.ok(rec && rec.js.includes("src/sources/email/content.js"));
+});
+
+test("scriptsForGrants: all grants register both email groups plus discord", () => {
+  const list = scriptsForGrants(ALL_OPTIONAL);
+  assert.equal(list.length, 6);
+  for (const g of ["discord", "outlook", "gmail"]) {
+    assert.ok(list.some((s) => s.id === `wa1:obs:${g}`), `obs:${g}`);
+    assert.ok(list.some((s) => s.id === `wa1:rec:${g}`), `rec:${g}`);
+  }
+});
+
+test("neededGroups: discord gates on enabled, email gates per provider", () => {
+  assert.deepEqual(neededGroups("discord", {}), ["discord"]);
+  assert.deepEqual(neededGroups("discord", { enabled: false }), []);
+  assert.deepEqual(neededGroups("outlook", {}), ["outlook", "gmail"]);
+  assert.deepEqual(neededGroups("outlook", { enabled: false }), []);
+  assert.deepEqual(neededGroups("outlook", { gmail: false }), ["outlook"]);
+  assert.deepEqual(neededGroups("outlook", { outlook: false, gmail: false }), []);
+  assert.deepEqual(neededGroups("learn", {}), []);
 });
 
 test("manifest: optional hosts are not required and not static-matched", () => {

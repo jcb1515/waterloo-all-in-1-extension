@@ -5,8 +5,8 @@
 
 import { Card } from "../bits.jsx";
 import { CheckIcon } from "../../ui/icons.jsx";
-import { AllowSourceButton, useSourceAccess } from "../../ui/permissions.jsx";
-import { stageForAdapter } from "../../core/registry.js";
+import { AllowSourceButton, useAccessMap, useSourceAccess } from "../../ui/permissions.jsx";
+import { GROUP_LABELS, neededGroups } from "../../core/permissions.js";
 
 /** @param {{ok?: boolean, label: string, todo?: string}} p */
 function StatusChip({ ok, label, todo }) {
@@ -45,7 +45,12 @@ export function WelcomeSection({ settings, state }) {
   const ss = ((state && state.sourceState) || {});
   const learnOk = !!(ss.learn && ss.learn.lastOkAt);
   const discordOk = useSourceAccess("discord");
-  const emailOk = useSourceAccess("outlook");
+  const emailNeeded = neededGroups(
+    "outlook",
+    settings.sources && settings.sources.outlook
+  );
+  const emailAccess = useAccessMap(["outlook", "gmail"]);
+  const emailMissing = emailNeeded.filter((g) => emailAccess[g] === false);
   const outlineUrls = (settings.sources && settings.sources.outline && settings.sources.outline.urls) || {};
   const outlineCount = Array.isArray(outlineUrls)
     ? outlineUrls.length
@@ -122,26 +127,24 @@ export function WelcomeSection({ settings, state }) {
             Publish your agenda to one private feed and subscribe to it from
             Google Calendar — no duplicates.
           </Step>
-          {stageForAdapter("outlook") === "live" ? (
-            <Step
-              n={7}
-              done={emailOk === true}
-              title={<>Outlook / Gmail: allow reading invites <a class="welcome-link" href="#sources">Sources</a></>}
-            >
-              Optional permission — the extension only reads calendar invites and
-              dated mail in Outlook or Gmail tabs you open.
-              {emailOk === false ? (
-                <>
-                  {" "}
-                  <AllowSourceButton
-                    sourceId="outlook"
-                    label="Allow email sites"
-                    className="btn btn-sm"
-                  />
-                </>
-              ) : null}
-            </Step>
-          ) : null}
+          <Step
+            n={7}
+            done={emailNeeded.length > 0 && emailMissing.length === 0}
+            title={<>Outlook / Gmail: allow reading invites <a class="welcome-link" href="#sources">Sources</a></>}
+          >
+            Optional permissions, asked per provider — the extension only reads
+            calendar invites and dated mail in Outlook or Gmail tabs you open.
+            {emailMissing.map((g) => (
+              <>
+                {" "}
+                <AllowSourceButton
+                  sourceId={g}
+                  label={`Allow ${GROUP_LABELS[g] || g}`}
+                  className="btn btn-sm"
+                />
+              </>
+            ))}
+          </Step>
         </ol>
       </Card>
 

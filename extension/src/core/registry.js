@@ -21,7 +21,7 @@ export const SOURCE_STAGE = Object.freeze({
   learn: "live",
   outline: "live",
   portal: "live",
-  outlook: "soon",
+  outlook: "live",
   waterlooworks: "live",
   discord: "live",
 });
