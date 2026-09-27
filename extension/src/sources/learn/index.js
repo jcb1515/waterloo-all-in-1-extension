@@ -62,21 +62,36 @@ function toLive(r) {
   return out;
 }
 
-/** The sentence a date hit sits in: text up to the nearest . ! ? or newline on each side. */
+/** The sentence a date hit sits in: text up to the nearest sentence boundary on each side. */
 function sentenceOf(text, index, length) {
+  // . ! ? only end a sentence when a new uppercase sentence (or the end of the
+  // text) follows, so abbreviations ("Ch. 3", "Oct. 9") don't cut it. \n always
+  // ends one.
+  const isBoundary = (i) => {
+    if (text[i] === "\n") return true;
+    if (text[i] !== "." && text[i] !== "!" && text[i] !== "?") return false;
+    const rest = text.slice(i + 1).replace(/^\s+/, "");
+    return rest === "" || /^[A-Z]/.test(rest);
+  };
   let start = 0;
   for (let i = index - 1; i >= 0; i--) {
-    if (".!?\n".includes(text[i])) {
+    if (isBoundary(i)) {
       start = i + 1;
       break;
     }
   }
   let end = text.length;
   for (let i = index + length; i < text.length; i++) {
-    if (".!?\n".includes(text[i])) {
+    if (isBoundary(i)) {
       end = i + 1;
       break;
     }
+  }
+  if (end - start > 300) {
+    // A sentence longer than the cap is cropped around the hit, not at its start.
+    const mid = index + Math.floor(length / 2);
+    start = Math.max(0, mid - 150);
+    end = Math.min(text.length, start + 300);
   }
   return text.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 300);
 }
@@ -112,6 +127,17 @@ const adapter = {
 
     /** @type {Item[]} */
     const items = [];
+    const seenIds = new Set();
+    /** Item ids must be unique in a SyncResult; a date repeated in a news title
+     *  and body hits the same id twice, so later duplicates are dropped. */
+    const pushItem = (item) => {
+      if (seenIds.has(item.id)) {
+        ctx.log(`learn: dropped duplicate item id ${item.id}`);
+        return;
+      }
+      seenIds.add(item.id);
+      items.push(item);
+    };
     /** @type {LearnCourse[]} */
     const courses = [];
     const readOk = [];
@@ -203,7 +229,7 @@ const adapter = {
           const plainEvent = row.dueField === "event" && row.startAt;
           if (!(plainEvent && (item.type === "exam" || item.type === "presentation"))) item.dueAt = row.dueAt;
           pairs.push({ row, item });
-          items.push(item);
+          pushItem(item);
         }
 
         // Discussion posts: an open topic the student already posted in counts
@@ -272,7 +298,7 @@ const adapter = {
                 if (hit.endAt) item.endAt = hit.endAt;
                 item.allDay = hit.allDay;
               }
-              items.push(item);
+              pushItem(item);
               pairs.push({ row: { kind: "news" }, item });
             }
           }
@@ -332,15 +358,21 @@ const adapter = {
           if (v.DisplayedGrade != null) entry.display = String(v.DisplayedGrade);
           courseGrades.push(entry);
           if (typeof v.WeightedDenominator !== "number" || v.WeightedDenominator <= 0) continue;
+          // Grades only attach to tool items, never to announcement items.
+          const toolPairs = pairs.filter((p) => p.row.kind !== "news");
           // VERIFY: whether folders/quizzes carry the grade object id as
           // GradeItemId, and objects link back via AssociatedToolItemId.
           const toolId = obj && (obj.AssociatedToolItemId ?? obj.GradeItemId);
           let target = toolId != null
-            ? pairs.find((p) => String(p.item.id).split(":").slice(3).join(":") === String(toolId))
+            ? toolPairs.find(
+                (p) =>
+                  (p.row.kind === "dropbox" || p.row.kind === "quiz") &&
+                  String(p.item.id).split(":").slice(3).join(":") === String(toolId)
+              )
             : null;
           if (!target && component) {
             const want = normName(component);
-            target = pairs.find((p) => normName(p.item.title) === want);
+            target = toolPairs.find((p) => normName(p.item.title) === want);
           }
           if (target) target.item.weight = v.WeightedDenominator;
         }

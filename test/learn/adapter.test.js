@@ -137,3 +137,71 @@ test("learn adapter: the result never carries the student's name", async () => {
   assert.ok(!json.includes(WHOAMI.FirstName), "no FirstName");
   assert.ok(!json.includes(WHOAMI.LastName), "no LastName");
 });
+
+test("learn adapter: a date repeated in the title and body is one item, and ids are unique", async () => {
+  const routes = learnRoutes();
+  routes.set("/d2l/api/le/V/1001/news/", {
+    json: [
+      {
+        Id: 310,
+        Title: "Midterm moved to Oct 29",
+        Body: { Text: "The midterm is now Thursday, October 29." },
+        StartDate: "2026-09-25T12:00:00.000Z",
+        IsPublished: true,
+      },
+    ],
+  });
+  const { ctx } = makeCtx(routes);
+  const result = await adapter.sync(ctx);
+  const newsItems = result.items.filter((i) => i.id.startsWith("learn:1001:news:"));
+  assert.deepEqual(newsItems.map((i) => i.id), ["learn:1001:news:310:2026-10-29T04:00:00.000Z"]);
+  const ids = result.items.map((i) => i.id);
+  assert.equal(new Set(ids).size, ids.length, "all item ids unique");
+});
+
+test("learn adapter: abbreviations like 'Ch.' do not cut the evidence sentence", async () => {
+  const routes = learnRoutes();
+  routes.set("/d2l/api/le/V/1001/news/", {
+    json: [
+      {
+        Id: 311,
+        Title: "Quiz update",
+        Body: { Text: "Quiz 2 (Ch. 3 material) is on Friday, Oct. 9 in class." },
+        StartDate: "2026-09-25T12:00:00.000Z",
+        IsPublished: true,
+      },
+    ],
+  });
+  const { ctx } = makeCtx(routes);
+  const result = await adapter.sync(ctx);
+  const newsItems = result.items.filter((i) => i.id.startsWith("learn:1001:news:"));
+  assert.equal(newsItems.length, 1);
+  assert.equal(newsItems[0].startAt || newsItems[0].dueAt, "2026-10-09T04:00:00.000Z");
+  assert.ok(newsItems[0].evidence.snippet.includes("Quiz 2"), newsItems[0].evidence.snippet);
+});
+
+test("learn adapter: grade matching never lands on announcement items", async () => {
+  const routes = learnRoutes();
+  routes.set("/d2l/api/le/V/1001/news/", {
+    json: [
+      {
+        Id: 312,
+        Title: "Midterm Exam",
+        Body: { Text: "The midterm exam is on Thursday, October 29 in STC 1012." },
+        StartDate: "2026-09-25T12:00:00.000Z",
+        IsPublished: true,
+      },
+    ],
+  });
+  const { ctx } = makeCtx(routes);
+  const result = await adapter.sync(ctx);
+  // The grade value "Midterm Exam" (WeightedDenominator 25 in the fixture)
+  // matches the quiz, not the announcement of the same name.
+  const quiz = byId(result, "learn:1001:quiz:55");
+  assert.ok(quiz);
+  assert.equal(quiz.weight, 25);
+  const newsItems = result.items.filter((i) => i.id.startsWith("learn:1001:news:"));
+  assert.equal(newsItems.length, 1);
+  assert.equal(newsItems[0].title, "Midterm Exam");
+  assert.equal(newsItems[0].weight, undefined);
+});
