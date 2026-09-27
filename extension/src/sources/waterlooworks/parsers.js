@@ -568,8 +568,47 @@ export function parseInterviewDetail(doc) {
   return out;
 }
 
+/**
+ * The message body: text nodes in document order strictly between the SUBJECT
+ * heading and the ADMINISTRATION INFORMATION block. Transient — the adapter
+ * feeds it to date extraction and never persists it.
+ * @param {any} doc
+ * @param {any} subjEl
+ * @param {any} adminEl
+ */
+function messageBodyText(doc, subjEl, adminEl) {
+  const root = doc.body || doc.documentElement;
+  if (!root || !subjEl || !adminEl) return undefined;
+  let started = false;
+  let out = "";
+  /** @returns {boolean} false stops the walk */
+  const visit = (node) => {
+    if (node === adminEl) return false;
+    if (node === subjEl) {
+      started = true;
+      return true; // skip the subject subtree itself
+    }
+    if (node.nodeType === 3) {
+      if (started) out += ` ${node.nodeValue}`;
+      return true;
+    }
+    if (node.nodeType !== 1) return true;
+    if (node.matches && node.matches(ICON_SELECTOR)) return true;
+    for (const child of node.childNodes || []) {
+      if (!visit(child)) return false;
+    }
+    if (started && BLOCK_TAGS.has(node.tagName)) out += " ";
+    return true;
+  };
+  visit(root);
+  if (!started) return undefined;
+  const text = out.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 20000) : undefined;
+}
+
 export function parseMessageDetail(doc) {
-  if (!findTextElement(doc, MESSAGE_DETAIL_HEADING_RE)) return { ok: false };
+  const adminEl = findTextElement(doc, MESSAGE_DETAIL_HEADING_RE);
+  if (!adminEl) return { ok: false };
   // Shortest matching element wins, so a wrapper containing the body can't
   // smuggle body text into the subject.
   const subjEl = findTextElement(doc, /^subject:/i);
@@ -588,10 +627,12 @@ export function parseMessageDetail(doc) {
       linkedJobTitle = match[2].trim();
     }
   }
-  // Privacy: the message body and To/Created By are never extracted or stored.
+  // Privacy: To/Created By are never extracted. bodyText is returned for
+  // transient date extraction only — the adapter must not persist it.
   return {
     ok: true,
     subject,
+    bodyText: messageBodyText(doc, subjEl, adminEl),
     category: get(/^category$/i),
     subCategory: get(/^sub-?category$/i),
     attachedTo: get(/^attached to$/i),

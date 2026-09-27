@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parseHTML } from "linkedom";
+import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
 import {
   toApplications,
@@ -14,6 +15,7 @@ import {
   interviewDetailItems,
   linkItems,
   mergeInterviewScopes,
+  messageDateItems,
 } from "../../extension/src/sources/waterlooworks/map.js";
 
 const FIXTURES = path.resolve(
@@ -214,4 +216,62 @@ test("mergeInterviewScopes lets the detail win on shared fields", () => {
   );
   const merged2 = mergeInterviewScopes(listItems, timeslot);
   assert.ok(merged2.find((i) => i.id === "waterlooworks:timeslot:400001"));
+});
+
+test("messageDateItems classifies types and keeps only confident fresh hits", () => {
+  // Interview keyword in the snippet wins over the deadline keyword.
+  const interview = messageDateItems(
+    {
+      subject: "Booking open",
+      sentAt: "2026-09-25T16:01:00.000Z",
+      text: "Your interview is on October 5, 2026 at 10:00 AM.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  assert.equal(interview.length, 1);
+  assert.equal(interview[0].type, "interview");
+  assert.equal(interview[0].startAt, "2026-10-05T14:00:00.000Z");
+  assert.equal(interview[0].review, "pending");
+  assert.equal(interview[0].org, "WaterlooWorks");
+
+  // Deadline keyword -> dueAt instead of startAt.
+  const deadline = messageDateItems(
+    {
+      subject: "Rankings",
+      sentAt: "2026-09-25T16:01:00.000Z",
+      text: "Submit your form by October 9, 2026 5:00 PM.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  assert.equal(deadline.length, 1);
+  assert.equal(deadline[0].type, "deadline");
+  assert.equal(deadline[0].dueAt, "2026-10-09T21:00:00.000Z");
+  assert.equal(deadline[0].startAt, undefined);
+
+  // A hit more than a day before send time is a past reference — dropped.
+  const past = messageDateItems(
+    {
+      subject: "Recap",
+      sentAt: "2026-09-25T16:01:00.000Z",
+      text: "We met on September 10.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  assert.equal(past.length, 0);
+
+  // Relative dates resolve from the message's send time, not now.
+  const relative = messageDateItems(
+    {
+      subject: "Reminder",
+      sentAt: "2026-09-25T16:01:00.000Z",
+      text: "Your interview is tomorrow at 2 PM.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  assert.equal(relative.length, 1);
+  assert.equal(relative[0].startAt, "2026-09-26T18:00:00.000Z");
 });

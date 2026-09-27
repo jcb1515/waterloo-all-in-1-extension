@@ -16,6 +16,8 @@ import {
   postingItems,
   linkItems,
   mergeInterviewScopes,
+  messageDateItems,
+  messageKey,
 } from "./map.js";
 import { diffApplications } from "./diff.js";
 
@@ -26,6 +28,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Per-job scopes accumulate; each page describes ONE job. Days before prune. */
 const JOB_SCOPES = { "posting": 14, "interview-detail": 30 };
 const JOB_SCOPE_CAP = 200;
+/** message-dates accumulates per message key; days before prune / item cap. */
+const MESSAGE_SCOPE_AGE_DAYS = 60;
+const MESSAGE_SCOPE_CAP = 300;
 
 /**
  * Every cached item from state.lastGood, interview list/detail merged by id.
@@ -36,7 +41,11 @@ function cachedItems(state) {
   return mergeInterviewScopes(
     lastGood.interviews?.items || [],
     lastGood["interview-detail"]?.items || []
-  ).concat(lastGood.events?.items || [], lastGood.posting?.items || []);
+  ).concat(
+    lastGood.events?.items || [],
+    lastGood.posting?.items || [],
+    lastGood["message-dates"]?.items || []
+  );
 }
 
 /**
@@ -48,34 +57,81 @@ function anchorMs(item) {
 }
 
 /**
- * Per-job accumulate: prev items from other jobs survive; items for the
- * job(s) in this payload are replaced by the fresh read — or removed when the
- * read produced none (expired posting deadline, a timeslot item after the
- * interview got booked). Then prune stale items and cap.
+ * Keyed accumulate: prev items whose key isn't in this payload survive; items
+ * for the key(s) read this time are replaced by the fresh read — or removed
+ * when the read produced none (expired posting deadline, a timeslot item after
+ * the interview got booked, a re-read message with no dates). Then prune
+ * stale items and cap.
  * @param {any[]} prevItems
  * @param {any[]} freshItems
- * @param {any[]} jobIds   jobIds present in this payload
+ * @param {any[]} keys       keys present in this payload
+ * @param {(item: any) => string|undefined} keyOf
  * @param {number} nowMs
  * @param {number} maxAgeDays
+ * @param {number} cap
  */
-function accumulateJobItems(prevItems, freshItems, jobIds, nowMs, maxAgeDays) {
-  const jobs = new Set((jobIds || []).filter(Boolean));
+function accumulateKeyedItems(prevItems, freshItems, keys, keyOf, nowMs, maxAgeDays, cap) {
+  const present = new Set((keys || []).filter(Boolean));
   const cutoff = nowMs - maxAgeDays * DAY_MS;
   const combined = [
-    ...(prevItems || []).filter((item) => !jobs.has(item?.meta?.jobId)),
+    ...(prevItems || []).filter((item) => !present.has(keyOf(item))),
     ...(freshItems || []),
   ];
   const kept = combined.filter((item) => {
     const anchor = anchorMs(item);
     return Number.isNaN(anchor) || anchor >= cutoff;
   });
-  if (kept.length <= JOB_SCOPE_CAP) return kept;
+  if (kept.length <= cap) return kept;
   // Drop the oldest by anchor date, preserving the order of survivors.
   const ranked = kept
     .map((item, i) => ({ item, i, anchor: anchorMs(item) }))
     .sort((a, b) => a.anchor - b.anchor || a.i - b.i);
-  const drop = new Set(ranked.slice(0, kept.length - JOB_SCOPE_CAP).map((r) => r.i));
+  const drop = new Set(ranked.slice(0, kept.length - cap).map((r) => r.i));
   return kept.filter((_, i) => !drop.has(i));
+}
+
+/** Per-job accumulate, keyed on meta.jobId. */
+function accumulateJobItems(prevItems, freshItems, jobIds, nowMs, maxAgeDays) {
+  return accumulateKeyedItems(
+    prevItems,
+    freshItems,
+    jobIds,
+    (item) => item?.meta?.jobId,
+    nowMs,
+    maxAgeDays,
+    JOB_SCOPE_CAP
+  );
+}
+
+/**
+ * Run message-date extraction over a batch of messages and fold the items
+ * into lastGood["message-dates"], keyed per message: a re-read message
+ * replaces its own items (or drops them when none parse) while other
+ * messages' items survive.
+ * @param {Record<string, any>} state
+ * @param {any[]} msgs
+ * @param {any} extractDates  ctx.textDates
+ * @param {Date} now
+ * @param {string} at
+ */
+function deriveMessageDates(state, msgs, extractDates, now, at) {
+  if (typeof extractDates !== "function") return;
+  const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
+  const keys = msgs.map((msg) => messageKey(msg.subject, msg.sentAt, now));
+  const fresh = msgs.flatMap((msg) => messageDateItems(msg, extractDates, nowIso));
+  state.lastGood["message-dates"] = {
+    items: accumulateKeyedItems(
+      state.lastGood["message-dates"]?.items,
+      fresh,
+      keys,
+      (item) => item?.meta?.messageKey,
+      nowMs,
+      MESSAGE_SCOPE_AGE_DAYS,
+      MESSAGE_SCOPE_CAP
+    ),
+    at,
+  };
 }
 
 const pathOf = (url) => {
@@ -267,9 +323,10 @@ export default {
         delete state.needsUpdate.posting;
       }
       if (parsed.messages) {
+        const rows = parsed.messages.rows || [];
         state.messages = mergeRecent(
           prev.messages,
-          parsed.messages.rows.map((row) => ({
+          rows.map((row) => ({
             subject: row.subject,
             receivedAt: row.receivedAt,
             from: row.from,
@@ -278,15 +335,61 @@ export default {
           (row) => `${row.subject}|${row.receivedAt}|${row.from}`,
           MAX_STORED
         );
+        // Inbox rows have no body — date items come from the subject alone.
+        deriveMessageDates(
+          state,
+          rows.map((row) => ({
+            subject: row.subject,
+            sentAt: row.receivedAt,
+            text: row.subject,
+            url: payload.url,
+          })),
+          ctx.textDates,
+          now,
+          payload.at
+        );
         readOk.push("messages");
         delete state.needsUpdate.messages;
       }
       if (parsed["message-detail"]) {
+        const detail = parsed["message-detail"];
         state.messageDetails = mergeRecent(
           prev.messageDetails,
-          [parsed["message-detail"]],
+          // Metadata only — bodyText is transient and never persisted.
+          [
+            {
+              subject: detail.subject,
+              category: detail.category,
+              subCategory: detail.subCategory,
+              attachedTo: detail.attachedTo,
+              createdAt: detail.createdAt,
+              linkedJobId: detail.linkedJobId,
+              linkedJobTitle: detail.linkedJobTitle,
+            },
+          ],
           (row) => `${row.subject}|${row.createdAt}`,
           MAX_STORED
+        );
+        const employer = detail.linkedJobId
+          ? (state.applications || []).find(
+              (app) => app.jobId === detail.linkedJobId
+            )?.employer
+          : undefined;
+        deriveMessageDates(
+          state,
+          [
+            {
+              subject: detail.subject,
+              sentAt: detail.createdAt,
+              text: `${detail.subject || ""}\n${detail.bodyText || ""}`,
+              url: payload.url,
+              category: detail.category,
+              employer,
+            },
+          ],
+          ctx.textDates,
+          now,
+          payload.at
         );
         readOk.push("message-detail");
         delete state.needsUpdate["message-detail"];

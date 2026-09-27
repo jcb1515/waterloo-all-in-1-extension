@@ -7,7 +7,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parseHTML } from "linkedom";
+import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
+import { messageKey } from "../../extension/src/sources/waterlooworks/map.js";
 import adapter from "../../extension/src/sources/waterlooworks/index.js";
 
 const FIXTURES = path.resolve(
@@ -32,6 +34,7 @@ function makeCtx(state = {}) {
       const exportName = name.split("/")[1];
       return parsers[exportName](parseHTML(html).document, opts);
     },
+    textDates: extractDates,
     log() {},
   };
 }
@@ -404,6 +407,73 @@ test("rankings state persists without items", async () => {
     at: AT,
   });
   assert.equal(result.items.length, 0);
+});
+
+test("message detail body yields a pending item; the body is never persisted", async () => {
+  const ctx = makeCtx();
+  const result = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  const derived = result.items.filter((i) => i.meta?.messageKey);
+  // The past reference ("mentioned on September 10") is dropped — one item.
+  assert.equal(derived.length, 1);
+  const item = derived[0];
+  assert.equal(item.type, "cycle-date"); // "Cycle 1 …" subject wins first
+  assert.equal(item.review, "pending");
+  assert.equal(item.status, "open");
+  assert.equal(item.confidence, "tentative");
+  // Friday, October 2 4:00 PM Toronto (EDT) -> 20:00Z
+  assert.equal(item.dueAt, "2026-10-02T20:00:00.000Z");
+  assert.ok(item.evidence.snippet.length <= 300);
+  assert.match(item.evidence.snippet, /October 2/);
+  assert.equal(item.evidence.method, "text");
+  // Only the matched sentence is stored — the rest of the body is not.
+  const stateJson = JSON.stringify(result.state);
+  assert.ok(!stateJson.includes("WatIAM passphrase"));
+  assert.ok(!stateJson.includes("spaces are limited"));
+  // messageDetails holds metadata only — no bodyText.
+  assert.equal(result.state.messageDetails[0].bodyText, undefined);
+});
+
+test("message-date item ids are identical on re-parse", async () => {
+  const ctx = makeCtx();
+  const first = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  const second = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    makeCtx(first.state)
+  );
+  const ids = (res) => res.items.filter((i) => i.meta?.messageKey).map((i) => i.id);
+  assert.deepEqual(ids(second), ids(first));
+});
+
+test("list-row receivedAt and detail createdAt hash to one message key", () => {
+  const subject = "Cycle 1 applications due on WaterlooWorks";
+  // The inbox row and the detail page report the same instant; a bare
+  // calendar day lands on it too.
+  const detail = messageKey(subject, "2026-09-25T16:01:00.000Z", NOW);
+  assert.equal(detail, messageKey(subject, "2026-09-25", NOW));
+  // Late-UTC instants still land on the same Toronto day.
+  assert.equal(detail, messageKey(subject, "2026-09-25T23:30:00.000Z", NOW));
+});
+
+test("a later inbox read replaces that message's derived items", async () => {
+  const ctx = makeCtx();
+  const detail = await adapter.observe.parse(
+    payload("message-detail-dates.html", `${WW}/messages.htm`, "net"),
+    ctx
+  );
+  assert.equal(detail.items.filter((i) => i.meta?.messageKey).length, 1);
+  // The inbox row for the same message (same subject/day -> same key)
+  // carries no body: its items are replaced with subject-only extraction.
+  const list = await adapter.observe.parse(
+    payload("messages.html", "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm", "net"),
+    makeCtx(detail.state)
+  );
+  assert.equal(list.items.filter((i) => i.meta?.messageKey).length, 0);
 });
 
 test("sync returns the cached picture with complete:false", async () => {

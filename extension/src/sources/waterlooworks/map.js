@@ -2,6 +2,8 @@
 // Parser rows/details -> contract objects (pure; no chrome APIs).
 
 import { itemId } from "../../core/contract.js";
+import { hashString } from "../../capture/redact.js";
+import { termCodeFor, zonedParts } from "../../lib/textdates/index.js";
 import { normalizeStatus } from "./status.js";
 import { SCOPE } from "./selectors.js";
 
@@ -275,6 +277,152 @@ export function postingItems(posting, now) {
       meta: { jobId: posting.jobId, division: posting.division },
     },
   ];
+}
+
+/** Message-date items are kept only when the hit clears this bar. */
+const MSG_MIN_CONFIDENCE = 0.6;
+/** Hits more than this far before the message's send time are past references. */
+const MSG_PAST_MS = DAY_MS;
+const SNIPPET_MAX = 300;
+const TITLE_MAX = 100;
+
+/** Normalize a message subject so list rows and detail pages hash alike. */
+const normalizeSubject = (subject) =>
+  String(subject || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * The Toronto calendar day (YYYY-MM-DD) of a send time. A bare "YYYY-MM-DD"
+ * input is already a calendar day; a timestamp is read in Toronto.
+ * @param {string|undefined} sentAt
+ * @param {Date} fallback
+ */
+function torontoDay(sentAt, fallback) {
+  if (typeof sentAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sentAt)) {
+    return sentAt;
+  }
+  const date = sentAt ? new Date(sentAt) : fallback;
+  const valid = date instanceof Date && !Number.isNaN(date.getTime()) ? date : fallback;
+  const p = zonedParts(valid);
+  return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
+}
+
+/**
+ * Stable per-message key. The inbox row's `receivedAt` and the detail page's
+ * `createdAt` are the same instant, so both hash to one key and the detail
+ * read replaces the list read's items rather than duplicating them.
+ * @param {string|undefined} subject
+ * @param {string|undefined} sentAt
+ * @param {Date} now  fallback when sentAt is missing/unparseable
+ */
+export function messageKey(subject, sentAt, now) {
+  return hashString(`${normalizeSubject(subject)}|${torontoDay(sentAt, now)}`);
+}
+
+/**
+ * The sentence of `text` containing the matched date (hit.index/hit.text),
+ * capped at SNIPPET_MAX chars. When the sentence itself overflows, keep a
+ * window centred on the match so the snippet still shows the date.
+ * @param {string} text
+ * @param {{index: number, text: string}} hit
+ */
+function snippetAround(text, hit) {
+  const start = hit.index;
+  const end = start + hit.text.length;
+  const before = text.slice(0, start);
+  const left =
+    Math.max(
+      before.lastIndexOf("."),
+      before.lastIndexOf("!"),
+      before.lastIndexOf("?"),
+      before.lastIndexOf("\n")
+    ) + 1;
+  const rest = /[.!?]/.exec(text.slice(end));
+  const right = rest ? end + rest.index + 1 : text.length;
+  let sentence = text.slice(left, right).replace(/\s+/g, " ").trim();
+  if (sentence.length > SNIPPET_MAX) {
+    const hitStart = Math.max(0, start - left);
+    const from = Math.max(
+      0,
+      Math.min(hitStart - Math.floor(SNIPPET_MAX / 2), sentence.length - SNIPPET_MAX)
+    );
+    sentence = sentence.slice(from, from + SNIPPET_MAX).trim();
+  }
+  return sentence.slice(0, SNIPPET_MAX);
+}
+
+/** First keyword match on subject + snippet decides the item type. */
+function messageType(subject, snippet) {
+  const text = `${subject || ""} ${snippet}`;
+  if (/interview/i.test(text)) return "interview";
+  if (/\b(rank|ranking|match|cycle|job postings?)\b/i.test(text)) return "cycle-date";
+  if (/\b(due|deadline|closes?|submit|by)\b/i.test(text)) return "deadline";
+  return "event";
+}
+
+/**
+ * Dates mentioned in a WaterlooWorks message -> pending Review items.
+ * `text` is transient (subject + body text); only the ≤300-char sentence that
+ * contains each matched date is stored, in `details` and `evidence.snippet`.
+ * @param {{subject?: string, sentAt?: string, text?: string, url?: string,
+ *   category?: string, employer?: string}} msg
+ * @param {(text: string, opts: {now: Date, termCode?: number, tz?: string}) => any[]} extractDates
+ *   ctx.textDates — the shared textdates extractor
+ * @param {string} nowIso
+ * @returns {Item[]}
+ */
+export function messageDateItems(msg, extractDates, nowIso) {
+  if (typeof extractDates !== "function" || !msg?.text) return [];
+  const now = new Date(nowIso);
+  const sent = msg.sentAt ? new Date(msg.sentAt) : null;
+  const ref = sent && !Number.isNaN(sent.getTime()) ? sent : now;
+  const hits = extractDates(msg.text, {
+    now: ref,
+    termCode: termCodeFor(ref),
+  });
+  const msgKey = messageKey(msg.subject, msg.sentAt, now);
+  const cutoff = ref.getTime() - MSG_PAST_MS;
+  const items = [];
+  for (const hit of hits || []) {
+    if (hit.confidence < MSG_MIN_CONFIDENCE) continue;
+    const startMs = Date.parse(hit.startAt);
+    if (Number.isNaN(startMs) || startMs < cutoff) continue;
+    const snippet = snippetAround(msg.text, hit);
+    const type = messageType(msg.subject, snippet);
+    const key = `msg:${msgKey}:${hit.startAt}`;
+    /** @type {Item} */
+    const item = {
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type,
+      title: String(msg.subject || "WaterlooWorks message").trim().slice(0, TITLE_MAX) ||
+        "WaterlooWorks message",
+      org: msg.employer || "WaterlooWorks",
+      url: msg.url || undefined,
+      status: "open",
+      confidence: "tentative",
+      review: "pending",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      details: snippet || undefined,
+      evidence: { snippet, url: msg.url || undefined, method: "text" },
+      meta: {
+        messageKey: msgKey,
+        category: msg.category || undefined,
+        weekdayMismatch: Boolean(hit.weekdayMismatch),
+      },
+    };
+    if (hit.allDay) {
+      item.startAt = hit.startAt;
+      item.allDay = true;
+      if (hit.endAt) item.endAt = hit.endAt; // exclusive midnight (textdates)
+    } else if (type === "deadline" || type === "cycle-date") {
+      item.dueAt = hit.startAt;
+    } else {
+      item.startAt = hit.startAt;
+      if (hit.endAt) item.endAt = hit.endAt;
+    }
+    items.push(item);
+  }
+  return items;
 }
 
 /**

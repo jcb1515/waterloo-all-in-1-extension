@@ -196,7 +196,7 @@ test("parseInterviewDetail reads an unbooked interview with open slots", () => {
 
 // --- message detail / rankings ------------------------------------------------
 
-test("parseMessageDetail keeps metadata but never the body", () => {
+test("parseMessageDetail keeps metadata; bodyText is transient only", () => {
   const detail = parsers.parseMessageDetail(doc("message-detail.html"));
   assert.equal(detail.ok, true);
   assert.equal(detail.subject, "Cycle 1 applications due on WaterlooWorks");
@@ -206,10 +206,20 @@ test("parseMessageDetail keeps metadata but never the body", () => {
   assert.equal(detail.createdAt, "2026-09-25T16:01:00.000Z");
   assert.equal(detail.linkedJobId, "488135");
   assert.equal(detail.linkedJobTitle, "Analog/Mixed-Signal Engineering Co-op");
+  // bodyText is returned for one-shot date extraction; the adapter must
+  // never persist it (asserted at the adapter level).
+  assert.match(detail.bodyText, /private and must never be stored/);
+  assert.ok(!detail.bodyText.includes("Priority")); // admin block excluded
   const serialized = JSON.stringify(detail);
-  assert.ok(!serialized.includes("confidential"));
   assert.ok(!serialized.includes("A Student")); // "To" never extracted
   assert.ok(!serialized.includes("Casey Advisor")); // "Created By" never extracted
+});
+
+test("parseMessageDetail bodyText is whitespace-collapsed plain text", () => {
+  const detail = parsers.parseMessageDetail(doc("message-detail-dates.html"));
+  assert.equal(detail.ok, true);
+  assert.match(detail.bodyText, /book your slot by Friday, October 2 at 4:00 PM/);
+  assert.match(detail.bodyText, /mentioned on September 10/);
 });
 
 test("parseRankings reads the closed state", () => {
