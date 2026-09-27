@@ -6,7 +6,7 @@
   no chrome, no storage.
 */
 
-import { extractDates } from "../../lib/textdates/index.js";
+import { extractDates, weekdayOf, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { CARD, GMAIL, OUTLOOK } from "./selectors.js";
 import {
   CARD_CUE_RE,
@@ -95,10 +95,66 @@ function linksOf(el) {
   return out;
 }
 
+const LABEL_MONTHS = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+const LABEL_WD = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+const toHour = (h, mer) => (h % 12) + (/p/i.test(String(mer || "")) ? 12 : 0);
+
+/**
+ * The short "received" labels mail lists show, resolved to Toronto wall time
+ * against `now`: "3:14 PM" (today), "Fri" / "Fri 4:34 PM" (the most recent
+ * such weekday, today only when its time is still ahead), "Sep 25" (this
+ * year, else last), "9/25/26" (M/D/Y, YY = 20YY). Anything else falls back to
+ * the textdates parse ("Thu, Oct 1, 2026, 3:14 PM"). Returns ISO or undefined.
+ * @param {string} text @param {Date|number|string} [now]
+ */
+export function parseListLabel(text, now = new Date()) {
+  const s = String(text || "").trim();
+  const d = now instanceof Date ? now : new Date(now || Date.now());
+  if (Number.isNaN(d.getTime())) return undefined;
+  const p = zonedParts(d);
+  /** @type {RegExpExecArray|null} */ let m;
+  // "3:14 PM" — today at that time.
+  if ((m = /^(\d{1,2}):(\d{2})\s*([AP])M$/i.exec(s))) {
+    return zonedIso(p.y, p.m, p.d, toHour(Number(m[1]), m[3]), Number(m[2]));
+  }
+  // "Fri" / "Fri 4:34 PM" — most recent such weekday.
+  if ((m = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?(\s+(\d{1,2}):(\d{2})\s*([AP])M)?$/i.exec(s))) {
+    const wd = LABEL_WD[m[1].slice(0, 3).toLowerCase()];
+    const hh = m[3] ? toHour(Number(m[3]), m[5]) : 0;
+    const mi = m[4] ? Number(m[4]) : 0;
+    let back = (weekdayOf(p.y, p.m, p.d) - wd + 7) % 7;
+    if (back === 0 && hh * 60 + mi > p.h * 60 + p.mi) back = 7;
+    const day = new Date(Date.UTC(p.y, p.m - 1, p.d - back));
+    return zonedIso(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), hh, mi);
+  }
+  // "Sep 25" — this year, or last year when it hasn't happened yet.
+  if ((m = /^([A-Z][a-z]{2,8})\.?\s+(\d{1,2})$/.exec(s))) {
+    const name = m[1].toLowerCase();
+    const mo = LABEL_MONTHS.findIndex((n) => n.startsWith(name));
+    if (mo >= 0) {
+      const dd = Number(m[2]);
+      const y = mo + 1 > p.m || (mo + 1 === p.m && dd > p.d) ? p.y - 1 : p.y;
+      return zonedIso(y, mo + 1, dd, 0, 0);
+    }
+  }
+  // "9/25/26" — US M/D/Y, two-digit year is 20YY.
+  if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(s))) {
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return zonedIso(y, Number(m[1]), Number(m[2]), 0, 0);
+  }
+  return undefined;
+}
+
 /** Parse a human date/time label ("Thu, Oct 1, 2026, 3:14 PM") Toronto-side. */
-function parseReceived(text) {
+function parseReceived(text, now) {
+  const short = parseListLabel(text, now);
+  if (short) return short;
   try {
-    const hits = extractDates(String(text || ""), { now: new Date() });
+    const hits = extractDates(String(text || ""), { now: now || new Date() });
     const h = hits.find((x) => x.confidence >= 0.5) || hits[0];
     return h ? h.startAt : undefined;
   } catch {
@@ -171,14 +227,15 @@ function inviteCard(doc, gmail) {
 /**
  * @param {any} doc
  * @param {string} href
+ * @param {{now?: Date}} [opts]
  * @returns {{v: 1, provider: "gmail"|"outlook", folder: string|null,
  *   view: "list"|"message"|"other", messages: Msg[]}}
  */
-export function extractFor(doc, href) {
+export function extractFor(doc, href, { now } = {}) {
   try {
     const host = new URL(href).hostname;
-    if (host === "mail.google.com") return gmailExtract(doc, href);
-    return outlookExtract(doc, href);
+    if (host === "mail.google.com") return gmailExtract(doc, href, now);
+    return outlookExtract(doc, href, now);
   } catch {
     return { v: 1, provider: "outlook", folder: null, view: "other", messages: [] };
   }
@@ -186,7 +243,7 @@ export function extractFor(doc, href) {
 
 /* ------------------------------ Gmail ------------------------------ */
 
-function gmailExtract(doc, href) {
+function gmailExtract(doc, href, now) {
   const u = new URL(href);
   const n = (u.pathname.match(/\/u\/(\d+)/) || [])[1] || "0";
   const segs = String(u.hash || "")
@@ -229,7 +286,7 @@ function gmailExtract(doc, href) {
         fromEmail: (senderEl && senderEl.getAttribute("email")) || "",
         subject,
         receivedText: receivedText || undefined,
-        receivedAt: parseReceived(receivedText),
+        receivedAt: parseReceived(receivedText, now),
         body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
@@ -266,7 +323,7 @@ function gmailExtract(doc, href) {
           .replace(/^\s*[-–—]+\s*/, "")
           .slice(0, PREVIEW_CAP) || undefined,
         receivedText: receivedText || undefined,
-        receivedAt: parseReceived(receivedText),
+        receivedAt: parseReceived(receivedText, now),
         links: [],
       });
     }
@@ -278,7 +335,7 @@ function gmailExtract(doc, href) {
 
 const TIME_LINE = /^\d{1,2}:\d{2}\s*[AP]M$|^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b|^\d{4}-\d{2}-\d{2}$/i;
 
-function outlookExtract(doc, href) {
+function outlookExtract(doc, href, now) {
   const u = new URL(href);
   const segs = u.pathname.split("/").filter(Boolean);
   let rest = segs.slice(segs.indexOf("mail") + 1);
@@ -317,7 +374,7 @@ function outlookExtract(doc, href) {
         fromEmail: (senderEl && senderEl.getAttribute("title")) || "",
         subject: textOf(main.querySelector(OUTLOOK.heading)),
         receivedText: receivedText || undefined,
-        receivedAt: parseReceived(receivedText),
+        receivedAt: parseReceived(receivedText, now),
         body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
@@ -354,7 +411,7 @@ function outlookExtract(doc, href) {
         subject,
         preview: rest2.join(" ").slice(0, PREVIEW_CAP) || undefined,
         receivedText: time || undefined,
-        receivedAt: parseReceived(time),
+        receivedAt: parseReceived(time, now),
         links: linksOf(row),
       });
     }

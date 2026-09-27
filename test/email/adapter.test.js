@@ -12,7 +12,7 @@ import adapter, {
   startMailScan,
   stopMailScan,
 } from "../../extension/src/sources/email/index.js";
-import { extractFor } from "../../extension/src/sources/email/dom.js";
+import { extractFor, parseListLabel } from "../../extension/src/sources/email/dom.js";
 import { itemsFromMessage } from "../../extension/src/sources/email/extract.js";
 import {
   GMAIL_SCAN_QUERY,
@@ -464,6 +464,118 @@ test("DOM: outlook list and message views", () => {
   assert.match(m.body || "", /When: Thursday, October 15, 2026/);
   assert.deepEqual(m.links, ["https://teams.microsoft.com/l/meetup-join/19%3ameeting_x"]);
   assert.ok(m.receivedAt);
+});
+
+test("bulk senders produce nothing unless they pass the gate", () => {
+  // Newsletter: boilerplate footer marks it bulk even though the date line
+  // carries the "info session" keyword.
+  const news = items(
+    msg({
+      from: "Club News",
+      fromEmail: "news@club.example.org",
+      subject: "September newsletter",
+      body: "Our info session is on October 9 at 6 PM.\nUnsubscribe from these emails.",
+    }),
+  );
+  assert.deepEqual(news, []);
+
+  // A no-reply sender is bulk on its local part alone.
+  const noreply = items(
+    msg({
+      from: "Shop",
+      fromEmail: "no-reply@shop.example.com",
+      subject: "Your receipt",
+      body: "Your pickup window is October 9 at 6 PM.",
+    }),
+  );
+  assert.deepEqual(noreply, []);
+
+  // ...but a gated bulk sender (Learn's noreply) still produces items.
+  const [learn] = items(
+    msg({
+      from: "LEARN",
+      fromEmail: "noreply@learn.uwaterloo.ca",
+      subject: "Quiz reminder",
+      body: "Quiz 3 is due October 9 at 11:59 PM.",
+    }),
+  );
+  assert.equal(learn.type, "deadline");
+  assert.equal(learn.dueAt, "2026-10-10T03:59:00.000Z");
+});
+
+test("a sender matching a WaterlooWorks application is an employer", () => {
+  const [i] = items(
+    msg({
+      from: "Talent Team",
+      fromEmail: "talent@acme.com",
+      subject: "Next steps",
+      body: "Can we set up a call on October 8 at 2:00 PM?",
+    }),
+    {
+      applications: [
+        { employer: "Acme Corp", jobTitle: "Firmware Co-op", jobId: "400001", status: "applied" },
+      ],
+    },
+  );
+  assert.equal(i.type, "interview");
+  assert.equal(i.startAt, "2026-10-08T18:00:00.000Z");
+  assert.equal(i.org, "Acme Corp");
+  assert.equal(i.meta.employer, "Acme Corp");
+  assert.equal(i.meta.jobId, "400001");
+});
+
+test("a recruiter at a personal domain is named, not 'gmail'", () => {
+  const [i] = items(
+    msg({
+      from: "Sam Lee",
+      fromEmail: "sam.recruits@gmail.com",
+      subject: "Following up",
+      body: "Hi, I'm a recruiter at Acme. Are you available for a phone screen on Thursday, October 8 at 2:00 PM?",
+    }),
+  );
+  assert.equal(i.type, "interview");
+  assert.equal(i.startAt, "2026-10-08T18:00:00.000Z");
+  assert.equal(i.review, "pending");
+  assert.equal(i.meta.employer, "Sam Lee");
+});
+
+test("bare-hour meet-up in casual text -> pending meeting at PM", () => {
+  const [i] = items(
+    msg({
+      from: "Alex Kim",
+      fromEmail: "alex@robotics.example.org",
+      subject: "Robotics",
+      body: "Hey, can we meet Thursday at 2?",
+      receivedAt: "2026-09-29T15:00:00.000Z",
+    }),
+  );
+  assert.equal(i.type, "meeting");
+  assert.equal(i.startAt, "2026-10-01T18:00:00.000Z");
+  assert.equal(i.review, "pending");
+});
+
+test("parseListLabel resolves short mail labels against now", () => {
+  const now = new Date("2026-09-29T20:00:00.000Z"); // Tuesday, 4 PM EDT
+  assert.equal(parseListLabel("3:14 PM", now), "2026-09-29T19:14:00.000Z");
+  assert.equal(parseListLabel("Fri 4:34 PM", now), "2026-09-25T20:34:00.000Z");
+  assert.equal(parseListLabel("Fri", now), "2026-09-25T04:00:00.000Z");
+  assert.equal(parseListLabel("Sep 25", now), "2026-09-25T04:00:00.000Z");
+  assert.equal(parseListLabel("Dec 30", now), "2025-12-30T05:00:00.000Z");
+  assert.equal(parseListLabel("9/25/26", now), "2026-09-25T04:00:00.000Z");
+});
+
+test("a list row's label date anchors relative dates in the preview", () => {
+  const [i] = items(
+    msg({
+      from: "Alex Kim",
+      fromEmail: "alex@robotics.example.org",
+      subject: "Robotics",
+      preview: "can we meet tomorrow at 3pm?",
+      receivedAt: "2026-09-25T04:00:00.000Z", // the "Sep 25" label
+    }),
+  );
+  assert.equal(i.type, "meeting");
+  assert.equal(i.startAt, "2026-09-26T19:00:00.000Z"); // tomorrow = Sep 26, not now
 });
 
 test("email sources contain no forbidden APIs", () => {

@@ -144,6 +144,7 @@ const adapter = {
               textDates: ctx.textDates || extractDates,
               courses: ctx.courses || [],
               settings,
+              applications: /** @type {any} */ (ctx).applications,
               at,
             }),
           );

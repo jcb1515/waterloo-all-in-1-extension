@@ -13,13 +13,17 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
   and a MutationObserver debounced to 2s. Sends `MSG.OBSERVED` with
   `{source, kind: "dom", url, body: JSON.stringify(extract), at}` only when
   the extract has messages, deduped by body, capped at 2 MB, `.catch`-ed.
-- `dom.js` — `extractFor(doc, href)` → `{v, provider, folder, view, messages}`,
-  one per host. `Msg = {key, url, from, fromEmail, subject, preview?,
-  receivedText?, receivedAt?, body?, links}`. Bodies exist only in message
-  view (≤20,000 chars, `<br>`/block boundaries → `\n`), previews ≤200 chars,
-  `receivedAt` = ISO Toronto from a title/text parse (omitted on failure),
-  `links` = Teams/Zoom/Meet/WaterlooWorks hrefs with Google `url?q=` wrappers
-  unwrapped.
+- `dom.js` — `extractFor(doc, href, {now})` → `{v, provider, folder, view,
+  messages}`, one per host. `Msg = {key, url, from, fromEmail, subject,
+  preview?, receivedText?, receivedAt?, body?, links}`. Bodies exist only in
+  message view (≤20,000 chars, `<br>`/block boundaries → `\n`), previews ≤200
+  chars, `links` = Teams/Zoom/Meet/WaterlooWorks hrefs with Google `url?q=`
+  wrappers unwrapped. `receivedAt` = ISO Toronto from `parseListLabel`
+  (short mail labels: `"3:14 PM"` → today, `"Fri [4:34 PM]"` → the most
+  recent such weekday, `"Sep 25"` → this year else last, `"9/25/26"` → M/D/Y
+  with YY = 20YY) against the extract's `now`, falling back to the textdates
+  parse for full labels — so "tomorrow at 3pm" in a week-old row resolves
+  against its received date, not the machine clock.
 - `rules.js` + `extract.js` — `itemsFromMessage(msg, …)` (pure):
   - **Invites → exact items.** Checked in order: the rendered **invite card**
     (`msg.invite`, when the client drew the RSVP card whose date Gmail/Outlook
@@ -36,24 +40,49 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
       key, so an Invitation / Updated invitation / reminder / forward / the
       matching Canceled event of the same meeting collapse to one item; a
       cancellation lands as `status "cancelled"` and the publisher drops it.
-    - `meta.employer` = sender domain label (e.g. `acme`) on interviews and
-      co-op mail, so core can link the item to a WaterlooWorks application.
+    - `meta.employer` = `employerOf(fromEmail, fromName)`: the sender domain
+      label (e.g. `acme`), or — on a personal domain (gmail, outlook,
+      yahoo, icloud, proton, …) — the cleaned display name ("Sam Lee"),
+      never `"gmail"`. Set on interviews and co-op mail so core can link the
+      item to a WaterlooWorks application.
     - Gmail invite items get `meta.onCalendar = "google"`: Google already puts
       Gmail invitations on the user's Google Calendar, so the publisher skips
       them (opt back in with `settings.gmailInvitesToFeed: true`).
-  - **Important mail → review items.** Sender gate: WaterlooWorks/co-op,
+  - **Important mail → review items.** A message qualifies when
+    `gate.ok || !isBulk(msg)`: `senderGate` covers WaterlooWorks/co-op,
     Learn, a `courses[].instructors[].email` match, a course code in the
-    subject, or `settings.teams`/`settings.senders` substrings — OR a keyword
-    in the subject. Keyword set: interview, offer, rank(ing), deadline, due,
-    extension, midterm, exam, room change, cance(l)led, rescheduled, meeting,
-    tapeout, design review, rsvp, invited, invitation, register, registration,
-    event ∪ `settings.keywords`. Date hits come from
-    `textDates(subject + "\n" + body|preview)`, confidence ≥0.6, not ended
-    before `receivedAt − 1d`, and inside a keyword sentence; max 3 per
-    message, one per Toronto day. Type maps off the keyword (interview,
-    offer-deadline, cycle-date, exam, meeting, deadline, else event); timed
-    hits give `startAt`/`endAt` or `dueAt` (all-day deadline → 23:59 ET).
-    Always `tentative`/`pending`; `id = <provider>:mail:<key>:<instant>`.
+    subject, `settings.teams`/`settings.senders` substrings, and — via
+    `ctx.applications` (array or id-keyed map of
+    `{employer, jobTitle, jobId, status}`) — an employer match
+    (`titleSimilarity(employer, display-name-or-domain-label) >= 0.6`, or a
+    ≥4-char domain label equal to an employer token →
+    `{ok, coop, employer, jobId}`; items then carry `org = employer`,
+    `meta.employer`, `meta.jobId`). `isBulk` is a no-reply/newsletter-style
+    local part or footer boilerplate (`unsubscribe`, `view … in browser`,
+    `manage … preferences`); bulk + ungated → `[]`, so a newsletter's own
+    dates never reach the calendar while `noreply@learn.uwaterloo.ca` still
+    does. The old subject-keyword requirement is gone — a date's *sentence*
+    must still contain a keyword. Keyword set: interview, offer, rank(ing),
+    deadline, due, extension, midterm, exam, room change, cance(l)led,
+    rescheduled, meeting, tapeout, design review, rsvp, invited, invitation,
+    register, registration, event, meet, call, phone (screen), chat, coffee
+    chat, sync, catch up, availab(le|ility), (re)schedule, office hours,
+    info session, workshop, assessment, coding/online assessment, hirevue,
+    onsite, zoom, teams/google meet, calendly, book, confirm, reminder,
+    action required, plus case-sensitive `\bOA\b` ∪ `settings.keywords`.
+    Date hits come from `textDates(subject + "\n" + body|preview)`,
+    confidence ≥0.6, not ended before `receivedAt − 1d`; max 3 per message,
+    one per Toronto day. `TYPE_RULES` order: interview (interview|phone
+    screen|screen(ing)|hirevue|onsite) → offer-deadline → cycle-date →
+    rsvp/register-by deadline → assessment (online assessment|coding
+    challenge|`\bassessment\b`|`\bOA\b` → deadline + `category
+    "assessment"`) → exam → meeting (meet(ing)|call|phone|chat|coffee|sync|
+    catch up|zoom|teams/google meet|design review|tapeout|availab|
+    (re)schedul; promoted to `interview` when the gate is co-op/employer or
+    the subject says interview|screen) → event (office hours|info session|
+    workshop) → deadline (due|deadline|extension) → event. Timed hits give
+    `startAt`/`endAt` or `dueAt` (all-day deadline → 23:59 ET). Always
+    `tentative`/`pending`; `id = <provider>:mail:<key>:<instant>`.
     `exam` items take the outline/Portal titles ("Midterm"/"Final exam" when
     `classify` finds one in the sentence or subject) plus
     `details = "Email: " + cleanedSubject`, so they merge with the real exam.
@@ -151,6 +180,11 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   `data-folder-name` else the `/mail/` path (skip `0`).
 - Link keep-list: `teams.microsoft.com/l/meetup-join`, `zoom.us/j/`,
   `meet.google.com/`, `waterlooworks.uwaterloo.ca`.
+- Bulk/gate regexes: the `no-?reply|do-?not-?reply|notifications?|
+  newsletters?` local part, the `unsubscribe|view … in browser|manage …
+  preferences` footer set, `PERSONAL_DOMAINS`, the case-sensitive `\bOA\b`,
+  the `titleSimilarity >= 0.6` employer threshold, and `parseListLabel`'s
+  label formats + "this year else last" year pick.
 - Outlook message views may contain more than one `[data-convid]` doc (e.g.
   a thread pane); the single-key rule in `index.js` then falls back to the
   list scope rather than over-removing.

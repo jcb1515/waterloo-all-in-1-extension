@@ -14,7 +14,9 @@ import {
   EASTERN_TZ,
   employerOf,
   GCAL_INVITE_RE,
+  isBulk,
   isCoopSender,
+  keywordOf,
   keywordRe,
   mailType,
   MEET_LINK,
@@ -43,10 +45,10 @@ const torontoDay = (iso) => {
  * @param {Msg} msg
  * @param {{provider?: "gmail"|"outlook", now?: Date, termCode?: number,
  *   textDates?: any, courses?: any[], settings?: Record<string, any>,
- *   at?: string}} opts
+ *   applications?: any, at?: string}} opts
  * @returns {Item[]}
  */
-export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textDates, courses = [], settings = {}, at } = {}) {
+export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textDates, courses = [], settings = {}, applications, at } = {}) {
   const td = textDates || extractDates;
   const ref = msg.receivedAt ? new Date(msg.receivedAt) : now || new Date();
   const when = ref.toISOString();
@@ -102,7 +104,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
       // forward, Canceled event) collapses to one id; a cancellation lands as
       // status "cancelled" and the publisher drops it.
       const id = `${provider}:invite:${slug(title)}:${hit.startAt}`;
-      const employer = interview || coopSender ? employerOf(msg.fromEmail) : undefined;
+      const employer = interview || coopSender ? employerOf(msg.fromEmail, msg.from) : undefined;
       // Gmail invitations already appear on the user's Google Calendar —
       // publishing them again would duplicate the event (opt back in with
       // settings.gmailInvitesToFeed).
@@ -141,9 +143,9 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
 
   /* ---- 2. important mail -> Review items ---- */
   const kwRe = keywordRe(settings.keywords);
-  const gate = senderGate(msg, { courses, settings });
-  const subjectKw = subject.match(kwRe);
-  if (!gate.ok && !subjectKw) return [];
+  const gate = senderGate(msg, { courses, settings, applications });
+  // A non-bulk human sender qualifies on its own; bulk mail needs the gate.
+  if (!gate.ok && isBulk(msg)) return [];
 
   const text = `${subject}\n${body || msg.preview || ""}`;
   const floor = ref.getTime() - DAY_MS;
@@ -157,26 +159,33 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     if (good.length >= MAX_HITS) break;
     if (Date.parse(h.endAt || h.startAt) < floor) continue;
     const sentence = sentenceOf(text, h.index, h.text.length);
-    const km = sentence.match(kwRe);
-    if (!km) continue;
+    const kw = keywordOf(sentence, kwRe);
+    if (!kw) continue;
     const day = torontoDay(h.startAt);
     if (days.has(day)) continue;
     days.add(day);
-    good.push({ h, sentence, kw: km[0] });
+    good.push({ h, sentence, kw });
   }
   if (!good.length) return [];
 
   const coop = gate.coop || isCoopSender(msg);
-  const employer = employerOf(msg.fromEmail);
+  const employer = employerOf(msg.fromEmail, msg.from);
   const title = cleanSubject(subject);
   /** @type {Item[]} */
   const items = [];
   for (const { h, sentence, kw } of good) {
-    const type = mailType(sentence);
+    const rule = mailType(sentence);
+    // A meeting from a co-op/employer sender, or about an interview/screen,
+    // is an interview.
+    const type =
+      rule.type === "meeting" && (gate.coop || /interview|screen/i.test(subject))
+        ? "interview"
+        : rule.type;
     const isDeadline = DEADLINE_TYPES.has(type);
     const iso = isDeadline ? (h.allDay ? dueEndOfDay(h.startAt) : h.startAt) : h.startAt;
     const id = `${provider}:mail:${msg.key}:${iso}`;
-    const org = gate.course || gate.team || (coop || type === "interview" ? employer : undefined);
+    const emp = gate.employer || (coop || type === "interview" ? employer : undefined);
+    const org = gate.course || gate.team || emp;
     // Exam mail uses the titles outline/Portal emit ("Midterm"/"Final exam")
     // so the same exam merges into one calendar event; the subject stays in
     // details. Other types keep the cleaned subject as the title.
@@ -194,6 +203,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
       id,
       source: provider,
       type: /** @type {Item["type"]} */ (type),
+      category: rule.category,
       title: itemTitle,
       details,
       org,
@@ -207,7 +217,8 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
         messageKey: msg.key,
         messageUrl: msg.url,
         fromName: msg.from,
-        employer: coop || type === "interview" ? employer : undefined,
+        employer: emp,
+        ...(gate.jobId ? { jobId: gate.jobId } : {}),
         keyword: kw,
         facts: factsOf([["From", msg.from]]),
       },
