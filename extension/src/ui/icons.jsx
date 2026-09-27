@@ -289,6 +289,21 @@ export const ShieldIcon = (p) => (
   </Svg>
 );
 
+export const MessageSquareIcon = (p) => (
+  <Svg {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </Svg>
+);
+
+export const RepeatIcon = (p) => (
+  <Svg {...p}>
+    <path d="m17 2 4 4-4 4" />
+    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+    <path d="m7 22-4-4 4-4" />
+    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+  </Svg>
+);
+
 export const DatabaseIcon = (p) => (
   <Svg {...p}>
     <ellipse cx="12" cy="5" rx="9" ry="3" />

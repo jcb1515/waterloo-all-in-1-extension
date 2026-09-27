@@ -208,13 +208,75 @@ export function previewState(nowD = new Date(), variants = {}) {
   add("discord:wato-electrical-sync", {
     source: "discord",
     type: "meeting",
-    title: "WATonomous — Electrical sync",
+    title: "Electrical sync (weekly)",
     org: "WATonomous",
     startAt: dayAt(nowD, 1, 19, 0),
     endAt: dayAt(nowD, 1, 19, 45),
     location: "#electrical",
     confidence: "exact",
+    meta: {
+      guildId: "9102",
+      channelId: "9912",
+      recurrence: { freq: "WEEKLY", byDay: "MO", time: "19:00", tz: "America/Toronto", weeks: 4 },
+      facts: [
+        { label: "Server", value: "WATonomous" },
+        { label: "Pattern", value: "Weekly, Mon 19:00" },
+      ],
+    },
     seenIn: seen("discord", "wato-sync", "channel:electrical", today),
+  });
+  add("discord:wato-pcb-review", {
+    source: "discord",
+    type: "task",
+    title: "Review the power board schematic",
+    org: "WATonomous",
+    dueAt: dayAt(nowD, 2, 23, 59),
+    meta: {
+      guildId: "9102",
+      channelId: "9912",
+      assignedToMe: true,
+      facts: [{ label: "Assigned to you", value: "Yes" }],
+    },
+    url: "https://discord.com/channels/9102/9912/88214",
+    seenIn: seen("discord", "wato-pcb", "channel:electrical", today),
+  });
+  add("discord:wato-firmware-deadline", {
+    source: "discord",
+    type: "deadline",
+    title: "Firmware freeze for demo day",
+    org: "WATonomous",
+    dueAt: dayAt(nowD, 5, 20, 0),
+    url: "https://discord.com/channels/9102/9912/88310",
+    seenIn: seen("discord", "wato-freeze", "channel:electrical", today),
+  });
+  add("discord:wato-standup-pending", {
+    source: "discord",
+    type: "meeting",
+    title: "Standup (weekly)",
+    org: "WATonomous",
+    startAt: nextWeekday(nowD, 4, 9, 30),
+    endAt: nextWeekday(nowD, 4, 9, 45),
+    confidence: "tentative",
+    review: "pending",
+    meta: {
+      guildId: "9102",
+      recurrence: { freq: "WEEKLY", byDay: "TH", time: "09:30", tz: "America/Toronto", weeks: 3 },
+      facts: [{ label: "Pattern", value: "Weekly, Thu 09:30" }],
+    },
+    seenIn: seen("discord", "wato-standup", "channel:general", today),
+  });
+  add("discord:ece2027-design-review", {
+    source: "discord",
+    type: "meeting",
+    title: "ECE 2027 — design review",
+    org: "ECE 2027",
+    startAt: dayAt(nowD, 3, 17, 0),
+    endAt: dayAt(nowD, 3, 18, 0),
+    location: "#meetings",
+    confidence: "exact",
+    meta: { guildId: "8804", channelId: "9913" },
+    url: "https://discord.com/channels/8804/9913/88402",
+    seenIn: seen("discord", "ece2027-review", "channel:meetings", today),
   });
   add("portal:exams:MATH117", {
     source: "portal",
@@ -353,8 +415,33 @@ export function previewState(nowD = new Date(), variants = {}) {
     seenIn: seen("learn", "106:news:12", "106:news", today),
   });
 
+  add("manual:capstone-demo", {
+    source: "manual",
+    type: "deadline",
+    title: "Capstone demo poster",
+    org: "ECE 198",
+    dueAt: dayAt(nowD, 6, 23, 59),
+    allDay: true,
+    confidence: "exact",
+    review: "auto",
+    evidence: { method: "manual" },
+    seenIn: seen("manual", "capstone-demo", "manual", today),
+  });
+
   const userState = {
     "learn:math115-asn4": { done: true, doneAt: iso(now - 30 * HOUR) },
+    "learn:ece105-quiz3": {
+      estimateMin: 90,
+      notes: "Review Thevenin equivalents and the 2024 practice quiz.",
+      subtasks: [
+        { text: "Redo practice problems 4.1–4.6", done: true },
+        { text: "Memorise the formula sheet", done: false },
+      ],
+    },
+    "learn:ece150-project1": { estimateMin: 180 },
+    "learn:ece190-deliverable1": { estimateMin: 45 },
+    "learn:math115-asn5": { snoozedUntil: nextWeekday(nowD, 1, 8, 0) },
+    "manual:capstone-demo": { hidden: true },
   };
 
   const sourceState = {

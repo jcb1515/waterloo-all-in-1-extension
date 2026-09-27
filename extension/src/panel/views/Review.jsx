@@ -214,13 +214,17 @@ function ReviewCard({ item, now, termCode, editing, onEdit, actions }) {
 }
 
 /**
- * @param {{state: any, actions: any, now: Date, onBack: () => void}} props
+ * @param {{state: any, actions: any, now: Date, onBack: () => void,
+ *   org?: string|null}} props
  */
-export function Review({ state, actions, now }) {
-  const { upcoming, past } = useMemo(
-    () => pendingReviewItems(state.items, state.userState, now),
-    [state.items, state.userState, now]
-  );
+export function Review({ state, actions, now, org }) {
+  const { upcoming, past } = useMemo(() => {
+    const res = pendingReviewItems(state.items, state.userState, now);
+    if (!org) return res;
+    const want = String(org).toLowerCase();
+    const match = (it) => String(it.org || "").toLowerCase() === want;
+    return { upcoming: res.upcoming.filter(match), past: res.past.filter(match) };
+  }, [state.items, state.userState, now, org]);
   const [editingId, setEditingId] = useState(() => (query0("edit") ? "first" : null));
   const [pastOpen, setPastOpen] = useState(false);
   const termCode = state.settings && state.settings.termCode;
@@ -239,6 +243,11 @@ export function Review({ state, actions, now }) {
 
   return (
     <div class="review">
+      {org ? (
+        <p class="help">
+          Filtered to <strong>{org}</strong>
+        </p>
+      ) : null}
       {total === 0 ? (
         <div class="card empty-card">
           <InboxIcon size={20} />

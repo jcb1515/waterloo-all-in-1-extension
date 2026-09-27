@@ -17,12 +17,14 @@ import { Review } from "./views/Review.jsx";
 import { Updates } from "./views/Updates.jsx";
 import { ItemSheet } from "./views/ItemSheet.jsx";
 import { QuickAdd } from "./views/QuickAdd.jsx";
+import { Teams } from "./views/Teams.jsx";
 
 const TABS = [
   ["agenda", "Agenda"],
   ["calendar", "Calendar"],
   ["coop", "Co-op"],
   ["courses", "Courses"],
+  ["teams", "Teams"],
 ];
 
 const OVERLAY_TITLES = {
@@ -62,6 +64,7 @@ export function App() {
   });
   const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [qaEditId, setQaEditId] = useState(() => null);
+  const [reviewOrg, setReviewOrg] = useState(() => query.get("org"));
   const [overlay, setOverlay] = useState(() => {
     if (query.get("item")) return "item";
     if (query.get("quickadd")) return "quickadd";
@@ -106,6 +109,11 @@ export function App() {
         setQaEditId(item && item.id ? item.id : null);
         setOverlay("quickadd");
       },
+      /** Open the Review overlay filtered to one org (Teams "Needs review"). */
+      openReviewOrg(org) {
+        setReviewOrg(org || null);
+        setOverlay("review");
+      },
     }),
     [state.actions]
   );
@@ -143,7 +151,7 @@ export function App() {
         setOverlay(null);
         return;
       }
-      const digit = ["1", "2", "3", "4"].indexOf(e.key);
+      const digit = ["1", "2", "3", "4", "5"].indexOf(e.key);
       if (digit >= 0 && digit < TABS.length) {
         setOverlay(null);
         setTab(TABS[digit][0]);
@@ -225,7 +233,14 @@ export function App() {
             class="btn-icon has-badge"
             aria-label={`Review — ${reviewCount} pending`}
             title={`Review (${reviewCount})`}
-            onClick={() => setOverlay(overlay === "review" ? null : "review")}
+            onClick={() => {
+              if (overlay === "review") {
+                setOverlay(null);
+              } else {
+                setReviewOrg(null);
+                setOverlay("review");
+              }
+            }}
           >
             <InboxIcon size={17} />
             {reviewCount ? <span class="icon-badge">{reviewCount}</span> : null}
@@ -277,7 +292,13 @@ export function App() {
       <main class="panel-body" role="tabpanel">
         {syncing ? <span class="sr-only" role="status">Syncing sources…</span> : null}
         {overlay === "review" ? (
-          <Review state={state} actions={actions} now={now} onBack={() => setOverlay(null)} />
+          <Review
+            state={state}
+            actions={actions}
+            now={now}
+            org={reviewOrg}
+            onBack={() => setOverlay(null)}
+          />
         ) : overlay === "item" && sheetId ? (
           <ItemSheet
             state={state}
@@ -314,6 +335,13 @@ export function App() {
           <CalendarView state={state} actions={actions} now={now} />
         ) : tab === "coop" ? (
           <Coop state={state} actions={actions} now={now} />
+        ) : tab === "teams" ? (
+          <Teams
+            state={state}
+            actions={actions}
+            now={now}
+            onOpenReview={(org) => actions.openReviewOrg(org)}
+          />
         ) : (
           <Courses state={state} actions={actions} now={now} />
         )}
