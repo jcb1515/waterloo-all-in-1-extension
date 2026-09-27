@@ -64,6 +64,21 @@ export function normalizeRestBody(url, bodyText) {
     out.messages = (Array.isArray(list) ? list : [])
       .map((row) => row?.message || row)
       .filter(Boolean);
+  } else if (kind === "rsvps") {
+    // GET /users/@me/scheduled-events — the events the user has RSVP'd to.
+    // Only the event ids are kept; nothing else in the payload is read.
+    const list = Array.isArray(body)
+      ? body
+      : Array.isArray(body?.scheduled_events)
+        ? body.scheduled_events
+        : [];
+    out.eventIds = list
+      .map((e) =>
+        String(
+          e?.guild_scheduled_event_id || e?.guild_scheduled_event?.id || e?.id || ""
+        )
+      )
+      .filter(Boolean);
   } else if (kind === "search") {
     const groups = Array.isArray(body?.messages) ? body.messages : [];
     for (const group of groups) {

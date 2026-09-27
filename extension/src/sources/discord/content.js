@@ -11,7 +11,12 @@
 //     background; they are never persisted beyond snippets.
 
 import { MSG } from "../../core/contract.js";
-import { readLocation, inventoryExtract, readMessages } from "./dom.js";
+import {
+  readLocation,
+  inventoryExtract,
+  readMessages,
+  eventsModalExtract,
+} from "./dom.js";
 import { hashString } from "../../capture/redact.js";
 
 (() => {
@@ -22,6 +27,8 @@ import { hashString } from "../../capture/redact.js";
   const SEEN_CAP = 2000;
   /** @type {string|null} */
   let lastInventoryHash = null;
+  /** @type {string|null} */
+  let lastEventsHash = null;
   /** messageId:contentHash pairs already sent (oldest dropped at cap). */
   const seenMessages = new Set();
   /** @type {number|undefined} */
@@ -48,6 +55,19 @@ import { hashString } from "../../capture/redact.js";
     try {
       const loc = readLocation(location.href);
       if (!loc) return;
+
+      // Scheduled events arrive over the gateway — the network recorder
+      // never sees them — so the Events modal is read straight from the
+      // DOM whenever one is open (list view = "N Events", detail view =
+      // "Event Info" tab). TODO(events): markup is best-guess, see dom.js.
+      const ev = eventsModalExtract(document, location.href);
+      if (ev) {
+        const evHash = hashString(JSON.stringify(ev.cards));
+        if (evHash !== lastEventsHash) {
+          lastEventsHash = evHash;
+          send(ev);
+        }
+      }
 
       // DM views: report where we are, never what's said.
       if (loc.guildId === "@me") {
@@ -77,9 +97,6 @@ import { hashString } from "../../capture/redact.js";
       if (fresh.length) {
         send({ v: 1, type: "messages", location: loc, messages: fresh });
       }
-
-      // TODO(events): when a scheduled-events modal extract exists, send
-      // {v:1, type:"events", location, events} here.
     } catch {
       // Discord's DOM is hostile territory — a miss must stay silent.
     }

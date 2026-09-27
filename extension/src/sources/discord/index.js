@@ -34,6 +34,7 @@ import {
 } from "./messages.js";
 import { inferIdentity } from "./identity.js";
 import { meetingKey, textWeeklyHint, recurringSuggestions } from "./recurring.js";
+import { parseEventsExtract } from "./events.js";
 
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 /** @typedef {import("../../core/contract.js").ObservedPayload} ObservedPayload */
@@ -44,6 +45,9 @@ const MSG_CAP = 600;
 const DM_CAP = 500;
 const MEETING_LOG_CAP = 300;
 const MEETING_LOG_AGE_DAYS = 120;
+const RSVP_CAP = 500;
+/** Event occurrences whose anchor is this far past are dropped. */
+const EVENT_STALE_MS = DAY_MS;
 /** Items in a channel the inventory hasn't mapped yet expire quickly. */
 const UNMAPPED_AGE_DAYS = 2;
 
@@ -366,10 +370,29 @@ function outputItems(state, settings, nowMs, nowIso) {
       meta: { ...item.meta, guildId },
     });
   }
+  // Scheduled events (from the Events modal extracts) — watched guilds
+  // only. Each series' weekday/time is recorded so a message-derived
+  // recurring suggestion on the same slot is suppressed (the event item
+  // already covers it; same-source dupes never merge in the core).
+  const eventSlots = new Set();
+  for (const [guildId, rec] of Object.entries(state.lastGood?.events || {})) {
+    const srv = watched[guildId];
+    if (!srv) continue;
+    for (const ev of rec.items || []) {
+      const r = ev?.meta?.recurrence;
+      if (r?.byDay && r?.time) {
+        eventSlots.add(`${guildId}|${r.byDay}|${r.time}`);
+      }
+      items.push({ ...ev, org: srv.team || ev.org });
+    }
+  }
   const recurring = recurringSuggestions(state.meetingLog || [], {
     nowMs,
     nowIso,
     teamOf: (gid) => watched[gid]?.team,
+  }).filter((s) => {
+    const r = s?.meta?.recurrence;
+    return !(r && eventSlots.has(`${s.meta?.guildId}|${r.byDay}|${r.time}`));
   });
   return items.concat(recurring);
 }
@@ -575,6 +598,14 @@ export default {
         if (norm.kind === "mentions") {
           state.identity = inferIdentity(prev.identity, norm.messages, settings);
         }
+        if (norm.kind === "rsvps") {
+          // The @me/scheduled-events read lists events the user marked
+          // Interested — event ids only, so eventRef lookups outrank the
+          // DOM Interested-button heuristic.
+          const set = new Set(state.rsvps || []);
+          for (const id of norm.eventIds || []) set.add(String(id));
+          state.rsvps = [...set].slice(-RSVP_CAP);
+        }
         if (norm.kind === "channel" && norm.channelId) {
           // A history read after the sweep started closes that channel.
           if (!state.sweep) state.sweep = { startedAt: payload.at, done: {} };
@@ -679,8 +710,46 @@ export default {
             );
           }
         }
-        // TODO(events): extract.type === "events" folds scheduled-event
-        // occurrences into state.meetingLog here (see recurring.js/dom.js).
+        else if (extract.type === "events") {
+          // Scheduled-events modal: a list read replaces the guild's event
+          // set wholesale (it's the full list); a detail read replaces
+          // only the series it shows.
+          const guildId = String(loc.guildId || "");
+          if (guildId && guildId !== "@me") {
+            const guild = state.guilds?.[guildId];
+            const cfg = watchConfig(
+              extract.guildName || guild?.name || "",
+              settings.watched
+            );
+            const fresh = parseEventsExtract(extract, {
+              now: nowMs,
+              nowIso,
+              guildId,
+              team: cfg?.team || extract.guildName,
+              rsvps: state.rsvps || [],
+            });
+            const evState = { ...(state.lastGood.events || {}) };
+            const prev = evState[guildId]?.items || [];
+            let merged;
+            if (extract.modal === "list") {
+              merged = fresh; // full guild list — replace wholesale
+            } else {
+              const touched = new Set(fresh.map((i) => i.meta?.series));
+              merged = touched.size
+                ? [...prev.filter((i) => !touched.has(i.meta?.series)), ...fresh]
+                : prev; // unparsable detail modal leaves prior state alone
+            }
+            const cutoff = nowMs - EVENT_STALE_MS;
+            evState[guildId] = {
+              items: merged.filter((i) => {
+                const a = Date.parse(i?.startAt || i?.dueAt || "");
+                return !Number.isFinite(a) || a >= cutoff;
+              }),
+              at: payload.at,
+            };
+            state.lastGood.events = evState;
+          }
+        }
         else if (extract.type === "location") {
           state.lastLocation = loc;
         }

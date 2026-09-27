@@ -9,6 +9,7 @@ export const OBSERVE_URL_PATTERNS = [
   "^https://discord\\.com/api/v\\d+/channels/\\d+/messages(\\?|$)",
   "^https://discord\\.com/api/v\\d+/channels/\\d+/messages/pins",
   "^https://discord\\.com/api/v\\d+/users/@me/mentions",
+  "^https://discord\\.com/api/v\\d+/users/@me/scheduled-events",
   "^https://discord\\.com/api/v\\d+/guilds/\\d+/messages/search",
 ];
 
@@ -17,6 +18,10 @@ export const REST_ROUTES = [
   { kind: "pins", re: /\/api\/v\d+\/channels\/(\d+)\/messages\/pins(?:\?|$)/ },
   { kind: "channel", re: /\/api\/v\d+\/channels\/(\d+)\/messages(?:\?|$)/ },
   { kind: "mentions", re: /\/api\/v\d+\/users\/@me\/mentions(?:\?|$)/ },
+  {
+    kind: "rsvps",
+    re: /\/api\/v\d+\/users\/@me\/scheduled-events(?:\?|$)/,
+  },
   { kind: "search", re: /\/api\/v\d+\/guilds\/(\d+)\/messages\/search(?:\?|$)/ },
 ];
 
@@ -96,3 +101,72 @@ export const TIME_LINE_RE = /^\s*(?:time|when)\s*[:\-–]\s*(.+)$/im;
 /** "Location: E5 3101" / "where: …" / "room: …" lines. */
 export const LOCATION_LINE_RE =
   /^\s*(?:location|where|room|place)\s*[:\-–]\s*(.+)$/im;
+
+/* Scheduled events modal -------------------------------------------------- */
+
+/** The Events list modal and event detail modal render as a dialog. */
+export const EVENT_DIALOG_SEL = '[role="dialog"]';
+/** "4 Events" — the list modal's header line. */
+export const EVENTS_HEADER_RE = /^\s*\d+\s+events?\s*$/im;
+/** The detail modal's tab label (list modals don't have it). */
+export const EVENT_DETAIL_MARK = "Event Info";
+/** Button texts used to split cards / read RSVP state. */
+export const EVENT_COPY_LINK_TEXT = "Copy Link";
+export const EVENT_INTERESTED_TEXT = "Interested";
+/** The Interested toggle when ON: aria-pressed/checked or a class hint. */
+export const INTERESTED_ON_RE = /selected|active|green|filled|checked|on\b/i;
+/** "Repeats every Tuesday" line. */
+export const EVENT_REPEAT_RE = /^\s*repeats?\s+every\s+(.+)$/i;
+/** The "Events in series" occurrences section heading. */
+export const EVENT_SERIES_RE = /^\s*events?\s+in\s+series\s*$/i;
+/** "/events/<guildId>/<eventId>" inside an href or attribute. */
+export const EVENT_REF_RE = /\/events\/(\d+)\/(\d+)/;
+/** "Created by <person>" — dropped at extraction; names never leave. */
+export const EVENT_CREATED_BY_RE = /^\s*created\s+by\b/i;
+/**
+ * Best-guess rows of the "N Interested" member list — skipped at
+ * extraction so attendee names never leave the page.
+ */
+export const EVENT_MEMBER_ROW_SEL =
+  '[class*="member" i], [class*="avatar" i], [class*="participant" i], [class*="attendee" i], [class*="guest" i]';
+
+/** UI chrome inside event cards that never carries event content. */
+export const EVENT_UI_RES = [
+  /^\s*\d+\s+events?\s*$/i, // "4 Events" header
+  /^\s*\d+\s*$/, // bare interested-count number
+  /^\s*\d+\s+interested\s*$/i, // "6 Interested" tab
+  /^\s*\d+\s+people\s+are\s+interested\s*$/i,
+  /^\s*copy\s+link\s*$/i,
+  /^\s*interested\s*$/i,
+  /^\s*event\s+info\s*$/i,
+  /^\s*[…·•]\s*$/,
+  /^\s*share\s*$/i,
+  /^\s*start\s+event\s*$/i,
+  /^\s*edit\s+event\s*$/i,
+  /^\s*close\s*$/i,
+  /^@[\w.]+$/, // stray handles (member lists)
+];
+
+/** Lines that look like a place: room codes, links, venue words. */
+export const EVENT_LOCATION_RE =
+  /(?:\b[A-Za-z]{1,4}\s?-?\s?\d{3,4}\b)|(?:https?:\/\/)|(?:\b(?:room|hall|building|zoom|meet|teams|voice|stage|online|virtual|discord|gym|field|office|lounge|lab)\b)/i;
+
+/**
+ * An event date line: optional weekday, `Mon d[th][, yyyy]` or
+ * today/tomorrow, then `·` / `,` / `at`, then `h:mm AM/PM`.
+ * Groups: 1 weekday, 2 month, 3 day, 4 year, 5 today|tomorrow, 6 h, 7 mi,
+ * 8 meridiem.
+ */
+export const EVENT_DATE_RE = new RegExp(
+  "^\\s*(?:(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\\.?\\s+)?" +
+    "(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?\\s+" +
+    "(\\d{1,2})(?:st|nd|rd|th)?\\s*,?\\s*(\\d{4})?|(today|tomorrow))" +
+    "\\s*(?:·|•|,|at)\\s*" +
+    "(\\d{1,2}):(\\d{2})\\s*(a\\.?m\\.?|p\\.?m\\.?)",
+  "i"
+);
+/** The range separator between two date-times (" — ", " – ", " - ", to). */
+export const EVENT_RANGE_SEP_RE = /^\s*(?:—|–|−|-|\bto\b)\s*/;
+/** A bare "h:mm AM/PM" (a range tail with no second date). */
+export const EVENT_TIME_ONLY_RE =
+  /^\s*(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)/i;

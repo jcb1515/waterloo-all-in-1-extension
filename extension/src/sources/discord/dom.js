@@ -28,6 +28,15 @@ import {
   MESSAGE_CONTENT_PREFIX,
   ROLE_MENTION_SEL,
   MENTIONED_RE,
+  EVENT_DIALOG_SEL,
+  EVENTS_HEADER_RE,
+  EVENT_DETAIL_MARK,
+  EVENT_COPY_LINK_TEXT,
+  EVENT_INTERESTED_TEXT,
+  INTERESTED_ON_RE,
+  EVENT_REF_RE,
+  EVENT_CREATED_BY_RE,
+  EVENT_MEMBER_ROW_SEL,
 } from "./selectors.js";
 
 /** /channels/<guild|@me>/<channel?> -> {guildId| "@me", channelId?} | null */
@@ -273,6 +282,255 @@ export function messagesExtract(doc, href) {
   };
 }
 
-// TODO(events): a {v:1, type:"events", location, events:[...]} extract for
-// the scheduled-events modal plugs in here once real captures exist —
-// dom.js reads it, content.js sends it, index.js folds it into meetingLog.
+/* Scheduled events modal ----------------------------------------------------
+ * TODO(events): the real DOM markup for Discord's Events modals is still
+ * unknown — this reader is intentionally text-driven. Card boundaries are
+ * found via each card's "Copy Link" button; everything else is line order
+ * + heading/icon hints. Verify against a saved capture at CP2.
+ */
+
+const ELEMENT_NODE = 1;
+
+/** True when `root` contains `el` (linkedom-safe). */
+function containsEl(root, el) {
+  try {
+    if (typeof root?.contains === "function") return root.contains(el);
+  } catch {
+    /* tolerate */
+  }
+  for (let e = el; e; e = e.parentElement) if (e === root) return true;
+  return false;
+}
+
+/** Inside an h1–h4 or [role=heading]? (climbs past `stopAt` harmlessly) */
+function inHeading(el) {
+  for (let e = el; e && e.nodeType === ELEMENT_NODE; e = e.parentElement) {
+    const tag = String(e.nodeName || "").toUpperCase();
+    if (/^H[1-4]$/.test(tag)) return true;
+    try {
+      if (
+        String(e.getAttribute?.("role") || "") === "heading" ||
+        e.getAttribute?.("aria-level") != null
+      ) {
+        return true;
+      }
+    } catch {
+      /* tolerate */
+    }
+  }
+  return false;
+}
+
+/** The line's element (or its previous sibling) contains an svg. */
+function hasIcon(el) {
+  try {
+    if (el?.querySelector?.("svg")) return true;
+    const prev = el?.previousElementSibling;
+    if (prev) {
+      if (String(prev.nodeName || "").toUpperCase() === "SVG") return true;
+      if (prev.querySelector?.("svg")) return true;
+    }
+  } catch {
+    /* tolerate */
+  }
+  return false;
+}
+
+/** Best-guess member/avatar rows (the "N Interested" tab) are skipped. */
+function isMemberRow(root, el) {
+  try {
+    const hit = el?.closest?.(EVENT_MEMBER_ROW_SEL) || null;
+    return Boolean(hit && containsEl(root, hit));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A dialog's text as ordered lines: [{text, heading, icon, el}]. <br> and
+ * block boundaries (incl. buttons/links) split lines; "Created by …" and
+ * member-list rows are dropped here so names never leave the page.
+ * @param {Element} root
+ */
+function collectLines(root) {
+  /** @type {{text: string, heading: boolean, icon: boolean, el: any}[]} */
+  const lines = [];
+  let buf = "";
+  /** @type {any} */
+  let bufEl = null;
+  const flush = () => {
+    const t = buf.replace(/[^\S\n]+/g, " ").replace(/\n+/g, " ").trim();
+    buf = "";
+    const el = bufEl;
+    bufEl = null;
+    if (!t || EVENT_CREATED_BY_RE.test(t)) return;
+    lines.push({ text: t, heading: inHeading(el), icon: hasIcon(el), el });
+  };
+  /** @param {any} node */
+  const walk = (node) => {
+    for (const child of node?.childNodes || []) {
+      if (child.nodeType === 3 /* TEXT_NODE */) {
+        if (!buf) bufEl = child.parentElement || child.parentNode || node;
+        buf += child.nodeValue || "";
+        continue;
+      }
+      const tag = String(child.nodeName || "").toUpperCase();
+      if (tag === "SVG" || tag === "IMG") continue;
+      if (isMemberRow(root, child)) continue;
+      if (tag === "BR") {
+        flush();
+        continue;
+      }
+      const block =
+        /^(DIV|P|LI|H[1-6]|SECTION|ARTICLE|TR|PRE|BLOCKQUOTE|BUTTON|A|HEADER|FOOTER|UL|OL)$/.test(
+          tag
+        );
+      if (block) flush();
+      walk(child);
+      if (block) flush();
+    }
+  };
+  walk(root);
+  flush();
+  return lines;
+}
+
+/** Interested toggle state: true / false / null (no such button). */
+function interestedState(root) {
+  try {
+    for (const el of root.querySelectorAll(
+      'button, [role="button"], [role="switch"], a'
+    )) {
+      if (textOf(el) !== EVENT_INTERESTED_TEXT) continue;
+      if (
+        el.getAttribute?.("aria-pressed") === "true" ||
+        el.getAttribute?.("aria-checked") === "true"
+      ) {
+        return true;
+      }
+      return INTERESTED_ON_RE.test(String(el.getAttribute?.("class") || ""));
+    }
+  } catch {
+    /* tolerate */
+  }
+  return null;
+}
+
+/** "/events/<guildId>/<eventId>" from any attribute inside the card. */
+function eventRefOf(root) {
+  const scan = (el) => {
+    try {
+      for (const attr of Array.from(el.attributes || [])) {
+        const m = EVENT_REF_RE.exec(String(attr.value ?? attr.nodeValue ?? ""));
+        if (m) return `events/${m[1]}/${m[2]}`;
+      }
+    } catch {
+      /* tolerate */
+    }
+    return null;
+  };
+  try {
+    const own = scan(root);
+    if (own) return own;
+    for (const el of root.querySelectorAll("*")) {
+      const hit = scan(el);
+      if (hit) return hit;
+    }
+  } catch {
+    /* tolerate */
+  }
+  return null;
+}
+
+/**
+ * The Events list modal / event detail modal -> a DOM extract.
+ * Card split: each card is the largest dialog subtree containing exactly
+ * one "Copy Link" control; with none, the whole dialog is one card and the
+ * parser splits on top-level date lines. Dialog lines outside any card
+ * (e.g. an "Events in series" block rendered as a sibling) attach to the
+ * previous card.
+ * @param {Document} doc @param {string} href
+ */
+export function eventsModalExtract(doc, href) {
+  try {
+    /** @type {any} */
+    let dialog = null;
+    let modal = null;
+    for (const el of doc.querySelectorAll(EVENT_DIALOG_SEL)) {
+      const t = textWithBreaks(el);
+      if (EVENTS_HEADER_RE.test(t)) {
+        dialog = el;
+        modal = "list";
+        break;
+      }
+      if (t.includes(EVENT_DETAIL_MARK)) {
+        dialog = el;
+        modal = "detail";
+        break;
+      }
+    }
+    if (!dialog) return null;
+
+    const location = readLocation(href) || { guildId: "", channelId: undefined };
+    const guildName =
+      readGuilds(doc).find((g) => g.guildId === location.guildId)?.name ||
+      undefined;
+
+    const lines = collectLines(dialog);
+    /** Card roots = largest single-"Copy Link" subtrees of the dialog. */
+    const copyEls = [];
+    for (const el of dialog.querySelectorAll('button, [role="button"], a')) {
+      if (textOf(el) === EVENT_COPY_LINK_TEXT) copyEls.push(el);
+    }
+    const roots =
+      copyEls.length > 1
+        ? copyEls.map((el) => {
+            let root = el;
+            for (
+              let p = el.parentElement;
+              p && p !== dialog;
+              p = p.parentElement
+            ) {
+              if (copyEls.filter((o) => containsEl(p, o)).length !== 1) break;
+              root = p;
+            }
+            return root;
+          })
+        : [dialog]; // one (or no) "Copy Link": the dialog is one card
+
+    const cardLines = roots.map(() => /** @type {any[]} */ ([]));
+    let cur = -1;
+    for (const ln of lines) {
+      const idx = roots.findIndex((r) => ln.el && containsEl(r, ln.el));
+      if (idx !== -1) cur = idx;
+      if (cur === -1) continue; // dialog chrome before the first card
+      cardLines[cur].push(ln);
+    }
+
+    let tz;
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      /* tolerate */
+    }
+    return {
+      v: 1,
+      type: "events",
+      location,
+      tz: tz || "America/Toronto",
+      modal,
+      guildName,
+      cards: roots.map((root, i) => ({
+        lines: cardLines[i].map(({ text, heading, icon }) => ({
+          text,
+          heading,
+          icon,
+        })),
+        interested: interestedState(root),
+        eventRef: eventRefOf(root),
+      })),
+    };
+  } catch {
+    return null;
+  }
+}

@@ -37,6 +37,9 @@ Discord page ──REST responses──> recorder.content.js ──net payload�
 - `/api/v*/channels/:id/messages` — channel history (sweep reads)
 - `/api/v*/channels/:id/messages/pins` — pins
 - `/api/v*/users/@me/mentions` — pings; also drives identity inference
+- `/api/v*/users/@me/scheduled-events` — the user's RSVP'd event ids
+  (`state.rsvps`); an event whose id is listed counts as Interested even
+  when the DOM button heuristic fails
 - `/api/v*/guilds/:id/messages/search` — search results
 
 DOM extracts (`{v:1, type, location, ...}` sent by `content.js`):
@@ -48,7 +51,13 @@ DOM extracts (`{v:1, type, location, ...}` sent by `content.js`):
   produce identical item ids
 - `location` — on `/channels/@me/*` this is ALL that is sent (DM content
   is never read)
-- `events` — TODO(events): scheduled-events modal, pending real captures
+- `events` — the scheduled-events modal (`{modal:"list"|"detail",
+  guildName, cards:[{lines:[{text,heading,icon}], interested, eventRef}]}`).
+  Event definitions travel over the gateway, so the recorder never sees
+  them — `content.js` reads the open `[role="dialog"]` instead. Cards are
+  split by each card's "Copy Link" button; `Created by` lines and
+  Interested-tab member rows are dropped at extraction so no names leave
+  the page.
 
 Every parse returns `scope: "discord"` with the filtered union plus
 recurring suggestions, so the core's scope-mode fold keeps the store
@@ -126,8 +135,20 @@ state.unreadWatched = [{guildId, guildName, channelId, name, url, mentions}]
 state.unreadGuilds = [{guildId, name, mentions}]
 state.meetingLog = [{guildId, channelId, key, startAt?, endAt?, url, at,
                      fromText?, weekday?, hhmm?}]   // cap 300, 120 days
+state.rsvps = [eventId, …]                          // cap 500
+state.lastGood.events[guildId] = { items, at }      // scheduled events
 state.identity = { selfId?, roleIds: [], evidence: n }
 ```
+
+Scheduled events (`events.js`): a list-modal read replaces the guild's
+event set wholesale; a detail read replaces only that `meta.series`.
+Items are `type:"meeting", category:"scheduled-event"` with ids
+`discord:event:<guild>:<slug>` (one-shot) or `…:<YYYY-MM-DD>` (series).
+Interested (button or RSVP list) → `review:"auto"`, every listed
+occurrence plus weekly-generated tentative ones up to 6 weeks out;
+otherwise one pending item for the next occurrence
+(`meta.pendingSeries`). A series suppresses message-derived recurring
+suggestions on the same (guild, weekday, HH:MM) slot.
 
 Items from a channel the inventory hasn't mapped yet are stored (a REST
 read before the first inventory isn't lost) but hidden from output and
@@ -163,4 +184,11 @@ suggestion on its own (`weeks: 0, fromText: true`).
   messages ("Monday and Wednesday") collapse to the first.
 - Guild/channel names come from aria-label prefixes — locale strings other
   than en need their own `GUILD_LABEL_PREFIX_RE`.
-- Scheduled events: `TODO(events)` hooks in dom.js/content.js/index.js.
+- Events modal markup is unverified against live Discord: card split via
+  "Copy Link" buttons, `INTERESTED_ON_RE` class heuristic, heading/icon
+  line flags, and the member-list skip selector
+  (`EVENT_MEMBER_ROW_SEL`) all need tuning at CP2. If Interested-button
+  state is unreliable the RSVP REST read covers it.
+- `Time:`/`Location:` announcement lines upgrade an all-day date hit to a
+  timed, located item (timezone labels ignored — always Toronto wall
+  time).
