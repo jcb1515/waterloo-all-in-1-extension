@@ -416,3 +416,61 @@ test("mergeTerms prefers portal fields", () => {
   assert.equal(out[1269].start, "2025-09-03", "portal wins its own fields");
   assert.equal(out[1269].name, "Fall 2025", "portal-empty fields fall through");
 });
+
+test("meta.facts union across a cluster; the higher-ranked member wins per label", () => {
+  const start = "2025-09-16T14:30:00.000Z";
+  const oc = raw("outline", "lec2", {
+    type: "class",
+    title: "ECE 105 LEC 002",
+    org: "ECE 105",
+    startAt: start,
+    meta: {
+      facts: [
+        { label: "Room", value: "RCH 101" },
+        { label: "Instructor", value: "A. Prof" },
+      ],
+    },
+  });
+  const pc = raw("portal", "cls:9", {
+    type: "class",
+    title: "ECE 105 lecture",
+    org: "ECE 105",
+    startAt: start,
+    confidence: "exact",
+    meta: {
+      facts: [
+        { label: "ROOM", value: "PAC 1" }, // same label, other case — loses
+        { label: "Section", value: "LEC 002" },
+      ],
+    },
+  });
+  const r = recompute({ raws: raws(["portal", [pc]], ["outline", [oc]]), now: NOW });
+  assert.equal(Object.keys(r.items).length, 1);
+  const facts = Object.values(r.items)[0].meta.facts;
+  assert.deepEqual(facts, [
+    { label: "Room", value: "RCH 101" }, // outline outranks portal on classes
+    { label: "Instructor", value: "A. Prof" },
+    { label: "Section", value: "LEC 002" },
+  ]);
+});
+
+test("meta.facts union survives when only a lower-ranked member has facts", () => {
+  const start = "2025-09-16T14:30:00.000Z";
+  const oc = raw("outline", "lec2", {
+    type: "class",
+    title: "ECE 105 LEC 002",
+    org: "ECE 105",
+    startAt: start,
+  });
+  const pc = raw("portal", "cls:9", {
+    type: "class",
+    title: "ECE 105 lecture",
+    org: "ECE 105",
+    startAt: start,
+    confidence: "exact",
+    meta: { facts: [{ label: "Room", value: "E7 1234" }] },
+  });
+  const r = recompute({ raws: raws(["portal", [pc]], ["outline", [oc]]), now: NOW });
+  const facts = Object.values(r.items)[0].meta.facts;
+  assert.deepEqual(facts, [{ label: "Room", value: "E7 1234" }]);
+});

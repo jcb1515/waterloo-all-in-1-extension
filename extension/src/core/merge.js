@@ -318,6 +318,23 @@ function buildItem(id, members, us) {
   for (const m of members) for (const s of m.seenIn || []) seen.push(s);
   if (seen.length) item.seenIn = seen;
   if (top.evidence) item.evidence = top.evidence;
+  // Union meta.facts across members — the higher-ranked member's fact wins
+  // per label (case-insensitive), so e.g. a Portal room fact and an outline
+  // instructor fact on the same class both survive.
+  {
+    /** @type {{label: string, value: string}[]} */
+    const facts = [];
+    const factLabels = new Set();
+    for (const m of ranked) {
+      for (const f of (m.meta && m.meta.facts) || []) {
+        const key = String((f && f.label) || "").toLowerCase();
+        if (!key || f.value == null || factLabels.has(key)) continue;
+        factLabels.add(key);
+        facts.push({ label: f.label, value: f.value });
+      }
+    }
+    if (facts.length) item.meta.facts = facts;
+  }
   if (us && us.done) item.status = "done";
   else if (members.some((m) => m.status === "submitted")) item.status = "submitted";
   else if (members.every((m) => m.status === "cancelled")) item.status = "cancelled";
