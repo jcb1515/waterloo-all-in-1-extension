@@ -250,6 +250,20 @@ function safeJson(v) {
   }
 }
 
+/** Call adapter.sync, converting a throw into an error SyncResult. */
+async function callSync(adapter, ctx) {
+  try {
+    return await /** @type {any} */ (adapter).sync(ctx);
+  } catch (e) {
+    const err = /** @type {any} */ (e);
+    return {
+      items: [],
+      complete: false,
+      error: { code: "exception", message: String((err && err.message) || err) },
+    };
+  }
+}
+
 /**
  * @param {import("./contract.js").Adapter} adapter
  * @param {Record<string, any>} settings full settings object
@@ -261,26 +275,44 @@ async function doSync(adapter, settings, reason) {
   const prevState = ((await getLocal("sourceState")) || {})[id];
   const mv = await getMergedView();
   const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv, await adapterExtras(adapter.id));
+  const seenVersion = stateVersion(id);
 
-  /** @type {any} */
-  let result;
-  try {
-    result = await /** @type {any} */ (adapter).sync(ctx);
-  } catch (e) {
-    const err = /** @type {any} */ (e);
-    result = { items: [], complete: false, error: { code: "exception", message: String((err && err.message) || err) } };
-  }
+  // The adapter call stays outside the ingest queue so observes aren't
+  // blocked while it fetches.
+  let result = await callSync(adapter, ctx);
 
-  await setLocal(rawKey(id), applyResult(mv.raws[id] || null, result, { mode: "sync" }));
+  // The fold is queued with observes/captures: a slow sync that finishes
+  // after an observe re-reads the fresh raw and state before writing.
+  return ingest(id, async () => {
+    if (stateVersion(id) !== seenVersion) {
+      // ctx.state moved on while sync() ran (an observe wrote it). Re-run
+      // once against the fresh state so the result — including the adapter's
+      // private next-state — is derived from what is actually stored.
+      const curState = ((await getLocal("sourceState")) || {})[id];
+      const mv2 = await getMergedView();
+      const ctx2 = makeCtx(
+        adapter,
+        settings,
+        curState && curState.state,
+        mv2,
+        await adapterExtras(id)
+      );
+      result = await callSync(adapter, ctx2);
+    }
 
-  const rawItems = /** @type {any} */ (await getLocal(rawKey(id))) || { items: [] };
-  await mutateKey("sourceState", (cur) => ({
-    ...(cur || {}),
-    [id]: nextSourceState(prevState, result, now, "sync", (rawItems.items || []).length),
-  }));
-  await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
-  await recomputeAll(now, resultUpdates(result));
-  return result;
+    const mv2 = await getMergedView();
+    await setLocal(rawKey(id), applyResult(mv2.raws[id] || null, result, { mode: "sync" }));
+
+    const rawItems = /** @type {any} */ (await getLocal(rawKey(id))) || { items: [] };
+    await mutateKey("sourceState", (cur) => ({
+      ...(cur || {}),
+      [id]: nextSourceState((cur || {})[id], result, now, "sync", (rawItems.items || []).length),
+    }));
+    bumpStateVersion(id);
+    await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
+    await recomputeAll(now, resultUpdates(result));
+    return result;
+  });
 }
 
 /* --------------------------- ingests --------------------------- */
@@ -293,6 +325,16 @@ function ingest(source, fn) {
   ingestQueues.set(source, run.catch(() => {}));
   return run;
 }
+
+/**
+ * Per-adapter write counter for sourceState. A long-running sync snapshots it
+ * when building ctx.state; if it moved by fold time, the adapter's state is
+ * stale and sync() is re-run once against the fresh one.
+ */
+const stateVersions = new Map();
+const stateVersion = (/** @type {string} */ id) => stateVersions.get(id) || 0;
+const bumpStateVersion = (/** @type {string} */ id) =>
+  stateVersions.set(id, stateVersion(id) + 1);
 
 function ingestResult(source, result, scope) {
   return ingest(source, async () => {
@@ -341,6 +383,7 @@ export async function handleObserved(payload) {
         (raw.items || []).length
       ),
     }));
+    bumpStateVersion(adapter.id);
     await recomputeAll(new Date(), resultUpdates(result));
   });
 }
@@ -464,6 +507,7 @@ export async function clearSource(source) {
     delete all[source];
     return all;
   });
+  bumpStateVersion(source);
   await recomputeAll(new Date());
 }
 
