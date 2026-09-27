@@ -63,11 +63,12 @@ const rangeDates = (hit) => [
 ];
 /** True for a hit spanning at least ~two days (a plausible "week"). */
 const isWeekRange = (hit) => !!hit.endAt && Date.parse(hit.endAt) - Date.parse(hit.startAt) >= 2 * DAY_MS;
-const dateFor = (monText, day, termCode) => {
+/** "Sep 15" -> "YYYY-MM-DD"; the year comes from term/now inference. */
+const dateFor = (monText, day, { now, termCode } = /** @type {{now?: Date, termCode?: number}} */ ({})) => {
   const i = "janfebmaraprmayjunjulaugsepoctnovdec".indexOf(String(monText).slice(0, 3).toLowerCase());
   if (i < 0) return null;
   const mon = i / 3 + 1;
-  const year = termCode != null ? 1900 + Math.floor(termCode / 10) : new Date().getFullYear();
+  const year = inferYear(mon, Number(day), { now, termCode });
   return `${year}-${pad(mon)}-${pad(Number(day))}`;
 };
 
@@ -479,12 +480,19 @@ export function buildOutline(data, opts = {}) {
   }
 
   /* ---- prose and non-label plan cells -> review items ---- */
-  const exactByCat = new Set();
+  // Structured (table/chart/TST/schedule) items already on the board cover the
+  // Toronto day of their startAt/dueAt — or, for all-day items, the whole
+  // [startAt, endAt) window. A prose hit inside that coverage is a duplicate.
+  /** @type {{cat: string, a: string, b: string}[]} */
+  const covered = [];
   for (const i of items) {
-    if (i.confidence !== "exact" || !i.category) continue;
-    const d = i.startAt ? torontoDate(i.startAt) : i.dueAt ? torontoDate(i.dueAt) : null;
-    if (d) exactByCat.add(`${i.category}|${d}`);
+    if (!i.category) continue;
+    const a = i.startAt ? torontoDate(i.startAt) : i.dueAt ? torontoDate(i.dueAt) : null;
+    if (!a) continue;
+    const b = i.allDay && i.endAt ? torontoDate(i.endAt) : addDays(a, 1);
+    covered.push({ cat: i.category, a, b });
   }
+  const isCovered = (cat, day) => covered.some((c) => c.cat === cat && c.a <= day && day < c.b);
   /** @type {string[]} */
   const proseLines = [];
   for (const line of String(data.text && data.text.plan || "").split("\n")) proseLines.push(line);
@@ -506,10 +514,10 @@ export function buildOutline(data, opts = {}) {
       const isReview = REVIEW_FOR.test(line);
       const cat = isReview ? "review-session" : cls.category;
       const day = torontoDate(hit.startAt);
-      if (cat && day && exactByCat.has(`${cat}|${day}`)) continue;
+      if (cat && day && isCovered(cat, day)) continue;
       let title;
-      if (cls.type === "exam" && cls.category === "midterm") title = "Midterm";
-      else if (cls.type === "exam" && cls.category === "final") title = "Final exam";
+      if (!isReview && cls.type === "exam" && cls.category === "midterm") title = "Midterm";
+      else if (!isReview && cls.type === "exam" && cls.category === "final") title = "Final exam";
       else {
         const head = line.slice(0, hit.index).replace(/(?:\b(?:due|on|by|is)|[:-])\s*$/i, "").trim();
         const tail = line.slice(hit.index + hit.text.length).trim();
@@ -564,7 +572,7 @@ export function buildOutline(data, opts = {}) {
         }
       }
     }
-    const bounds = [lecDates[0], startM ? dateFor(startM[1], startM[2], termCode) : null].filter(Boolean).sort();
+    const bounds = [lecDates[0], startM ? dateFor(startM[1], startM[2], { now, termCode }) : null].filter(Boolean).sort();
     const from = bounds[bounds.length - 1];
     const to = lecDates[lecDates.length - 1];
     let series = 0;

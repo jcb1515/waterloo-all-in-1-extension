@@ -112,6 +112,7 @@ test("ECE105 midterm dedupe and prose items", () => {
   assert.ok(rev);
   assert.equal(rev.type, "event");
   assert.equal((rev.startAt || "").slice(0, 10), "2026-10-23");
+  assert.match(rev.title, /^Review for Midterm/); // not "Midterm" — the line's own text wins
   assert.deepEqual(course.weights, []);
 });
 
@@ -178,6 +179,58 @@ test("GENE119 seminar classes", () => {
   assert.ok(sems.length > 0);
   assert.ok(sems.every((i) => i.category === "seminar"));
   assert.equal(sems[0].startAt, "2026-09-14T14:30:00.000Z"); // Mon 10:30 EDT
+});
+
+test("prose hit inside a structured all-day window is a duplicate", () => {
+  const synthetic = {
+    code: "TEST 100",
+    term: 1269,
+    title: "Synthetic",
+    schedule: [],
+    noScheme: false,
+    schemes: [{ name: null, rows: [{ component: "Final Exam", dateText: "December 10 - 23", location: "", weight: 50 }] }],
+    tables: [],
+    text: {
+      plan: "",
+      assessments:
+        "The final exam will be held during the exam period, December 10 - 23.\n" +
+        "The final exam ends the exam period on December 23.",
+      team: "",
+    },
+  };
+  const { items } = buildOutline(synthetic, {
+    now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+  });
+  const finals = items.filter((i) => i.category === "final");
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0].id, "outline:TEST100:assess:final-exam");
+  assert.equal(finals[0].startAt, "2026-12-10T05:00:00.000Z");
+  assert.equal(items.filter((i) => i.review === "pending").length, 0);
+});
+
+test("office-hours 'starting' year comes from term inference, not the wall clock", () => {
+  const synthetic = {
+    code: "TEST 200",
+    term: null,
+    title: "Synthetic",
+    schedule: [{ section: "001", kind: "LEC", days: [2], start: "10:00", end: "11:00", location: "", ranges: [["2026-09-08", "2026-12-08"]], dates: [] }],
+    schemes: [],
+    noScheme: true,
+    tables: [],
+    text: {
+      plan: "",
+      assessments: "",
+      team: "Office hours (starting Sep 15):\nTuesdays 10am - 11am in EIT 1000",
+    },
+  };
+  // now is months after the term ended; "Sep 15" must still be 2026.
+  const { items } = buildOutline(synthetic, {
+    now: new Date("2027-02-01T00:00:00Z"), url: "u", sections: ["LEC 001"], group: null,
+    officeHours: true, readingWeeks: [], textDates: extractDates,
+  });
+  const oh = items.filter((i) => i.category === "office-hours");
+  assert.ok(oh.length > 0);
+  assert.equal(oh[0].startAt, "2026-09-15T14:00:00.000Z"); // Tue Sep 15 2026, 10am EDT
 });
 
 test("all expanded item ids are unique", () => {
