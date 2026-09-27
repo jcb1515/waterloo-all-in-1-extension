@@ -2,7 +2,9 @@
 // WaterlooWorks date parsing (pure). WW renders times like
 // "Oct 02, 2026 04:00 PM ET", "Sep 29, 2026 9:00 AM", "September 30, 2026
 // 09:00 AM", "09/25/2026 12:01 PM", and date-only "Oct 2, 2026" / "MM/DD/YYYY".
-// TODO(CP1): switch to textdates zonedIso once stream/academic is merged.
+// Wall-time → UTC conversion is the shared textdates zonedIso (DST-safe).
+
+import { zonedIso } from "../../lib/textdates/index.js";
 
 const MONTHS = Object.freeze({
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
@@ -67,37 +69,7 @@ function to24h(h12, meridiem) {
   return meridiem.toLowerCase() === "p" ? h + 12 : h;
 }
 
-/**
- * Milliseconds offset of `tz` at the given instant (how far local wall time is
- * ahead of UTC).
- * @param {string} tz
- * @param {number} utcMs
- */
-function tzOffsetMs(tz, utcMs) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour12: false,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-  }).formatToParts(new Date(utcMs));
-  const get = (type) => Number(parts.find((p) => p.type === type)?.value);
-  const hour = get("hour") % 24; // en-US renders midnight as "24"
-  const wallAsUtc = Date.UTC(get("year"), get("month") - 1, get("day"), hour, get("minute"), get("second"));
-  return wallAsUtc - utcMs;
-}
 
-/**
- * The UTC instant whose wall clock in `tz` reads y-m-d h:mi.
- * @param {number} y @param {number} m @param {number} d
- * @param {number} h @param {number} mi
- * @param {string} tz
- */
-export function wallTimeToIso(y, m, d, h, mi, tz) {
-  const guess = Date.UTC(y, m - 1, d, h, mi);
-  let utc = guess - tzOffsetMs(tz, guess);
-  const retry = guess - tzOffsetMs(tz, utc); // correct once more for DST edges
-  if (retry !== utc) utc = retry;
-  return new Date(utc).toISOString();
-}
 
 /**
  * Parse a WW date/datetime string. Timed values are Toronto wall time and
@@ -115,7 +87,7 @@ export function parseWwDate(text, tz = "America/Toronto") {
     const dd = String(parts.d).padStart(2, "0");
     return `${parts.y}-${mm}-${dd}`;
   }
-  return wallTimeToIso(parts.y, parts.m, parts.d, parts.h, parts.mi ?? 0, tz);
+  return zonedIso(parts.y, parts.m, parts.d, parts.h, parts.mi ?? 0, tz);
 }
 
 /**
@@ -150,7 +122,7 @@ function rangeFromParts(dateText, timeText1, timeText2, tz) {
   const t2 = TIME.exec(timeText2);
   if (!date || !t1 || !t2) return null;
   return {
-    startAt: wallTimeToIso(date.y, date.m, date.d, to24h(+t1[1], t1[3]), +t1[2], tz),
-    endAt: wallTimeToIso(date.y, date.m, date.d, to24h(+t2[1], t2[3]), +t2[2], tz),
+    startAt: zonedIso(date.y, date.m, date.d, to24h(+t1[1], t1[3]), +t1[2], tz),
+    endAt: zonedIso(date.y, date.m, date.d, to24h(+t2[1], t2[3]), +t2[2], tz),
   };
 }
