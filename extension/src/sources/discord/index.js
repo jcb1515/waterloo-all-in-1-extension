@@ -282,6 +282,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
         pushMeetingLog(state, {
           guildId, channelId,
           messageId: String(msg.id),
+          key: meetingKey(firstLine(stripped)),
           url: guildId
             ? `https://discord.com/channels/${guildId}/${channelId}/${msg.id}`
             : undefined,
