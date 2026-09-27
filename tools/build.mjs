@@ -21,12 +21,14 @@ const ESM_ENTRIES = [
   "src/background/index.js",
   "src/panel/panel.js",
   "src/options/options.js",
+  "src/capture/offscreen.js",
 ];
 
 const IIFE_ENTRIES = [
   "src/capture/observer.main.js",
   "src/capture/recorder.content.js",
   "src/sources/learn/content.js",
+  "src/sources/outline/content.js",
   "src/sources/portal/content.js",
   "src/sources/waterlooworks/content.js",
   "src/sources/discord/content.js",
