@@ -60,6 +60,7 @@ function blankFeed(serviceUrl) {
     needsResubscribe: false,
     retryAt: null,
     failures: 0,
+    failedHash: null,
   };
 }
 
@@ -88,12 +89,27 @@ function realDeps() {
   };
 }
 
+/*
+  Serialise publishes: an alarm and a "Publish now" arriving together must not
+  both POST a fresh feed. A second call queues behind the first and re-reads
+  state (settings, calendarFeed, merged items) once it runs.
+*/
+/** @type {Promise<any>} */
+let publishChain = Promise.resolve();
+
 /**
  * Publish the merged items to the configured feed server.
  * @param {{force?: boolean, deps?: Record<string, any>}} [opts]
  * @returns {Promise<{ok: boolean, reason?: string}>}
  */
-export async function publishFeed(opts = {}) {
+export function publishFeed(opts = {}) {
+  const run = publishChain.then(() => publishNow(opts));
+  publishChain = run.catch(() => {});
+  return run;
+}
+
+/** @param {{force?: boolean, deps?: Record<string, any>}} opts */
+async function publishNow(opts) {
   const d = { ...realDeps(), ...(opts.deps || {}) };
   const settings = await d.getSettings();
   const cal = (settings && settings.calendar) || {};
@@ -108,7 +124,9 @@ export async function publishFeed(opts = {}) {
   feed.serviceUrl = origin;
 
   const mv = await d.getMergedView();
-  const { payload, count } = buildFeedPayload(mv.items, mv.userState, cal, new Date(d.now()));
+  const { payload, count } = buildFeedPayload(mv.items, mv.userState, cal, new Date(d.now()), {
+    acceptPending: !!(settings.review && settings.review.showPending),
+  });
   const hash = stableHash(payload);
 
   const unchanged = hash === feed.lastPayloadHash;
@@ -117,6 +135,11 @@ export async function publishFeed(opts = {}) {
   // Same payload but last PUT is old: republish anyway to refresh expiry.
   if (unchanged && !opts.force && !stale) {
     return { ok: true, reason: "unchanged" };
+  }
+  // A hard-failed payload (413/400) doesn't retry until it changes — otherwise
+  // every recompute would hammer the server with a payload it rejected.
+  if (!opts.force && feed.failedHash && hash === feed.failedHash) {
+    return { ok: false, reason: feed.error || "previously rejected" };
   }
 
   const save = (/** @type {any} */ patch) =>
@@ -141,7 +164,7 @@ export async function publishFeed(opts = {}) {
 
   /** Permanent failure until the payload changes — no retry alarm. */
   const hardFail = async (/** @type {string} */ message) => {
-    await save({ status: "error", error: message, retryAt: null });
+    await save({ status: "error", error: message, retryAt: null, failedHash: hash });
     return { ok: false, reason: message };
   };
 
@@ -168,6 +191,7 @@ export async function publishFeed(opts = {}) {
       error: null,
       failures: 0,
       retryAt: null,
+      failedHash: null,
       lastPublishedAt: new Date(d.now()).toISOString(),
       lastPayloadHash: hash,
       eventCount: count,

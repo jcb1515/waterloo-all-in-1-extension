@@ -201,6 +201,40 @@ test("stopFeed DELETEs with the token, clears state, disables sync", async () =>
   assert.equal(settings.calendar.enabled, false);
 });
 
+test("two parallel publishes produce one POST", async () => {
+  const { deps, calls } = makeDeps({ fetches: [resp(201, CREATED)] });
+  const [r1, r2] = await Promise.all([publishFeed({ deps }), publishFeed({ deps })]);
+  assert.equal(r1.ok, true);
+  // The second call waited for the first, then saw the unchanged hash.
+  assert.equal(r2.reason, "unchanged");
+  assert.equal(calls.filter((c) => c.init.method === "POST").length, 1);
+});
+
+test("a hard-failed payload is not retried until it changes", async () => {
+  const { deps, store, calls } = makeDeps({ fetches: [resp(413, {})] });
+  await publishFeed({ deps });
+  assert.ok(store[FEED_KEY].failedHash, "the rejected payload's hash is recorded");
+
+  // Next recompute kicks a publish with the same payload -> no fetch.
+  const r = await publishFeed({ deps });
+  assert.equal(r.ok, false);
+  assert.equal(calls.length, 1);
+
+  // A payload change clears the path (here: a new item lands).
+  const d2 = makeDeps({
+    fetches: [resp(200, { accepted: 2, skipped: [] })],
+    items: {
+      ...ITEMS,
+      "learn:b": { ...ITEMS["learn:a"], id: "learn:b", title: "Quiz #4" },
+    },
+  });
+  d2.store[FEED_KEY] = { ...store[FEED_KEY], feedId: "feed-9x", updateToken: "t" };
+  const r2 = await publishFeed({ deps: d2.deps });
+  assert.equal(r2.ok, true);
+  assert.equal(d2.calls.length, 1);
+  assert.equal(d2.store[FEED_KEY].failedHash, null);
+});
+
 test("the update token never reaches logs", async () => {
   const { deps, logs } = makeDeps({
     fetches: [resp(201, CREATED), { throw: new Error("boom") }, { throw: new Error("boom") }],

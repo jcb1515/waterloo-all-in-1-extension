@@ -52,8 +52,8 @@ async function copyText(text) {
   }
 }
 
-/** @param {{url: string, label?: string}} p one feed URL row: masked text + reveal/copy/add */
-function FeedLink({ url, label }) {
+/** @param {{url: string, label?: string, add?: boolean}} p one feed URL row: masked text + reveal/copy (+ Add for group feeds) */
+function FeedLink({ url, label, add }) {
   const [shown, setShown] = useState(false);
   const [copied, setCopied] = useState(false);
   return (
@@ -76,14 +76,16 @@ function FeedLink({ url, label }) {
         >
           {copied ? "Copied" : "Copy"}
         </button>
-        <a
-          class="btn btn-sm btn-primary"
-          href={googleAddUrl(url)}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <ExternalLinkIcon size={12} /> Add
-        </a>
+        {add ? (
+          <a
+            class="btn btn-sm btn-primary"
+            href={googleAddUrl(url)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLinkIcon size={12} /> Add
+          </a>
+        ) : null}
       </span>
     </div>
   );
@@ -229,7 +231,7 @@ export function CalendarSection({ settings, save, state }) {
                     {GROUP_LABELS.map(([key, label]) => {
                       const g = feed.groupFeeds[key];
                       const url = (g && (g.feedUrl || g)) || null;
-                      return url ? <FeedLink key={key} url={url} label={label} /> : null;
+                      return url ? <FeedLink key={key} url={url} label={label} add /> : null;
                     })}
                   </>
                 ) : null}
