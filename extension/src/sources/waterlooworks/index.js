@@ -7,7 +7,7 @@
 // page-network responses and content.js sends rendered-DOM snapshots; both
 // arrive here as ObservedPayloads and get parsed in the offscreen document.
 
-import { EXPECTED_SCOPES, OBSERVE_PATTERNS } from "./selectors.js";
+import { EXPECTED_SCOPES, OBSERVE_PATTERNS, SCOPE } from "./selectors.js";
 import {
   toApplications,
   interviewItems,
@@ -21,14 +21,11 @@ import { diffApplications } from "./diff.js";
 
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 
-/** Scopes whose output is calendar items (cached under state.lastGood). */
-const ITEM_SCOPES = ["interviews", "interviewDetail", "events", "posting"];
-/** Primary-scope reporting order when a payload carries several sections. */
-const SCOPE_PRIORITY = [
-  "applications", "interviews", "events", "posting",
-  "interview-detail", "messages", "message-detail", "rankings",
-];
 const MAX_STORED = 50;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Per-job scopes accumulate; each page describes ONE job. Days before prune. */
+const JOB_SCOPES = { "posting": 14, "interview-detail": 30 };
+const JOB_SCOPE_CAP = 200;
 
 /**
  * Every cached item from state.lastGood, interview list/detail merged by id.
@@ -38,8 +35,47 @@ function cachedItems(state) {
   const lastGood = state.lastGood || {};
   return mergeInterviewScopes(
     lastGood.interviews?.items || [],
-    lastGood.interviewDetail?.items || []
+    lastGood["interview-detail"]?.items || []
   ).concat(lastGood.events?.items || [], lastGood.posting?.items || []);
+}
+
+/**
+ * The item's anchor instant (its own date), or NaN when none parses.
+ * @param {any} item
+ */
+function anchorMs(item) {
+  return Date.parse(item?.endAt || item?.startAt || item?.dueAt || "");
+}
+
+/**
+ * Per-job accumulate: prev items from other jobs survive; items for the
+ * job(s) in this payload are replaced by the fresh read — or removed when the
+ * read produced none (expired posting deadline, a timeslot item after the
+ * interview got booked). Then prune stale items and cap.
+ * @param {any[]} prevItems
+ * @param {any[]} freshItems
+ * @param {any[]} jobIds   jobIds present in this payload
+ * @param {number} nowMs
+ * @param {number} maxAgeDays
+ */
+function accumulateJobItems(prevItems, freshItems, jobIds, nowMs, maxAgeDays) {
+  const jobs = new Set((jobIds || []).filter(Boolean));
+  const cutoff = nowMs - maxAgeDays * DAY_MS;
+  const combined = [
+    ...(prevItems || []).filter((item) => !jobs.has(item?.meta?.jobId)),
+    ...(freshItems || []),
+  ];
+  const kept = combined.filter((item) => {
+    const anchor = anchorMs(item);
+    return Number.isNaN(anchor) || anchor >= cutoff;
+  });
+  if (kept.length <= JOB_SCOPE_CAP) return kept;
+  // Drop the oldest by anchor date, preserving the order of survivors.
+  const ranked = kept
+    .map((item, i) => ({ item, i, anchor: anchorMs(item) }))
+    .sort((a, b) => a.anchor - b.anchor || a.i - b.i);
+  const drop = new Set(ranked.slice(0, kept.length - JOB_SCOPE_CAP).map((r) => r.i));
+  return kept.filter((_, i) => !drop.has(i));
 }
 
 const pathOf = (url) => {
@@ -118,10 +154,10 @@ export default {
         // capture exists this is where it maps to items/applications.
         state.lastJsonAt = payload.at;
         return {
-          items: [],
+          items: cachedItems(state),
           applications: state.applications || [],
           complete: false,
-          scope: "json",
+          scope: SCOPE,
           state,
         };
       }
@@ -136,7 +172,7 @@ export default {
           items: cachedItems(state),
           applications: state.applications || [],
           complete: false,
-          scope: "session",
+          scope: SCOPE,
           session: "signed-out",
           state,
         };
@@ -151,14 +187,13 @@ export default {
           items: cachedItems(state),
           applications: state.applications || [],
           complete: false,
-          scope: parsed.page === "unknown" ? "unknown" : parsed.page,
+          scope: SCOPE,
           state,
         };
       }
 
       const now = ctx.now || new Date();
-      /** @type {Record<string, import("../../core/contract.js").Item[]>} */
-      const freshItems = {};
+      const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
       const readOk = [];
       const found = new Set(
         Object.keys(parsed).filter((key) => key !== "page" && key !== "complete")
@@ -178,25 +213,53 @@ export default {
         delete state.needsUpdate.applications;
       }
       if (parsed.interviews) {
-        freshItems.interviews = interviewItems(parsed.interviews.rows, now);
+        // The list page is a full table: replace the scope.
+        state.lastGood.interviews = {
+          items: interviewItems(parsed.interviews.rows, now),
+          at: payload.at,
+        };
         readOk.push("interviews");
         delete state.needsUpdate.interviews;
       }
-      if (parsed.interviewDetail) {
-        freshItems.interviewDetail = interviewDetailItems(
-          parsed.interviewDetail,
-          now
-        );
-        readOk.push("interviewDetail");
-        delete state.needsUpdate.interviewDetail;
+      if (parsed["interview-detail"]) {
+        // One detail page = one job: keep other jobs' items, replace this
+        // job's (a booked detail drops that job's timeslot item).
+        const fresh = interviewDetailItems(parsed["interview-detail"], now);
+        state.lastGood["interview-detail"] = {
+          items: accumulateJobItems(
+            state.lastGood["interview-detail"]?.items,
+            fresh,
+            [parsed["interview-detail"].jobId],
+            nowMs,
+            JOB_SCOPES["interview-detail"]
+          ),
+          at: payload.at,
+        };
+        readOk.push("interview-detail");
+        delete state.needsUpdate["interview-detail"];
       }
       if (parsed.events) {
-        freshItems.events = eventItems(parsed.events.rows, now);
+        state.lastGood.events = {
+          items: eventItems(parsed.events.rows, now),
+          at: payload.at,
+        };
         readOk.push("events");
         delete state.needsUpdate.events;
       }
       if (parsed.posting) {
-        freshItems.posting = postingItems(parsed.posting, now);
+        // Same per-job accumulate: viewing job B keeps job A's deadline item;
+        // a posting with no future deadline removes that job's item.
+        const fresh = postingItems(parsed.posting, now);
+        state.lastGood.posting = {
+          items: accumulateJobItems(
+            state.lastGood.posting?.items,
+            fresh,
+            [parsed.posting.jobId],
+            nowMs,
+            JOB_SCOPES.posting
+          ),
+          at: payload.at,
+        };
         readOk.push("posting");
         delete state.needsUpdate.posting;
       }
@@ -215,15 +278,15 @@ export default {
         readOk.push("messages");
         delete state.needsUpdate.messages;
       }
-      if (parsed.messageDetail) {
+      if (parsed["message-detail"]) {
         state.messageDetails = mergeRecent(
           prev.messageDetails,
-          [parsed.messageDetail],
+          [parsed["message-detail"]],
           (row) => `${row.subject}|${row.createdAt}`,
           MAX_STORED
         );
-        readOk.push("messageDetail");
-        delete state.needsUpdate.messageDetail;
+        readOk.push("message-detail");
+        delete state.needsUpdate["message-detail"];
       }
       if (parsed.rankings) {
         state.rankings = {
@@ -237,11 +300,9 @@ export default {
       }
 
       // Fail-soft: a URL that should have yielded a section but didn't means
-      // the layout changed (or the DOM snapshot was taken before the grid
-      // rendered). Keep that scope's lastGood and flag it for review — but
-      // only on evidence that the page had actually finished loading.
-      // Past the bail above, every payload is a net response or a complete
-      // DOM snapshot, so a missing expected section really is a layout change.
+      // the layout changed. Past the bail above, every payload is a net
+      // response or a complete DOM snapshot, so a missing expected section
+      // really is a layout change.
       const failed = [];
       const file = pathOf(payload.url).split("/").pop() || "";
       const expectedGroups = Object.hasOwn(EXPECTED_SCOPES, file)
@@ -253,36 +314,23 @@ export default {
         failed.push(expected[0]);
       }
 
-      for (const scope of ITEM_SCOPES) {
-        if (freshItems[scope]) {
-          state.lastGood[scope] = { items: freshItems[scope], at: payload.at };
-        }
-      }
-
-      const items = mergeInterviewScopes(
-        freshItems.interviews || state.lastGood.interviews?.items || [],
-        freshItems.interviewDetail || state.lastGood.interviewDetail?.items || []
-      ).concat(
-        freshItems.events || state.lastGood.events?.items || [],
-        freshItems.posting || state.lastGood.posting?.items || []
-      );
+      const items = cachedItems(state);
       if (state.applications) state.applications = linkItems(state.applications, items);
       if (!Object.keys(state.needsUpdate).length) delete state.needsUpdate;
+      if (readOk.length) state.lastReadOk = readOk;
 
+      // scope is always "waterlooworks": W1's scope-mode fold replaces stored
+      // items whose seenIn scope matches, and every WW item reports that
+      // scope — so the lastGood union above is authoritative for the source.
       /** @type {SyncResult & {scope: string}} */
       const result = {
         items,
         applications: state.applications || [],
         complete: readOk.length > 0 && failed.length === 0,
-        // Scopes report in detectPage's kebab-case names; `found` holds
-        // parseAll's camelCase keys.
-        scope:
-          SCOPE_PRIORITY.find((scope) =>
-            found.has(scope.replace(/-([a-z])/g, (_, c) => c.toUpperCase()))
-          ) || "unknown",
+        scope: SCOPE,
         state,
       };
-      if (readOk.length) result.readOk = readOk;
+      if (readOk.length) result.readOk = [SCOPE];
       if (failed.length) {
         result.error = {
           code: "needs-update",

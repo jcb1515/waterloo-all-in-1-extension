@@ -30,17 +30,38 @@ replay (T2) can't reproduce them. This adapter is **T3 only**:
 | `/notLoggedIn.htm` | session | `session: "signed-out"`, cached items kept |
 
 The detail scopes share item ids with the list scope; the adapter merges by id
-(detail wins for `startAt`/`endAt`/`location`/`meta.prep`, list otherwise).
+(detail wins for `startAt`/`endAt`/`location`/`meta.prep`, `details` lines are
+concatenated de-duplicated, list first).
+
+**Unified scope.** Every WW item reports `seenIn[].scope = "waterlooworks"` and
+every `observe.parse` result returns `scope: "waterlooworks"` (plus
+`readOk: ["waterlooworks"]` when any section read). W1's scope-mode fold drops
+stored items whose `seenIn` scope equals the result scope, so one scope makes
+the adapter's `lastGood` union authoritative — the returned `items` are always
+the full current picture, on every return path (JSON body, signed-out,
+incomplete DOM included). Per-section detail lives only inside state, keyed by
+the `detectPage` names.
+
+**Per-job accumulation.** `posting` and `interview-detail` pages describe one
+job each, so `lastGood` for those scopes accumulates: a read replaces only that
+job's items (a posting with no future deadline removes its old deadline item; a
+booked detail removes its timeslot item). Stale items are pruned at 14 days
+(postings, by `dueAt`) / 30 days (details, by `endAt||startAt||dueAt`), capped
+at 200 items per scope (oldest dropped). `interviews` and `events` are whole
+tables → plain replace.
 
 ## Adapter state
 
 ```js
 {
   applications: Application[],         // after diffApplications
-  lastGood:    { [scope]: { items: Item[], at: string } },  // item scopes
-  needsUpdate: { [scope]: true },      // expected section missing on a loaded page
+  // item scopes, keyed by detectPage names:
+  lastGood:    { interviews, "interview-detail", events, posting:
+                   { items: Item[], at: string } },
+  needsUpdate: { [section]: true },    // expected section missing on a loaded page
   lastUpdates: Update[],               // Update hand-off — the core reads these
                                        // from state until W1 decides otherwise
+  lastReadOk:  string[],               // sections that read OK on the last payload
   lastSeenAt:  string,
   messages:    [{ subject, receivedAt, from, priority }],
   messageDetails: [...],               // see privacy note above

@@ -147,6 +147,24 @@ function headerLabels(table) {
 }
 
 /**
+ * Tables with duplicate outerHTML removed — DOM snapshots can contain the
+ * same table twice (once standalone, once inside a captured .label parent).
+ * @param {any} root
+ * @returns {any[]}
+ */
+function uniqueTables(root) {
+  const seen = new Set();
+  const out = [];
+  for (const table of root.querySelectorAll("table")) {
+    const html = table.outerHTML;
+    if (seen.has(html)) continue;
+    seen.add(html);
+    out.push(table);
+  }
+  return out;
+}
+
+/**
  * Find the table of a kind via TABLE_RULES (all required labels present).
  * Column order is user-configurable — never positional.
  * @param {any} doc
@@ -154,7 +172,7 @@ function headerLabels(table) {
  */
 function tableOfKind(doc, kind) {
   const rule = TABLE_RULES[kind];
-  for (const table of doc.querySelectorAll("table")) {
+  for (const table of uniqueTables(doc)) {
     const labels = headerLabels(table);
     if (labels.length && rule.every((label) => labels.includes(label))) return table;
   }
@@ -524,7 +542,7 @@ export function parseInterviewDetail(doc) {
 
   // Slot tables under "INTERVIEWER : <NAME>" headings: a single-cell day-header
   // row ("Thursday, October 1, 2026") then rows of [time range + room | state].
-  for (const table of doc.querySelectorAll("table")) {
+  for (const table of uniqueTables(doc)) {
     let day;
     for (const tr of tableRows(table)) {
       const cells = cellElements(tr);
@@ -617,8 +635,8 @@ export function parseAll(doc, opts = {}) {
   if (tableOfKind(doc, "interviews")) out.interviews = parseInterviews(doc);
   if (tableOfKind(doc, "events")) out.events = parseEventRegistrations(doc);
   if (tableOfKind(doc, "messages")) out.messages = parseMessages(doc);
-  if (isInterviewDetail(doc)) out.interviewDetail = parseInterviewDetail(doc);
-  if (isMessageDetail(doc)) out.messageDetail = parseMessageDetail(doc);
+  if (isInterviewDetail(doc)) out["interview-detail"] = parseInterviewDetail(doc);
+  if (isMessageDetail(doc)) out["message-detail"] = parseMessageDetail(doc);
   if (isPosting(doc)) out.posting = parsePosting(doc);
   if (isRankings(doc)) out.rankings = parseRankings(doc);
   return out;

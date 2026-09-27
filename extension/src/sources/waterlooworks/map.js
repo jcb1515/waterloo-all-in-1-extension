@@ -3,6 +3,7 @@
 
 import { itemId } from "../../core/contract.js";
 import { normalizeStatus } from "./status.js";
+import { SCOPE } from "./selectors.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 /** @typedef {import("../../core/contract.js").Application} Application */
@@ -89,7 +90,7 @@ export function interviewItems(rows, now) {
         : "open",
       confidence: "exact",
       review: "auto",
-      seenIn: [{ source: SOURCE, key, scope: "interviews", at: nowIso }],
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       details: details || undefined,
       meta: {
         jobId: row.jobId,
@@ -153,7 +154,7 @@ export function interviewDetailItems(detail, now) {
       status: cancelled(detail.status) ? "cancelled" : "open",
       confidence: "exact",
       review: "auto",
-      seenIn: [{ source: SOURCE, key, scope: "interviewDetail", at: nowIso }],
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       details: details || undefined,
       meta: {
         jobId: detail.jobId,
@@ -201,7 +202,7 @@ export function interviewDetailItems(detail, now) {
         {
           source: SOURCE,
           key: `timeslot:${detail.jobId}`,
-          scope: "interviewDetail",
+          scope: SCOPE,
           at: nowIso,
         },
       ],
@@ -242,7 +243,7 @@ export function eventItems(rows, now) {
       status: cancelled(row.registrationStatus) ? "cancelled" : "open",
       confidence: "exact",
       review: "auto",
-      seenIn: [{ source: SOURCE, key, scope: "events", at: nowIso }],
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       meta: { registrationStatus: row.registrationStatus },
     });
   }
@@ -270,7 +271,7 @@ export function postingItems(posting, now) {
       status: "open",
       confidence: "exact",
       review: "auto",
-      seenIn: [{ source: SOURCE, key, scope: "postings", at: iso(now) }],
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: iso(now) }],
       meta: { jobId: posting.jobId, division: posting.division },
     },
   ];
@@ -318,6 +319,9 @@ export function mergeInterviewScopes(listItems, detailItems) {
       startAt: detail.startAt ?? item.startAt,
       endAt: detail.endAt ?? item.endAt,
       location: detail.location ?? item.location,
+      // Concatenate de-duplicated lines — list lines first, then the detail's
+      // (interviewer, instructions) so neither side loses information.
+      details: mergeDetails(item.details, detail.details),
       meta: {
         ...detail.meta,
         ...item.meta,
@@ -327,6 +331,19 @@ export function mergeInterviewScopes(listItems, detailItems) {
     };
   });
   return [...merged, ...detailById.values()];
+}
+
+/**
+ * @param {string|undefined} a  list-side details
+ * @param {string|undefined} b  detail-side details
+ */
+function mergeDetails(a, b) {
+  const lines = [];
+  for (const line of `${a || ""}\n${b || ""}`.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed && !lines.includes(trimmed)) lines.push(trimmed);
+  }
+  return lines.length ? lines.join("\n") : undefined;
 }
 
 function dedupeSeenIn(...lists) {

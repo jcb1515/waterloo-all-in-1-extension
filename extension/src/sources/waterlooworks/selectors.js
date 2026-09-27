@@ -3,6 +3,15 @@
 // editing one file. Header matching is case-insensitive on the cleaned label
 // (Material icon ligature text removed, trailing "(1)" sort index stripped).
 
+/**
+ * The single scope every WaterlooWorks item reports (`seenIn[].scope` and
+ * `observe.parse`'s result scope). W1's scope-mode fold drops stored items
+ * whose seenIn scope equals the result scope, so one unified scope makes the
+ * adapter's lastGood union authoritative — partial section reads can't leave
+ * stale items behind.
+ */
+export const SCOPE = "waterlooworks";
+
 /** Material icon ligature elements — their text must be stripped everywhere. */
 export const ICON_SELECTOR = ".material-icons";
 
@@ -122,6 +131,6 @@ export const OBSERVE_PATTERNS = Object.freeze([
  */
 export const EXPECTED_SCOPES = Object.freeze({
   "applications.htm": Object.freeze(["applications"]),
-  "interviews.htm": Object.freeze(["interviews", "interviewDetail"]),
+  "interviews.htm": Object.freeze(["interviews", "interview-detail"]),
   "jobs.htm": Object.freeze(["posting"]),
 });
