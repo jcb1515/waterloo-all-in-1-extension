@@ -47,7 +47,7 @@ test("a new application on a later read emits a 'new' update", () => {
   assert.equal(updates[0].text, "Applied: Initech · Software Intern");
   assert.equal(updates[0].refId, "waterlooworks:2");
   assert.equal(updates[0].at, T2.toISOString());
-  assert.match(updates[0].id, /^waterlooworks:waterlooworks:2:applied:2026-09-12T12:00:00\.000Z$/);
+  assert.match(updates[0].id, /^waterlooworks:2:applied:2026-09-12T12:00:00\.000Z$/);
 });
 
 test("a status change appends history and emits a 'status' update", () => {
@@ -100,13 +100,12 @@ test("itemIds merge across reads without duplicates", () => {
   assert.deepEqual(applications[0].itemIds, ["waterlooworks:i1", "waterlooworks:i2"]);
 });
 
-test("a first-seen app with an unknown status gets empty history", () => {
+test("a first-seen app with an unknown status gets empty history and no update", () => {
   const { applications: prev } = diffApplications([], [app("1", "applied")], T1);
   const { applications, updates } = diffApplications(prev, [...prev, app("2", "unknown")], T2);
   const found = applications.find((a) => a.id === "waterlooworks:2");
   assert.deepEqual(found?.history, []);
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].text, "Unknown: Contoso · Software Intern");
+  assert.equal(updates.length, 0);
 });
 
 test("recovering from unknown to a known status emits a status update", () => {

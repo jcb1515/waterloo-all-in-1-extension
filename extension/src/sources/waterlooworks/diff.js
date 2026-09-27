@@ -38,7 +38,7 @@ export function diffApplications(prev, next, now) {
     }
     if (!before) {
       const history = status === "unknown" ? [] : [{ status, at: nowIso }];
-      if (hadPrev) updates.push(makeUpdate(app, status, "new", nowIso));
+      if (hadPrev && status !== "unknown") updates.push(makeUpdate(app, status, "new", nowIso));
       applications.push({ ...app, status, history, itemIds });
       continue;
     }
@@ -67,7 +67,7 @@ export function diffApplications(prev, next, now) {
  */
 function makeUpdate(app, status, kind, nowIso) {
   return {
-    id: `waterlooworks:${app.id}:${status}:${nowIso}`,
+    id: `${app.id}:${status}:${nowIso}`,
     at: nowIso,
     source: "waterlooworks",
     kind,
