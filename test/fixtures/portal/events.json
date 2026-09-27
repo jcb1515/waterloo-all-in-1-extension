@@ -1,0 +1,103 @@
+{
+  "meta": { "datetime": null, "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": [
+    {
+      "summary": "Lectures begin",
+      "name": "Important dates",
+      "description": "Classes begin for the fall term.",
+      "location": null,
+      "allDay": true,
+      "startDate": "2026-09-09T00:00:00",
+      "endDate": "2026-09-09T23:59:00",
+      "key": "cal-term-lectures-begin-1269",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "important",
+      "feedId": 7
+    },
+    {
+      "summary": "Reading Week",
+      "name": "Important dates",
+      "description": null,
+      "location": null,
+      "allDay": true,
+      "startDate": "2026-10-12T00:00:00",
+      "endDate": "2026-10-16T23:59:00",
+      "key": "cal-term-reading-week-1269",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "important",
+      "feedId": 7
+    },
+    {
+      "summary": "Lectures end",
+      "name": "Important dates",
+      "description": null,
+      "location": null,
+      "allDay": true,
+      "startDate": "2026-12-07T00:00:00",
+      "endDate": "2026-12-07T23:59:00",
+      "key": "cal-term-lectures-end-1269",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "important",
+      "feedId": 7
+    },
+    {
+      "summary": "Final examination period",
+      "name": "Important dates",
+      "description": null,
+      "location": null,
+      "allDay": true,
+      "startDate": "2026-12-10T00:00:00",
+      "endDate": "2026-12-24T00:00:00",
+      "key": "cal-term-exam-period-1269",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "important",
+      "feedId": 7
+    },
+    {
+      "summary": "Bomber Karaoke Night",
+      "name": "WUSA Events",
+      "description": "Weekly karaoke at the Bombshelter pub.",
+      "location": "Bombshelter",
+      "allDay": false,
+      "startDate": "2026-09-18T21:00:00",
+      "endDate": "2026-09-18T23:00:00",
+      "key": "wusa-karaoke-2026-09-18",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "wusa",
+      "feedId": 12
+    },
+    {
+      "summary": "Cancelled Yard Sale",
+      "name": "WUSA Events",
+      "description": null,
+      "location": "SLC",
+      "allDay": false,
+      "startDate": "2026-10-03T10:00:00",
+      "endDate": "2026-10-03T14:00:00",
+      "key": "wusa-yard-2026-10-03",
+      "isEventCancelled": true,
+      "rRule": null,
+      "style": "wusa",
+      "feedId": 12
+    },
+    {
+      "summary": "ECE 150 LEC 002",
+      "name": "My classes",
+      "description": null,
+      "location": "E7 5343",
+      "allDay": false,
+      "startDate": "2026-09-17T08:30:00",
+      "endDate": "2026-09-17T09:20:00",
+      "key": "class-ece150-lec-002-0917",
+      "isEventCancelled": false,
+      "rRule": null,
+      "style": "class",
+      "feedId": 3
+    }
+  ]
+}

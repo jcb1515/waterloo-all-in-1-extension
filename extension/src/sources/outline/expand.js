@@ -29,7 +29,7 @@ const KIND_TYPE = /** @type {Record<string, Item["type"]>} */ ({
   SEM: "class",
 });
 const KIND_WORD = { LEC: "lecture", TUT: "tutorial", LAB: "lab", SEM: "seminar" };
-const KIND_TITLE = { LEC: "Lecture", TUT: "Tutorial", LAB: "Lab", SEM: "Seminar" };
+export const KIND_TITLE = { LEC: "Lecture", TUT: "Tutorial", LAB: "Lab", SEM: "Seminar" };
 
 export const pad = (n) => String(n).padStart(2, "0");
 export const dNum = (iso) => {

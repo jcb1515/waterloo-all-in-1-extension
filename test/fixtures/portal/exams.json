@@ -1,0 +1,29 @@
+{
+  "meta": { "datetime": "2026-09-27T03:10:00Z", "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": [
+    {
+      "title": "ECE 150 Final",
+      "startDate": "2026-12-14T09:00:00",
+      "endDate": "2026-12-14T11:30:00",
+      "location": "PAC 1-12",
+      "seatCode": "A12",
+      "seatInstructions": null
+    },
+    {
+      "title": "MATH 117",
+      "startDate": "2026-12-18T19:30:00",
+      "endDate": "2026-12-18T22:00:00",
+      "location": "",
+      "seatCode": null,
+      "seatInstructions": null
+    },
+    {
+      "title": "ECE 105 Make-up Final",
+      "startDate": null,
+      "endDate": null,
+      "location": null,
+      "seatCode": null,
+      "seatInstructions": null
+    }
+  ]
+}
