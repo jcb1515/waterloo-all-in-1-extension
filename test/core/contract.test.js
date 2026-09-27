@@ -30,6 +30,7 @@ test("SITE_BY_HOST covers every manifest host except the feed worker", () => {
   const manifest = JSON.parse(readFileSync(path.join(REPO, "extension", "manifest.json"), "utf8"));
   const hosts = new Set();
   for (const p of manifest.host_permissions || []) hosts.add(new URL(p).hostname);
+  for (const p of manifest.optional_host_permissions || []) hosts.add(new URL(p).hostname);
   for (const cs of manifest.content_scripts || []) for (const m of cs.matches || []) hosts.add(new URL(m).hostname);
   for (const host of hosts) {
     if (host === "portalapi2.uwaterloo.ca") continue; // API host, no pages load on it

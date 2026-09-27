@@ -7,6 +7,8 @@ import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
 import { IS_PREVIEW, send } from "../data.js";
 import { UI } from "../../core/messages.js";
+import { OPTIONAL_PERMISSION_GROUPS } from "../../core/permissions.js";
+import { AllowSourceButton, useSourceAccess } from "../../ui/permissions.jsx";
 import { inventoryReport } from "../../sources/discord/index.js";
 import {
   RefreshIcon,
@@ -59,72 +61,110 @@ export function Sources({ state, actions, now }) {
   return (
     <div class="sources-list">
       {cards.map(({ adapter, stage, st, status }) => (
-        <section class="card source-card" key={adapter.id}>
-          <div class="source-head">
-            <span class="mono-tile" aria-hidden="true">
-              {monogram(adapter.label)}
-            </span>
-            <div class="source-title">
-              <h3>{adapter.label}</h3>
-              {st || stage !== "soon" ? (
-                <span class="source-meta tabular">
-                  {st && st.lastOkAt
-                    ? `Synced ${fmtAgo(st.lastOkAt, now)}`
-                    : st && st.lastRunAt
-                      ? `Tried ${fmtAgo(st.lastRunAt, now)}`
-                      : "Not synced yet"}
-                  {st && typeof st.itemCount === "number" && st.itemCount > 0
-                    ? ` · ${st.itemCount} items`
-                    : ""}
-                </span>
-              ) : null}
-            </div>
-            <span class={`badge ${TONE_BADGE[status.tone]}`}>{status.label}</span>
-          </div>
-          {status.detail ? <p class="source-detail">{status.detail}</p> : null}
-          {stage === "live" && !(adapter.intervalMinutes > 0) ? (
-            <p class="source-detail">Updates while you browse {adapter.label}.</p>
-          ) : null}
-          {adapter.id === "discord" ? <DiscordControls st={st} /> : null}
-          <div class="source-actions">
-            {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 ? (
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => actions.sync(adapter.id)}
-              >
-                <RefreshIcon size={13} /> Sync now
-              </button>
-            ) : null}
-            {adapter.origins && adapter.origins[0] ? (
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => actions.open(`${adapter.origins[0]}/`)}
-              >
-                <ExternalLinkIcon size={13} /> Open site
-              </button>
-            ) : null}
-            {st ? (
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost"
-                onClick={() => {
-                  if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
-                    actions.clearSource(adapter.id);
-                  }
-                }}
-              >
-                <TrashIcon size={13} /> Clear data
-              </button>
-            ) : null}
-          </div>
-        </section>
+        <SourceCard
+          key={adapter.id}
+          adapter={adapter}
+          stage={stage}
+          st={st}
+          status={status}
+          state={state}
+          actions={actions}
+          now={now}
+        />
       ))}
       <button type="button" class="btn btn-ghost sources-privacy" onClick={openPrivacy}>
         <ShieldIcon size={14} /> Privacy &amp; discovery settings
       </button>
     </div>
+  );
+}
+
+/**
+ * One source card. When the source is enabled but its optional host
+ * permission isn't granted, the badge reads "Needs permission" and an Allow
+ * button requests it in-place.
+ * @param {{adapter: any, stage: string, st: any, status: any, state: any,
+ *   actions: any, now: Date}} p
+ */
+function SourceCard({ adapter, stage, st, status, state, actions, now }) {
+  const optional = !!(OPTIONAL_PERMISSION_GROUPS /** @type {any} */)[adapter.id];
+  const granted = useSourceAccess(adapter.id);
+  const enabled = !(
+    state.settings &&
+    state.settings.sources &&
+    state.settings.sources[adapter.id] &&
+    state.settings.sources[adapter.id].enabled === false
+  );
+  const needsPerm = optional && enabled && granted === false;
+  const shown = needsPerm
+    ? { label: "Needs permission", tone: "warn", detail: `Allow access to ${adapter.origins[0].replace("https://", "")} so ${adapter.label} can read while you browse.` }
+    : status;
+
+  return (
+    <section class="card source-card">
+      <div class="source-head">
+        <span class="mono-tile" aria-hidden="true">
+          {monogram(adapter.label)}
+        </span>
+        <div class="source-title">
+          <h3>{adapter.label}</h3>
+          {st || stage !== "soon" ? (
+            <span class="source-meta tabular">
+              {st && st.lastOkAt
+                ? `Synced ${fmtAgo(st.lastOkAt, now)}`
+                : st && st.lastRunAt
+                  ? `Tried ${fmtAgo(st.lastRunAt, now)}`
+                  : "Not synced yet"}
+              {st && typeof st.itemCount === "number" && st.itemCount > 0
+                ? ` · ${st.itemCount} items`
+                : ""}
+            </span>
+          ) : null}
+        </div>
+        <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span>
+      </div>
+      {shown.detail ? <p class="source-detail">{shown.detail}</p> : null}
+      {stage === "live" && !(adapter.intervalMinutes > 0) && !needsPerm ? (
+        <p class="source-detail">Updates while you browse {adapter.label}.</p>
+      ) : null}
+      {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
+      <div class="source-actions">
+        {needsPerm ? (
+          <AllowSourceButton sourceId={adapter.id} />
+        ) : null}
+        {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            onClick={() => actions.sync(adapter.id)}
+          >
+            <RefreshIcon size={13} /> Sync now
+          </button>
+        ) : null}
+        {adapter.origins && adapter.origins[0] && !needsPerm ? (
+          <button
+            type="button"
+            class="btn btn-sm"
+            onClick={() => actions.open(`${adapter.origins[0]}/`)}
+          >
+            <ExternalLinkIcon size={13} /> Open site
+          </button>
+        ) : null}
+        {st && !needsPerm ? (
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            onClick={() => {
+              if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
+                actions.clearSource(adapter.id);
+              }
+            }}
+          >
+            <TrashIcon size={13} /> Clear data
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

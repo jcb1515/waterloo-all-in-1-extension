@@ -5,6 +5,8 @@
 
 import { Card } from "../bits.jsx";
 import { CheckIcon } from "../../ui/icons.jsx";
+import { AllowSourceButton, useSourceAccess } from "../../ui/permissions.jsx";
+import { stageForAdapter } from "../../core/registry.js";
 
 /** @param {{ok?: boolean, label: string, todo?: string}} p */
 function StatusChip({ ok, label, todo }) {
@@ -42,6 +44,8 @@ const WW_URL = "https://waterlooworks.uwaterloo.ca/";
 export function WelcomeSection({ settings, state }) {
   const ss = ((state && state.sourceState) || {});
   const learnOk = !!(ss.learn && ss.learn.lastOkAt);
+  const discordOk = useSourceAccess("discord");
+  const emailOk = useSourceAccess("outlook");
   const outlineUrls = (settings.sources && settings.sources.outline && settings.sources.outline.urls) || {};
   const outlineCount = Array.isArray(outlineUrls)
     ? outlineUrls.length
@@ -90,6 +94,16 @@ export function WelcomeSection({ settings, state }) {
             Read-only and passive — the extension never posts or fetches; it only
             notes dated messages in servers you already read.
             {watchedCount > 0 ? ` ${watchedCount} watched.` : ""}
+            {discordOk === false ? (
+              <>
+                {" "}
+                <AllowSourceButton
+                  sourceId="discord"
+                  label="Allow discord.com"
+                  className="btn btn-sm"
+                />
+              </>
+            ) : null}
           </Step>
           <Step
             n={6}
@@ -108,6 +122,26 @@ export function WelcomeSection({ settings, state }) {
             Publish your agenda to one private feed and subscribe to it from
             Google Calendar — no duplicates.
           </Step>
+          {stageForAdapter("outlook") === "live" ? (
+            <Step
+              n={7}
+              done={emailOk === true}
+              title={<>Outlook / Gmail: allow reading invites <a class="welcome-link" href="#sources">Sources</a></>}
+            >
+              Optional permission — the extension only reads calendar invites and
+              dated mail in Outlook or Gmail tabs you open.
+              {emailOk === false ? (
+                <>
+                  {" "}
+                  <AllowSourceButton
+                    sourceId="outlook"
+                    label="Allow email sites"
+                    className="btn btn-sm"
+                  />
+                </>
+              ) : null}
+            </Step>
+          ) : null}
         </ol>
       </Card>
 

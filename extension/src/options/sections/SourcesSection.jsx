@@ -10,6 +10,10 @@ import { send, IS_PREVIEW, query } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
 import { fileToEntry, OUTLINE_FILES_KEY } from "../outline-import.js";
 import { pdfToText, base64ToBytes } from "../pdf-text.js";
+import {
+  OPTIONAL_PERMISSION_GROUPS,
+  requestSourceAccess,
+} from "../../core/permissions.js";
 import { ExternalLinkIcon, TrashIcon, PlusIcon, FileTextIcon } from "../../ui/icons.jsx";
 
 const STAGE_BADGE = { live: "badge-ok", soon: "badge-muted" };
@@ -20,14 +24,39 @@ const STAGE_LABEL = { live: "Live", soon: "Coming soon" };
  */
 export function SourcesSection({ settings, save, state }) {
   const src = settings.sources || {};
+  const [denied, setDenied] = useState(/** @type {Record<string, boolean>} */ ({}));
 
   const patchSource = (id, patch) => save({ sources: { [id]: { ...(src[id] || {}), ...patch } } });
   const enabledOf = (id) => !src[id] || src[id].enabled !== false;
+
+  /**
+   * Enabling an optional-permission source asks for its hosts inside this
+   * click. Denied -> the toggle stays off and a note explains why.
+   * @param {string} id adapter id
+   * @param {boolean} v
+   */
+  const onToggle = async (id, v) => {
+    if (!v) {
+      setDenied((d) => ({ ...d, [id]: false }));
+      patchSource(id, { enabled: false });
+      return;
+    }
+    if (!IS_PREVIEW && (OPTIONAL_PERMISSION_GROUPS /** @type {any} */)[id]) {
+      const ok = await requestSourceAccess(id);
+      if (!ok) {
+        setDenied((d) => ({ ...d, [id]: true }));
+        return;
+      }
+    }
+    setDenied((d) => ({ ...d, [id]: false }));
+    patchSource(id, { enabled: true });
+  };
 
   return (
     <div class="opt-stack">
       {ADAPTERS.map((a) => {
         const stage = stageForAdapter(a.id);
+        const optional = !!(OPTIONAL_PERMISSION_GROUPS /** @type {any} */)[a.id];
         return (
           <Card key={a.id}>
             <div class="src-row">
@@ -48,9 +77,21 @@ export function SourcesSection({ settings, save, state }) {
               <Toggle
                 label="Enabled"
                 checked={enabledOf(a.id)}
-                onChange={(v) => patchSource(a.id, { enabled: v })}
+                onChange={(v) => onToggle(a.id, v)}
               />
             </div>
+            {denied[a.id] ? (
+              <p class="help status-err">
+                Permission wasn't granted — {a.label} stays off. The browser prompt asks for
+                access to {a.origins[0].replace("https://", "")}; allow it, then toggle again.
+              </p>
+            ) : null}
+            {optional && !denied[a.id] ? (
+              <p class="help">
+                Optional permission: your browser asks for {a.origins[0].replace("https://", "")}{" "}
+                when you enable this.
+              </p>
+            ) : null}
             {a.id === "outline" ? (
               <>
                 <OutlineUrls src={src.outline || {}} save={save} />

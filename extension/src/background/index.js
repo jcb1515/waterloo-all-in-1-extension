@@ -50,6 +50,7 @@ import {
   BRIEFING_ALARM,
   DIGEST_ALARM,
 } from "../core/remind.js";
+import { syncOptionalContentScripts } from "../core/permissions.js";
 
 const BADGE_BG = "#FED34C"; // school bus yellow
 const BADGE_TEXT = "#16181D";
@@ -108,6 +109,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     .then(setup)
     .then(catchUp)
     .catch((e) => console.warn("[wa1] install", e));
+  syncOptionalContentScripts();
   if (details && details.reason === "install") {
     // First run: the options page opens on the setup checklist.
     chrome.tabs
@@ -119,7 +121,11 @@ chrome.runtime.onStartup.addListener(() => {
   setup()
     .then(catchUp)
     .catch((e) => console.warn("[wa1] startup", e));
+  syncOptionalContentScripts();
 });
+// Optional-host grants change at runtime: (un)register that group's scripts.
+chrome.permissions.onAdded.addListener(() => syncOptionalContentScripts());
+chrome.permissions.onRemoved.addListener(() => syncOptionalContentScripts());
 setup().catch(() => {}); // SW reloads (dev reloads) don't fire onStartup
 
 chrome.alarms.onAlarm.addListener((alarm) => {
