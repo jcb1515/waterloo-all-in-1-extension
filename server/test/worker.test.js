@@ -6,6 +6,7 @@ import worker, {
   feedGroupOf,
   foldIcsLine,
   serializeState,
+  serverConfig,
   stableHash
 } from "../src/worker.js";
 import { fakeD1 } from "./fake-d1.js";
@@ -47,8 +48,18 @@ const blockFor = (ics, uid) =>
   vevents(ics).find((block) => block.includes(`UID:${uid}`));
 const prop = (block, name) => block.find((line) => line.startsWith(name));
 
-const call = (request, db, ctx) =>
-  worker.fetch(request, { DB: db }, ctx ?? { pending: [], waitUntil(p) { this.pending.push(p); } });
+const call = (request, db, ctx, env = {}) =>
+  worker.fetch(request, { DB: db, ...env }, ctx ?? { pending: [], waitUntil(p) { this.pending.push(p); } });
+
+const reqIp = (method, path, body, ip) =>
+  new Request(`https://feed.test${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      "cf-connecting-ip": ip
+    },
+    body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body)
+  });
 
 const req = (method, path, body, token) =>
   new Request(`https://feed.test${path}`, {
@@ -1029,3 +1040,150 @@ test("stableHash matches the BigInt FNV-1a implementation", () => {
   }
   for (const text of cases) assert.equal(stableHash(text), stableHashRef(text));
 });
+
+// --- shared-server hardening: env config, feed cap, per-IP create limit ----
+
+test("serverConfig validates env vars and falls back to defaults", () => {
+  assert.deepEqual(serverConfig({}), {
+    maxEvents: 3000,
+    maxFeeds: null,
+    createsPerIpPerDay: 10,
+    rateSalt: "waterloo-all-in-1"
+  });
+  assert.deepEqual(serverConfig({
+    MAX_EVENTS: "600", MAX_FEEDS: "50", CREATES_PER_IP_PER_DAY: "3",
+    RATE_SALT: "pepper"
+  }), { maxEvents: 600, maxFeeds: 50, createsPerIpPerDay: 3, rateSalt: "pepper" });
+  // Bad values fall back: out of range, non-numeric, non-integer, empty salt.
+  assert.deepEqual(serverConfig({
+    MAX_EVENTS: "0", MAX_FEEDS: "-2", CREATES_PER_IP_PER_DAY: "abc",
+    RATE_SALT: ""
+  }), {
+    maxEvents: 3000, maxFeeds: null,
+    createsPerIpPerDay: 10, rateSalt: "waterloo-all-in-1"
+  });
+  assert.equal(serverConfig({ MAX_EVENTS: "9999" }).maxEvents, 3000);
+  assert.equal(serverConfig({ MAX_EVENTS: "1.5" }).maxEvents, 3000);
+  assert.equal(serverConfig({ MAX_FEEDS: 7 }).maxFeeds, 7); // numbers ok
+});
+
+test("MAX_EVENTS env var clamps the publish cap", async () => {
+  const db = fakeD1();
+  const two = payload([ev(), ev({ id: "b" })]);
+  const res = await call(req("POST", "/v1/calendars", two), db, undefined, {
+    MAX_EVENTS: "1"
+  });
+  assert.equal(res.status, 413);
+  assert.match((await res.json()).error, /limit is 1/);
+  // A PUT is capped by the same var.
+  const { state } = applyPublish(null, two, T1);
+  db.feeds.set("z".repeat(24), {
+    update_token_hash: "x",
+    calendar_json: serializeState(state).json,
+    expires_at: Date.now() + 60_000,
+    updated_at: Date.now()
+  });
+  const hashToken = async (t) => {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t));
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+  db.feeds.get("z".repeat(24)).update_token_hash = await hashToken("tok");
+  const put = await call(
+    req("PUT", `/v1/calendars/${"z".repeat(24)}.ics`, two, "tok"),
+    db, undefined, { MAX_EVENTS: "1" }
+  );
+  assert.equal(put.status, 413);
+});
+
+test("MAX_FEEDS returns 503 'This server is full' at the cap", async () => {
+  const db = fakeD1();
+  const env = { MAX_FEEDS: "1" };
+  const first = await call(req("POST", "/v1/calendars", payload([ev()])), db, undefined, env);
+  assert.equal(first.status, 201);
+  const second = await call(req("POST", "/v1/calendars", payload([ev()])), db, undefined, env);
+  assert.equal(second.status, 503);
+  assert.deepEqual(await second.json(), { error: "This server is full" });
+  assert.equal(db.feeds.size, 1);
+
+  // Invalid values mean unlimited.
+  const db2 = fakeD1();
+  for (const bad of ["0", "-3", "lots"]) {
+    const res = await call(req("POST", "/v1/calendars", payload([ev()])), db2, undefined, { MAX_FEEDS: bad });
+    assert.equal(res.status, 201, `MAX_FEEDS=${bad}`);
+  }
+});
+
+test("CREATES_PER_IP_PER_DAY rate-limits POSTs per hashed IP", async () => {
+  const db = fakeD1();
+  const env = { CREATES_PER_IP_PER_DAY: "2", RATE_SALT: "pepper" };
+  const mk = (ip) => reqIp("POST", "/v1/calendars", payload([ev()]), ip);
+  assert.equal((await call(mk("203.0.113.7"), db, undefined, env)).status, 201);
+  assert.equal((await call(mk("203.0.113.7"), db, undefined, env)).status, 201);
+  const third = await call(mk("203.0.113.7"), db, undefined, env);
+  assert.equal(third.status, 429);
+  const retryAfter = Number(third.headers.get("retry-after"));
+  assert.ok(retryAfter >= 1 && retryAfter <= 86401);
+  assert.equal(third.headers.get("cache-control"), "no-store");
+  assert.equal(db.feeds.size, 2);
+
+  // The limit key is a salted day-scoped hash — never the raw IP.
+  assert.equal(db.createLimits.size, 1);
+  const [key, row] = [...db.createLimits.entries()][0];
+  assert.match(key, /^[0-9a-f]{32}$/);
+  assert.ok(!key.includes("203.0.113.7"));
+  assert.equal(row.count, 2);
+  assert.match(row.day, /^\d{4}-\d{2}-\d{2}$/);
+
+  // A different IP has its own quota; a different salt a different key.
+  assert.equal((await call(mk("198.51.100.9"), db, undefined, env)).status, 201);
+  assert.equal(
+    (await call(mk("203.0.113.7"), db, undefined, { ...env, RATE_SALT: "other" })).status,
+    201
+  );
+
+  // No CF-Connecting-IP (local dev) -> no limit at all.
+  const db3 = fakeD1();
+  for (let i = 0; i < 4; i++) {
+    assert.equal(
+      (await call(req("POST", "/v1/calendars", payload([ev()])), db3, undefined, env)).status,
+      201
+    );
+  }
+});
+
+test("cron deletes create_limits rows from previous days only", async () => {
+  const db = fakeD1();
+  const ctx = { pending: [], waitUntil(p) { this.pending.push(p); } };
+  const today = new Date().toISOString().slice(0, 10);
+  db.createLimits.set("a".repeat(32), { day: "2020-01-01", count: 5 });
+  db.createLimits.set("b".repeat(32), { day: today, count: 3 });
+  await worker.scheduled({}, { DB: db }, ctx);
+  await Promise.all(ctx.pending);
+  assert.ok(!db.createLimits.has("a".repeat(32)));
+  assert.ok(db.createLimits.has("b".repeat(32)));
+});
+
+test("feed responses send nosniff + no-referrer; JSON errors send no-store", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl } = await created.json();
+  const path = new URL(feedUrl).pathname;
+
+  const get = await call(req("GET", path), db);
+  assert.equal(get.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(get.headers.get("referrer-policy"), "no-referrer");
+
+  const etag = get.headers.get("etag");
+  const notModified = await call(
+    new Request(`https://feed.test${path}`, { headers: { "if-none-match": etag } }),
+    db
+  );
+  assert.equal(notModified.status, 304);
+  assert.equal(notModified.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(notModified.headers.get("referrer-policy"), "no-referrer");
+
+  const missing = await call(req("GET", `/v1/calendars/${"q".repeat(24)}.ics`), db);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("cache-control"), "no-store");
+});
+

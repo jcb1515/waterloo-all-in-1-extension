@@ -20,15 +20,17 @@
 export function watchConfig(guildName, watched) {
   const name = String(guildName || "").trim();
   if (!name) return null;
-  const entries = Object.entries(watched || {});
+  const entries = Object.entries(
+    watched && typeof watched === "object" ? watched : {}
+  );
   if (entries.length) {
     const lower = name.toLowerCase();
     for (const [key, entry] of entries) {
       if (key.trim().toLowerCase() === lower) {
         return {
           team: key.trim(),
-          focus: [...(entry?.focus || [])],
-          settings: entry || {},
+          focus: Array.isArray(entry?.focus) ? [...entry.focus] : [],
+          settings: entry && typeof entry === "object" ? entry : {},
         };
       }
     }
@@ -119,7 +121,9 @@ export function channelScore(channel, focus = []) {
   let score = 0;
   for (const w of nameWords) score += CHANNEL_POSITIVE[w] || 0;
   for (const w of catWords) score += CHANNEL_POSITIVE[w] || 0;
-  const focusSet = new Set((focus || []).map((f) => String(f).toLowerCase()));
+  const focusSet = new Set(
+    (Array.isArray(focus) ? focus : []).map((f) => String(f).toLowerCase())
+  );
   for (const f of focusSet) {
     const vocab = FOCUS_VOCAB[f] || [f];
     if (intersects(nameWords, vocab)) {
@@ -224,7 +228,7 @@ export const TASK_VERBS = [
  */
 export function wordTrigger(text, words) {
   const s = String(text || "");
-  for (const w of words || []) {
+  for (const w of Array.isArray(words) ? words : []) {
     const flex = String(w)
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       .replace(/[ -]+/g, "[\\s-]+");

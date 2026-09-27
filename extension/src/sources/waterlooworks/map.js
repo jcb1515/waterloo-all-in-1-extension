@@ -67,8 +67,11 @@ const wwLocalText = (value) => {
  * @param {any[]} rows  parseApplications rows
  * @returns {Application[]}
  */
+/** Non-array input (garbage state) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+
 export function toApplications(rows) {
-  return (rows || [])
+  return arr(rows)
     .filter((row) => row && row.jobId)
     .map((row) => ({
       id: `waterlooworks:${row.jobId}`,
@@ -91,7 +94,7 @@ export function interviewItems(rows, now) {
   const nowIso = iso(now);
   const used = new Set();
   const items = [];
-  for (const row of rows || []) {
+  for (const row of arr(rows)) {
     if (!row?.startAt || !row.jobId) continue;
     let key = `interview:${row.jobId}`;
     let id = itemId(SOURCE, key);
@@ -247,8 +250,8 @@ export function interviewDetailItems(detail, now) {
 
   // WW: "You must choose a timeslot at least one day before your interview,
   // or the system will automatically choose one."
-  const available = (detail.slots || []).filter((slot) =>
-    /^available$/i.test(slot.state || "")
+  const available = arr(detail.slots).filter((slot) =>
+    /^available$/i.test(slot?.state || "")
   );
   const firstStart = available
     .map((slot) => slot.startAt)
@@ -307,7 +310,7 @@ export function eventItems(rows, now) {
   const nowIso = iso(now);
   const items = [];
   const used = new Set();
-  for (const row of rows || []) {
+  for (const row of arr(rows)) {
     if (!row?.startAt) continue;
     const key = `event:${fnv(`${row.module || ""}|${row.event || ""}|${row.startAt}`)}`;
     let id = itemId(SOURCE, key);
@@ -589,15 +592,16 @@ const nextDay = (d) =>
  */
 export function coopDateItems(entries, { url, nowIso } = {}) {
   const keep = (e) =>
-    Boolean(e?.date) &&
-    COOP_KEEP_RE.test(`${e.cycle || ""} ${e.text || ""}`);
+    Boolean(
+      e && typeof e.date === "string" && /^\d{4}-\d{2}-\d{2}/.test(e.date)
+    ) && COOP_KEEP_RE.test(`${e.cycle || ""} ${e.text || ""}`);
 
   // "Interviews" runs collapse to one all-day range per (workTerm, cycle) —
   // the same cycle name recurs each recruiting season, so the workTerm half
   // of the key keeps September's and January's "Cycle 1" apart.
   /** @type {Map<string, {first: number, min: string, max: string}>} */
   const runs = new Map();
-  (entries || []).forEach((e, i) => {
+  arr(entries).forEach((e, i) => {
     if (!keep(e) || coopCategory(e.text) !== "interviews") return;
     const key = `${coopWorkTerm(e)}|${e.cycle || "general"}`;
     const run = runs.get(key);
@@ -648,7 +652,7 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
     items.push(item);
   };
 
-  (entries || []).forEach((e, i) => {
+  arr(entries).forEach((e, i) => {
     if (!keep(e)) return; // holidays, classes, exams — not co-op items
     const workTerm = coopWorkTerm(e);
     const category = coopCategory(e.text);
@@ -676,7 +680,7 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
     let timing;
     if (e.endOfDay) {
       timing = { dueAt: zonedIso(y, m, d, 23, 59) };
-    } else if (e.time) {
+    } else if (typeof e.time === "string" && e.time) {
       const [h, mi] = parseHHMM(e.time);
       timing = { dueAt: zonedIso(y, m, d, h, mi) };
     } else {
@@ -702,11 +706,11 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
  * @returns {Application[]}
  */
 export function linkItems(applications, items) {
-  return (applications || []).map((app) => {
+  return arr(applications).map((app) => {
     if (!app?.jobId) return app;
     return {
       ...app,
-      itemIds: (items || [])
+      itemIds: arr(items)
         .filter((item) => item?.meta?.jobId === app.jobId)
         .map((item) => item.id),
     };
@@ -722,8 +726,8 @@ export function linkItems(applications, items) {
  * @returns {Item[]}
  */
 export function mergeInterviewScopes(listItems, detailItems) {
-  const detailById = new Map((detailItems || []).map((item) => [item.id, item]));
-  const merged = (listItems || []).map((item) => {
+  const detailById = new Map(arr(detailItems).map((item) => [item.id, item]));
+  const merged = arr(listItems).map((item) => {
     const detail = detailById.get(item.id);
     if (!detail) return item;
     detailById.delete(item.id);
@@ -759,7 +763,7 @@ export function mergeInterviewScopes(listItems, detailItems) {
 function mergeFacts(a, b) {
   const out = [];
   const seen = new Set();
-  for (const f of [...(a || []), ...(b || [])]) {
+  for (const f of [...arr(a), ...arr(b)]) {
     const key = String(f?.label || "").toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -780,7 +784,7 @@ function mergeDetails(a, b) {
 function dedupeSeenIn(...lists) {
   const seen = new Set();
   const out = [];
-  for (const entry of lists.flat().filter(Boolean)) {
+  for (const entry of lists.flatMap(arr).filter(Boolean)) {
     const key = `${entry.source}:${entry.scope || ""}:${entry.key}`;
     if (seen.has(key)) continue;
     seen.add(key);

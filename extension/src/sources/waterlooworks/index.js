@@ -31,6 +31,13 @@ import { diffApplications } from "./diff.js";
 
 const MAX_STORED = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Replace-scope caches are bounded so a huge table can't grow state. */
+const LAST_GOOD_CAP = 500;
+const APPLICATIONS_CAP = 500;
+/** Non-array input (garbage state) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+const obj = (v) =>
+  v && typeof v === "object" && !Array.isArray(v) ? v : {};
 /** Per-job scopes accumulate; each page describes ONE job. Days before prune. */
 const JOB_SCOPES = { "posting": 14, "interview-detail": 30 };
 const JOB_SCOPE_CAP = 200;
@@ -45,15 +52,15 @@ const COOP_FETCH_MS = DAY_MS;
  * @param {Record<string, any>} state
  */
 function cachedItems(state) {
-  const lastGood = state.lastGood || {};
+  const lastGood = obj(state.lastGood);
   return mergeInterviewScopes(
-    lastGood.interviews?.items || [],
-    lastGood["interview-detail"]?.items || []
+    arr(lastGood.interviews?.items),
+    arr(lastGood["interview-detail"]?.items)
   ).concat(
-    lastGood.events?.items || [],
-    lastGood.posting?.items || [],
-    lastGood["message-dates"]?.items || [],
-    lastGood["coop-dates"]?.items || []
+    arr(lastGood.events?.items),
+    arr(lastGood.posting?.items),
+    arr(lastGood["message-dates"]?.items),
+    arr(lastGood["coop-dates"]?.items)
   );
 }
 
@@ -80,10 +87,10 @@ function anchorMs(item) {
  * @param {number} cap
  */
 function accumulateKeyedItems(prevItems, freshItems, keys, keyOf, nowMs, maxAgeDays, cap) {
-  const present = new Set((keys || []).filter(Boolean));
+  const present = new Set(arr(keys).filter(Boolean));
   const combined = [
-    ...(prevItems || []).filter((item) => !present.has(keyOf(item))),
-    ...(freshItems || []),
+    ...arr(prevItems).filter((item) => !present.has(keyOf(item))),
+    ...arr(freshItems),
   ];
   return pruneItems(combined, nowMs, maxAgeDays, cap);
 }
@@ -97,8 +104,8 @@ function accumulateKeyedItems(prevItems, freshItems, keys, keyOf, nowMs, maxAgeD
  * @param {"list"|"detail"} origin @param {number} nowMs
  */
 function accumulateMessageItems(prevItems, freshItems, keys, origin, nowMs) {
-  const present = new Set((keys || []).filter(Boolean));
-  const kept = (prevItems || []).filter((item) => {
+  const present = new Set(arr(keys).filter(Boolean));
+  const kept = arr(prevItems).filter((item) => {
     if (!present.has(item?.meta?.messageKey)) return true;
     if (origin === "detail") return false;
     return item?.meta?.messageOrigin === "detail";
@@ -106,7 +113,7 @@ function accumulateMessageItems(prevItems, freshItems, keys, origin, nowMs) {
   const keptIds = new Set(kept.map((item) => item.id));
   const combined = [
     ...kept,
-    ...(freshItems || []).filter(
+    ...arr(freshItems).filter(
       (item) => origin !== "list" || !keptIds.has(item.id)
     ),
   ];
@@ -120,7 +127,7 @@ function accumulateMessageItems(prevItems, freshItems, keys, origin, nowMs) {
  */
 function pruneItems(items, nowMs, maxAgeDays, cap) {
   const cutoff = nowMs - maxAgeDays * DAY_MS;
-  const kept = items.filter((item) => {
+  const kept = arr(items).filter((item) => {
     const anchor = anchorMs(item);
     return Number.isNaN(anchor) || anchor >= cutoff;
   });
@@ -195,7 +202,7 @@ const pathOf = (url) => {
 function mergeRecent(prev, next, keyOf, limit) {
   const seen = new Set();
   const merged = [];
-  for (const row of [...(next || []), ...(prev || [])]) {
+  for (const row of [...arr(next), ...arr(prev)]) {
     const key = keyOf(row);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -251,9 +258,12 @@ export default {
               res.text,
               "waterlooworks/parseCoopDates"
             );
-            if (parsed && parsed.ok !== false) {
+            if (parsed && typeof parsed === "object" && parsed.ok !== false) {
               state.lastGood["coop-dates"] = {
-                items: coopDateItems(parsed.entries || [], { url, nowIso }),
+                items: coopDateItems(arr(parsed.entries), {
+                  url,
+                  nowIso,
+                }).slice(0, LAST_GOOD_CAP),
                 at: nowIso,
               };
               delete state.needsUpdate["coop-dates"];
@@ -276,7 +286,7 @@ export default {
     // the page drops out); on failure/throttle the union merge keeps cache.
     return {
       items: cachedItems(state),
-      applications: state.applications || [],
+      applications: arr(state.applications),
       complete: fetchedOk,
       session: "no-tab",
       state,
@@ -305,22 +315,28 @@ export default {
         state.lastJsonAt = payload.at;
         return {
           items: cachedItems(state),
-          applications: state.applications || [],
+          applications: arr(state.applications),
           complete: false,
           scope: SCOPE,
           state,
         };
       }
 
-      const parsed = await ctx.parseHtml(body, "waterlooworks/parseAll", {
-        url: payload.url,
-      });
+      let parsed;
+      try {
+        parsed = await ctx.parseHtml(body, "waterlooworks/parseAll", {
+          url: payload.url,
+        });
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || typeof parsed !== "object") parsed = {};
 
       if (parsed.page === "logged-out") {
         state.signedOutAt = payload.at;
         return {
           items: cachedItems(state),
-          applications: state.applications || [],
+          applications: arr(state.applications),
           complete: false,
           scope: SCOPE,
           session: "signed-out",
@@ -335,7 +351,7 @@ export default {
       if (payload.kind === "dom" && !domComplete) {
         return {
           items: cachedItems(state),
-          applications: state.applications || [],
+          applications: arr(state.applications),
           complete: false,
           scope: SCOPE,
           state,
@@ -352,13 +368,13 @@ export default {
       );
 
       if (parsed.applications) {
-        const next = toApplications(parsed.applications.rows);
+        const next = toApplications(obj(parsed.applications).rows);
         const diff = diffApplications(
-          prev.applications,
+          arr(prev.applications),
           next,
           now
         );
-        state.applications = diff.applications;
+        state.applications = diff.applications.slice(0, APPLICATIONS_CAP);
         updates = diff.updates;
         readOk.push("applications");
         delete state.needsUpdate.applications;
@@ -366,7 +382,10 @@ export default {
       if (parsed.interviews) {
         // The list page is a full table: replace the scope.
         state.lastGood.interviews = {
-          items: interviewItems(parsed.interviews.rows, now),
+          items: interviewItems(obj(parsed.interviews).rows, now).slice(
+            0,
+            LAST_GOOD_CAP
+          ),
           at: payload.at,
         };
         readOk.push("interviews");
@@ -375,10 +394,10 @@ export default {
       if (parsed["interview-detail"]) {
         // One detail page = one job: keep other jobs' items, replace this
         // job's (a booked detail drops that job's timeslot item).
-        const fresh = interviewDetailItems(parsed["interview-detail"], now);
+        const fresh = interviewDetailItems(obj(parsed["interview-detail"]), now);
         state.lastGood["interview-detail"] = {
           items: accumulateJobItems(
-            state.lastGood["interview-detail"]?.items,
+            arr(state.lastGood["interview-detail"]?.items),
             fresh,
             [parsed["interview-detail"].jobId],
             nowMs,
@@ -391,7 +410,10 @@ export default {
       }
       if (parsed.events) {
         state.lastGood.events = {
-          items: eventItems(parsed.events.rows, now),
+          items: eventItems(obj(parsed.events).rows, now).slice(
+            0,
+            LAST_GOOD_CAP
+          ),
           at: payload.at,
         };
         readOk.push("events");
@@ -400,10 +422,10 @@ export default {
       if (parsed.posting) {
         // Same per-job accumulate: viewing job B keeps job A's deadline item;
         // a posting with no future deadline removes that job's item.
-        const fresh = postingItems(parsed.posting, now);
+        const fresh = postingItems(obj(parsed.posting), now);
         state.lastGood.posting = {
           items: accumulateJobItems(
-            state.lastGood.posting?.items,
+            arr(state.lastGood.posting?.items),
             fresh,
             [parsed.posting.jobId],
             nowMs,
@@ -415,7 +437,7 @@ export default {
         delete state.needsUpdate.posting;
       }
       if (parsed.messages) {
-        const rows = parsed.messages.rows || [];
+        const rows = arr(obj(parsed.messages).rows);
         state.messages = mergeRecent(
           prev.messages,
           rows.map((row) => ({
@@ -527,7 +549,7 @@ export default {
       /** @type {SyncResult & {scope: string}} */
       const result = {
         items,
-        applications: state.applications || [],
+        applications: arr(state.applications),
         complete: readOk.length > 0 && failed.length === 0,
         scope: SCOPE,
         state,

@@ -94,5 +94,6 @@ function knownStatus(status) {
  * @returns {string[]}
  */
 function mergeIds(a, b) {
-  return [...new Set([...(a ?? []), ...(b ?? [])])];
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  return [...new Set([...arr(a), ...arr(b)])];
 }

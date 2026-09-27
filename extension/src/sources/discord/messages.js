@@ -28,6 +28,9 @@ import {
 export const SOURCE = "discord";
 export const SCOPE = "discord";
 
+/** Non-array input (garbage extracts/state) reads as empty. */
+const arr = (v) => (Array.isArray(v) ? v : []);
+
 /** meta.facts builder: keeps only non-empty values, in order. */
 export function factsOf(pairs) {
   const out = [];
@@ -203,7 +206,7 @@ const firstLine = (text) =>
  * @param {string} channelId
  */
 export function domMessageToRest(dom, channelId) {
-  const markers = (dom?.times || [])
+  const markers = arr(dom?.times)
     .map((t) => {
       const ms = Date.parse(t);
       return Number.isFinite(ms) ? `<t:${Math.floor(ms / 1000)}>` : "";
@@ -214,7 +217,7 @@ export function domMessageToRest(dom, channelId) {
   // Discord highlights @everyone/@here the same as a personal ping (and
   // renders them with the roleMention class). A "mention" with no real
   // role left over is a broadcast — never counts as pinging me.
-  const realRoles = (dom?.roleMentions || []).filter(
+  const realRoles = arr(dom?.roleMentions).filter(
     (r) => !/^@(everyone|here)$/i.test(String(r).trim())
   );
   const everyoneOnly =
@@ -271,10 +274,10 @@ export function candidatesForMessage(msg, o) {
   }
   const cutoff = msgDate.getTime() - DAY_MS;
   if (typeof o.extractDates === "function") {
-    for (const hit of o.extractDates(text, {
+    for (const hit of arr(o.extractDates(text, {
       now: msgDate,
       termCode: termCodeFor(msgDate),
-    }) || []) {
+    }))) {
       if (hit.confidence < MIN_CONFIDENCE) continue;
       const startMs = Date.parse(hit.startAt);
       if (Number.isNaN(startMs) || startMs < cutoff) continue;
