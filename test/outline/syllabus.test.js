@@ -116,6 +116,21 @@ test("ENGL192 windows and the showcase event", () => {
   assert.equal(show.review, "pending");
 });
 
+test("ENGL192 classes carry Instructor and Office hours facts", () => {
+  const { items, course } = parse(FIXTURE);
+  assert.equal(
+    course.officeHours,
+    "Tuesdays & Thursdays, 10:00am to 11:00am, by appointment only.",
+  );
+  const classes = items.filter((i) => i.type === "class");
+  assert.ok(classes.length > 0);
+  for (const c of classes) {
+    const facts = Object.fromEntries((c.meta.facts || []).map((f) => [f.label, f.value]));
+    assert.equal(facts.Instructor, "Instructor"); // redacted placeholder
+    assert.match(facts["Office hours"] || "", /by appointment/);
+  }
+});
+
 test("ENGL192 course.weights is the grade breakdown", () => {
   const { course } = parse(FIXTURE);
   assert.deepEqual(course.weights, [

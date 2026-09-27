@@ -13,7 +13,7 @@ import {
   zonedIso,
   zonedParts,
 } from "../../lib/textdates/index.js";
-import { classify, isDueish, TRIGGER_RE } from "../learn/classify.js";
+import { classify, factsOf, isDueish, TRIGGER_RE } from "../learn/classify.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 /** @typedef {import("../../core/contract.js").Course} Course */
@@ -275,6 +275,17 @@ export function buildOutline(data, opts = {}) {
   }
   lecDates.sort();
 
+  // The first team-text line office-hours parsing reads — reused as the
+  // "Office hours" fact on class items and Course.officeHours.
+  /** @type {string|undefined} */
+  let officeHoursText;
+  for (const line of String((data.text && data.text.team) || "").split("\n")) {
+    if ([...line.matchAll(OFFICE_RE)].length) {
+      officeHoursText = line.trim();
+      break;
+    }
+  }
+
   /* ---- classes + TST exams ---- */
   /** @type {any[]} midterm occurrences (each later gets .item / .merged) */
   const midterms = [];
@@ -289,6 +300,12 @@ export function buildOutline(data, opts = {}) {
     const word = KIND_WORD[row.kind] || "class";
     for (const d of occurrences(row, readingWeeks)) {
       const id = uid(`outline:${CODE}:${row.kind}${row.section}:${d}T${row.start || "00:00"}`);
+      const topic = topicsFor(d);
+      const facts = factsOf([
+        ["Instructor", row.instructor],
+        ["Week topic", topic],
+        ["Office hours", officeHoursText],
+      ]);
       items.push({
         id,
         source: "outline",
@@ -305,7 +322,8 @@ export function buildOutline(data, opts = {}) {
         review: "auto",
         seenIn: seen(id.replace(/^outline:/, "")),
         evidence: evidence(),
-        details: topicsFor(d),
+        details: topic,
+        meta: facts ? { facts } : undefined,
       });
     }
   }
@@ -619,7 +637,15 @@ export function buildOutline(data, opts = {}) {
     if (item.type !== "exam" || (item.category !== "midterm" && item.category !== "final")) continue;
     const re = item.category === "midterm" ? /midterm|\bME\b/i : /final/i;
     const found = coverLines.filter((s) => re.test(s)).map((s) => s.trim());
-    if (found.length) item.details = [item.details, ...found].filter(Boolean).join(" ").slice(0, 500);
+    if (found.length) {
+      const note = found.join(" ");
+      item.details = [item.details, ...found].filter(Boolean).join(" ").slice(0, 500);
+      const fact = factsOf([["Covers", note]]);
+      if (fact) {
+        const prior = /** @type {any[]} */ (((item.meta || {}).facts) || []);
+        item.meta = { ...item.meta, facts: [...prior, ...fact] };
+      }
+    }
   }
 
   /** @type {OutlineCourse} */
@@ -633,6 +659,7 @@ export function buildOutline(data, opts = {}) {
       .map((r) => ({ component: r.component, weight: r.weight })),
     assessments,
   };
+  if (officeHoursText) course.officeHours = officeHoursText;
   if (schemes.length > 1) course.gradingSchemes = schemes;
   return { items, course };
 }

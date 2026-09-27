@@ -32,6 +32,7 @@ test("learn adapter: happy path", async () => {
   assert.ok(a1, "dropbox 42 item");
   assert.equal(a1.type, "deadline");
   assert.equal(a1.category, "assignment");
+  assert.deepEqual(a1.meta.facts, [{ label: "Submission", value: "Dropbox" }]);
   assert.equal(a1.status, "submitted");
   assert.ok(a1.url && a1.url.includes("db=42"), "deep-link url");
   assert.equal(a1.confidence, "exact");

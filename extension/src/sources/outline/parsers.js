@@ -171,6 +171,12 @@ export function parseOutline(doc, opts = {}) {
     let section = null;
     /** @type {string|null} */
     let kind = null;
+    // The instructor cell carries rowspan over a section's meeting rows;
+    // instructorLeft counts down the covered continuation rows.
+    /** @type {string} */
+    let instructor = "";
+    /** @type {number} */
+    let instructorLeft = 0;
     for (const tr of tbody.querySelectorAll("tr")) {
       const th = tr.querySelector("th");
       if (th) {
@@ -178,6 +184,16 @@ export function parseOutline(doc, opts = {}) {
         const m = String(secEl ? secEl.textContent : th.textContent).match(/(\w+)\s*\[\s*([A-Za-z]+)\s*\]/);
         section = m ? m[1] : null;
         kind = m ? m[2].toUpperCase() : null;
+      }
+      const info = tr.querySelector(".instructor-info");
+      if (info) {
+        instructor = String(info.textContent || "").replace(/\s+/g, " ").trim();
+        const td = info.closest ? info.closest("td") : null;
+        instructorLeft = (td && Number(td.getAttribute("rowspan")) > 1 ? Number(td.getAttribute("rowspan")) : 1) - 1;
+      } else if (instructorLeft > 0) {
+        instructorLeft--;
+      } else {
+        instructor = "";
       }
       const daysTd = tr.querySelector("td.meet-days");
       if (!daysTd) continue;
@@ -199,7 +215,7 @@ export function parseOutline(doc, opts = {}) {
       const locTd = iTime >= 0 ? tds[iTime + 1] : null;
       const location = locTd ? String(locTd.textContent || "").replace(/\s+/g, " ").trim() : "";
       if (section == null) continue;
-      schedule.push({ section, kind, days, start, end, location, ranges, dates });
+      schedule.push({ section, kind, days, start, end, location, instructor: instructor || undefined, ranges, dates });
     }
   }
 

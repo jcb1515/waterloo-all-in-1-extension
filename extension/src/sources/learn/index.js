@@ -10,7 +10,7 @@
 
 import { itemId, normCourseCode } from "../../core/contract.js";
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
-import { classify, isDueish, TRIGGER_RE } from "./classify.js";
+import { classify, factsOf, isDueish, TRIGGER_RE } from "./classify.js";
 import { cleanEventTitle, LiveSource, liveBase } from "./live-source.js";
 
 /** @typedef {import("../../core/contract.js").FetchResult} FetchResult */
@@ -35,6 +35,8 @@ const NEWS_WINDOW_MS = 60 * DAY_MS;
 const POSTS_LOOKBACK_MS = 14 * DAY_MS;
 const POSTS_LOOKAHEAD_MS = 30 * DAY_MS;
 const TOOL_SCOPES = ["dropbox", "quizzes", "discussions", "feed", "calendar"];
+/** Tool kind -> the Submission fact label the calendar renders. */
+const SUBMISSION = { dropbox: "Dropbox", quiz: "Quiz", discussion: "Discussion" };
 
 /**
  * A contract FetchResult -> LiveSource's fetch result shape.
@@ -214,6 +216,7 @@ const adapter = {
               listUrl: row.listUrl,
               completedAt: row.completedAt || undefined,
               groupFolder: row.groupFolder || undefined,
+              facts: factsOf([["Submission", SUBMISSION[row.kind]]]),
             },
           };
           if (cls.category) item.category = cls.category;

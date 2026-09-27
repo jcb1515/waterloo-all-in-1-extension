@@ -29,6 +29,15 @@ test("MATH117 parses header and LEC 002 rows", () => {
   assert.equal(makeup.start, "09:30");
 });
 
+test("schedule rows carry the rowspan instructor cell", () => {
+  const d = load("MATH117");
+  const rows = d.schedule.filter((r) => r.section === "002" && r.kind === "LEC");
+  assert.ok(rows.length >= 3);
+  // "Instructor" is the redacted placeholder name in the fixture; the
+  // rowspan=4 td covers all four meeting rows of the section block.
+  assert.ok(rows.every((r) => r.instructor === "Instructor"));
+});
+
 test("MATH115 multi-day row and two grading schemes", () => {
   const d = load("MATH115");
   const multi = d.schedule.find((r) => r.days.length === 3);

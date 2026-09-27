@@ -165,17 +165,33 @@ every occurrence inside a reading week is skipped (classes and office hours).
 ## Privacy
 
 Pages contain instructor names and emails. The adapter keeps them in
-`data.text.team` for office-hours/office parsing only — names never reach item
-fields beyond `location`/`details` (week topics). Test fixtures are redacted by
+`data.text.team` for office-hours parsing, and the schedule table's
+`.instructor-info` name lands in `meta.facts` on class items (the "Instructor"
+fact below). Names still never reach `location`/`details` or the evidence
+snippet. Test fixtures are redacted by
 `test/fixtures/outline/redact-outlines.mjs` (no `@uwaterloo.ca`, names →
 "Instructor").
 
+## `meta.facts`
+
+Class/tutorial/lab items carry `meta.facts` (shared `factsOf` in
+`learn/classify.js`): `Instructor` (the `.instructor-info` cell, rowspan-aware),
+`Week topic` (the same text as `details` from the plan table), and `Office
+hours` (the first team-text line the office-hours parsing reads — also
+`course.officeHours`). Midterm/final items that got an exam-coverage note carry
+a `Covers` fact with it. Syllabus classes carry `Instructor` (the
+`Instructor:` header line) and `Office hours` (the `Office Hours:` header line,
+which also becomes `course.officeHours`).
+
 ## Course extras
 
-`course` extends the contract Course: `term`, `sections`, `outlineUrl`,
-`weights` (first grading scheme's weighted rows), `assessments` (every
-table/chart row: `{component, weight, dateText, itemId, from}`), and
-`gradingSchemes` when a page defines more than one.
+`course` extends the contract Course: `term`, `outlineUrl`, `officeHours`
+(first office-hours line), `weights` (first grading scheme's weighted rows),
+`assessments` (every table/chart row: `{component, weight, dateText, itemId,
+from}`), and `gradingSchemes` when a page defines more than one. `sections`
+comes only from `ctx.courses` (Portal) merged with `settings.sections` via
+`pickSections` — Portal wins per component kind and a disagreement emits a
+review `update`.
 
 ## VERIFY (unconfirmed against live pages)
 

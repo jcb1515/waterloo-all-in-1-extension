@@ -24,10 +24,28 @@ Per course org unit (`<ou>`), `readOk` lists every scope that read completely:
 - `<ou>:news` — published, non-hidden announcements
 - `<ou>:grades` — grade objects, categories, `myGradeValues` (all three must read)
 - `<ou>:toc` — content table of contents
+- `<ou>:groups` — `groupcategories/` + `groups/` membership read (optional:
+  failures never touch `complete`)
 
 `complete` is true only when the session was fine and every tool, feed,
 calendar, news, grades and toc read succeeded for every kept course. Individual
 post/attempt checks are fail-soft and do not affect `complete`.
+
+## Groups and relay binaries
+
+`readGroups` walks `lp/<v>/<ou>/groupcategories/` then
+`.../groupcategories/<id>/groups/`, keeps groups whose `Enrollments` contain
+the whoami `Identifier` (numeric compare) and extracts `\bgroup\s*0*(\d+)\b`.
+Exactly one distinct number → `course.group`; several → unset + logged. A
+403/404 or other failure just logs — groups are optional metadata.
+
+`content.js`'s `RELAY_FETCH` handler accepts `init.binary: true` and answers
+`{base64}` via `readBodyInto` (the shared `capture/fetch.js` helper — 10 MB
+cap, `error: "too-large"`). Bodies are only read on `res.ok`; non-binary
+responses still return `text`.
+
+Tool items carry `meta.facts` `[{label: "Submission", value}]` — `Dropbox`,
+`Quiz` or `Discussion` by `row.kind`; content and announcement items get none.
 
 ## Session
 
@@ -55,12 +73,14 @@ just that one sentence (≤ 300 chars, `method: "text"`). All tool items are
 
 ## Extra `courses[]` fields (pending contract change)
 
-`LearnCourse = Course & { grades?, syllabusUrls? }`:
+`LearnCourse = Course & { grades?, syllabusUrls?, group? }`:
 
 - `grades`: per `myGradeValues` entry `{component, category?, points?, max?,
   weight?, display?}`.
 - `syllabusUrls`: `[{title, url}]` for TOC topics titled like a syllabus whose
   link ends in `.pdf`.
+- `group`: the contract `Course.group` — the student's "Group N" number when
+  exactly one is found.
 
 `weights` stays the contract shape (`{component, weight}[]` from categories,
 else grade objects). Item `weight` is filled from `WeightedDenominator` when a
@@ -77,3 +97,6 @@ grade value can be matched to an item.
 - Quiz attempts route (`/quizzes/{id}/attempts/`) commonly answers 403 to
   students — handled, but verify whether any student-visible route exists.
 - Discussion post `PostingUserId` vs whoami `Identifier` — assumed identical.
+- Group API shape assumed: `groupcategories/` returns `[{GroupCategoryId,
+  Name}]` and `.../<id>/groups/` returns `[{GroupId, Name, Enrollments: [<user
+  ids>]}]`; the groups list may actually be paged on large courses.
