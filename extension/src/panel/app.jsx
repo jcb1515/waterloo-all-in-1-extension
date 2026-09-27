@@ -1,6 +1,6 @@
 // Panel shell: sticky header with the brand lockup + sync controls, the
-// Agenda | Sources segmented tabs, the review/updates overlays, and
-// keyboard shortcuts.
+// Agenda | Calendar | Co-op | Courses segmented tabs, the sources/review/
+// updates overlays, and keyboard shortcuts.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, query, IS_PREVIEW } from "./data.js";
@@ -9,14 +9,21 @@ import { ADAPTERS, stageForAdapter } from "../core/registry.js";
 import { BrandMark } from "../ui/brand.jsx";
 import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon } from "../ui/icons.jsx";
 import { Agenda } from "./views/Agenda.jsx";
+import { CalendarView } from "./views/Calendar.jsx";
+import { Coop } from "./views/Coop.jsx";
+import { Courses } from "./views/Courses.jsx";
 import { Sources } from "./views/Sources.jsx";
 import { Review } from "./views/Review.jsx";
 import { Updates } from "./views/Updates.jsx";
 
 const TABS = [
   ["agenda", "Agenda"],
-  ["sources", "Sources"],
+  ["calendar", "Calendar"],
+  ["coop", "Co-op"],
+  ["courses", "Courses"],
 ];
+
+const OVERLAY_TITLES = { review: "Review", updates: "Updates", sources: "Sources" };
 
 /** Items still awaiting a review verdict. */
 function pendingCount(items, userState) {
@@ -41,10 +48,13 @@ function unreadCount(updates, seenAt) {
 
 export function App() {
   const state = useStore();
-  const [tab, setTab] = useState(() => (query.get("tab") === "sources" ? "sources" : "agenda"));
+  const [tab, setTab] = useState(() => {
+    const t = query.get("tab");
+    return TABS.some(([id]) => id === t) ? /** @type {string} */ (t) : "agenda";
+  });
   const [overlay, setOverlay] = useState(() => {
     const v = query.get("view");
-    return v === "review" || v === "updates" ? v : null;
+    return v && OVERLAY_TITLES[v] ? v : null;
   });
   const [syncing, setSyncing] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -106,9 +116,15 @@ export function App() {
     const onKey = (e) => {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if (e.key === "r") refresh();
-      if (e.key === "1") setTab("agenda");
-      if (e.key === "2") setTab("sources");
-      if (e.key === "Escape" && overlay) setOverlay(null);
+      if (e.key === "Escape" && overlay) {
+        setOverlay(null);
+        return;
+      }
+      const digit = ["1", "2", "3", "4"].indexOf(e.key);
+      if (digit >= 0 && digit < TABS.length) {
+        setOverlay(null);
+        setTab(TABS[digit][0]);
+      }
       if (e.key === "/") {
         e.preventDefault();
         setOverlay(null);
@@ -123,7 +139,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [syncing, overlay]);
 
-  const overlayTitle = overlay === "review" ? "Review" : "Updates";
+  const overlayTitle = overlay ? OVERLAY_TITLES[overlay] : null;
 
   return (
     <div class="panel">
@@ -141,7 +157,7 @@ export function App() {
         <div class="brand-lockup">
           <BrandMark size={30} />
           <div class="brand-words">
-            <span class="brand-top">{overlay ? "Waterloo" : "Waterloo"}</span>
+            <span class="brand-top">Waterloo</span>
             <span class="brand-name">{overlay ? overlayTitle : "All-in-1"}</span>
           </div>
         </div>
@@ -150,7 +166,7 @@ export function App() {
             <button
               type="button"
               class={`sync-pill tone-${summary.tone}`}
-              onClick={() => setTab("sources")}
+              onClick={() => setOverlay("sources")}
               title="Source status"
             >
               {syncing ? "Syncing…" : summary.label}
@@ -224,10 +240,16 @@ export function App() {
               setTab("agenda");
             }}
           />
-        ) : tab === "agenda" ? (
-          <Agenda state={state} actions={actions} now={now} onGoSources={() => setTab("sources")} />
-        ) : (
+        ) : overlay === "sources" ? (
           <Sources state={state} actions={actions} now={now} />
+        ) : tab === "agenda" ? (
+          <Agenda state={state} actions={actions} now={now} onGoSources={() => setOverlay("sources")} />
+        ) : tab === "calendar" ? (
+          <CalendarView state={state} actions={actions} now={now} />
+        ) : tab === "coop" ? (
+          <Coop state={state} actions={actions} now={now} />
+        ) : (
+          <Courses state={state} actions={actions} now={now} />
         )}
       </main>
 
