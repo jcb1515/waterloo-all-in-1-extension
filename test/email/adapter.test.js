@@ -98,7 +98,26 @@ test("gmail invite -> exact meeting item", () => {
   assert.equal(i.review, "auto");
   assert.equal(i.location, "https://meet.google.com/abc-defg-hij");
   assert.equal(i.source, "gmail");
-  assert.equal(i.id, "gmail:invite:k1:2026-10-06T22:00:00.000Z");
+  // Title-slug id: every copy of this invite collapses to one event.
+  assert.equal(i.id, "gmail:invite:robotics-design-review:2026-10-06T22:00:00.000Z");
+  assert.equal(i.meta.onCalendar, "google"); // Google already added it
+});
+
+test("gmailInvitesToFeed: true keeps gmail invites publishable", () => {
+  const [i] = items(
+    msg({ subject: GCAL, links: ["https://meet.google.com/abc-defg-hij"] }),
+    { settings: { gmailInvitesToFeed: true } },
+  );
+  assert.equal(i.meta.onCalendar, undefined);
+});
+
+test("invite updates and cancellations share one item id", () => {
+  const a = items(msg({ key: "t1", subject: GCAL, links: [] }))[0];
+  const b = items(msg({ key: "t2", subject: GCAL.replace("Invitation:", "Updated invitation:"), links: [] }))[0];
+  assert.equal(a.id, b.id);
+  const c = items(msg({ key: "t3", subject: GCAL.replace("Invitation:", "Canceled event:"), links: [] }))[0];
+  assert.equal(c.id, a.id);
+  assert.equal(c.status, "cancelled");
 });
 
 test("a non-Eastern invite zone is tentative/pending with meta.tz", () => {
@@ -141,6 +160,8 @@ test("outlook When:/Where:/Join: invite -> interview item", () => {
   assert.equal(i.endAt, "2026-10-15T18:30:00.000Z");
   assert.equal(i.location, "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x");
   assert.equal(i.source, "outlook");
+  assert.equal(i.meta.employer, "acme"); // links to the WaterlooWorks application
+  assert.equal(i.meta.onCalendar, undefined); // gmail-only flag
 });
 
 test("instructor mail: midterm room change -> one tentative exam item, no leaks", async () => {
@@ -164,6 +185,8 @@ test("instructor mail: midterm room change -> one tentative exam item, no leaks"
   assert.equal(res.items.length, 1);
   const i = res.items[0];
   assert.equal(i.type, "exam");
+  assert.equal(i.title, "Midterm"); // same title outline/Portal exams use
+  assert.equal(i.details, "Email: Midterm room change");
   assert.equal(i.startAt, "2026-10-22T23:00:00.000Z");
   assert.equal(i.org, "ECE 105");
   assert.equal(i.confidence, "tentative");
@@ -315,6 +338,7 @@ test("gmail invite card: date lives in the card, not the .a3s body", async () =>
   assert.equal(i.confidence, "exact");
   assert.equal(i.review, "auto");
   assert.equal(i.location, "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo");
+  assert.equal(i.meta.onCalendar, "google");
   const org = (i.meta.facts || []).find((f) => f.label === "Organizer");
   assert.equal(org && org.value, "Jane Doe");
 });

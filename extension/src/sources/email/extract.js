@@ -5,7 +5,8 @@
   items from keyword sentences. Pure: dates come from opts.textDates.
 */
 
-import { factsOf, sentenceOf } from "../learn/classify.js";
+import { classify, factsOf, sentenceOf } from "../learn/classify.js";
+import { slug } from "../outline/expand.js";
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import {
   cleanSubject,
@@ -93,15 +94,26 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     if (hit) {
       const eastern = !invite.tz || EASTERN_TZ.test(invite.tz);
       const cancelled = /^(canceled|cancelled)\b/i.test(subject);
+      const coopSender = isCoopSender(msg);
       const interview =
-        /interview/i.test(subject) || /interview/i.test(body.slice(0, 1000)) || isCoopSender(msg);
-      const id = `${provider}:invite:${msg.key}:${hit.startAt}`;
+        /interview/i.test(subject) || /interview/i.test(body.slice(0, 1000)) || coopSender;
+      const title = (invite.title || cleanSubject(subject)).slice(0, 100);
+      // Same meeting seen through many mails (Invitation, update, reminder,
+      // forward, Canceled event) collapses to one id; a cancellation lands as
+      // status "cancelled" and the publisher drops it.
+      const id = `${provider}:invite:${slug(title)}:${hit.startAt}`;
+      const employer = interview || coopSender ? employerOf(msg.fromEmail) : undefined;
+      // Gmail invitations already appear on the user's Google Calendar —
+      // publishing them again would duplicate the event (opt back in with
+      // settings.gmailInvitesToFeed).
+      const onCalendar =
+        provider === "gmail" && settings.gmailInvitesToFeed !== true ? "google" : undefined;
       /** @type {Item} */
       const item = {
         id,
         source: provider,
         type: interview ? "interview" : "meeting",
-        title: (invite.title || cleanSubject(subject)).slice(0, 100),
+        title,
         startAt: hit.startAt,
         endAt: hit.endAt || undefined,
         location: link || invite.where || whereText,
@@ -112,6 +124,8 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
           provider,
           messageKey: msg.key,
           ...(eastern ? {} : { tz: invite.tz }),
+          ...(employer ? { employer } : {}),
+          ...(onCalendar ? { onCalendar } : {}),
           facts: factsOf([
             ["Organizer", invite.organizer || msg.from],
             ["Where", invite.where || whereText],
@@ -163,12 +177,25 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     const iso = isDeadline ? (h.allDay ? dueEndOfDay(h.startAt) : h.startAt) : h.startAt;
     const id = `${provider}:mail:${msg.key}:${iso}`;
     const org = gate.course || gate.team || (coop || type === "interview" ? employer : undefined);
+    // Exam mail uses the titles outline/Portal emit ("Midterm"/"Final exam")
+    // so the same exam merges into one calendar event; the subject stays in
+    // details. Other types keep the cleaned subject as the title.
+    /** @type {string|undefined} */
+    let details;
+    let itemTitle = title;
+    if (type === "exam") {
+      const c = classify({ title: sentence });
+      const cat = c.type === "exam" ? c.category : classify({ title: subject }).category;
+      itemTitle = cat === "midterm" ? "Midterm" : cat === "final" ? "Final exam" : title;
+      details = `Email: ${title}`;
+    }
     /** @type {Item} */
     const item = {
       id,
       source: provider,
       type: /** @type {Item["type"]} */ (type),
-      title,
+      title: itemTitle,
+      details,
       org,
       status: "open",
       confidence: "tentative",
