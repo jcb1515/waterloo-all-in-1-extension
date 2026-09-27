@@ -33,3 +33,21 @@ export function classify({ title, kind, category } = {}) {
 export function isDueish(sentence) {
   return DUEISH_RE.test(String(sentence || ""));
 }
+
+/**
+ * Build `meta.facts` from [label, value] pairs: trimmed non-empty values,
+ * label <= 40 chars, value <= 300 chars, at most 12 facts (the server
+ * renders at most 12 per event). Shared by Learn, Portal and outline.
+ * @param {[string, unknown][]} pairs
+ * @returns {{label: string, value: string}[]|undefined}
+ */
+export function factsOf(pairs) {
+  const facts = [];
+  for (const [label, raw] of pairs || []) {
+    const value = String(raw ?? "").trim();
+    if (!value) continue;
+    facts.push({ label: String(label).slice(0, 40), value: value.slice(0, 300) });
+    if (facts.length >= 12) break;
+  }
+  return facts.length ? facts : undefined;
+}

@@ -11,9 +11,12 @@
 import { normCourseCode } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
 import { termCodeFor, zonedIso } from "../../lib/textdates/index.js";
+import { factsOf } from "../learn/classify.js";
 import { KIND_TITLE, addDays, dow, slug, torontoDate } from "../outline/expand.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
+/** @typedef {{name: string, email?: string}} InstructorName */
+/** @typedef {InstructorName & {section: string}} CourseInstructor */
 
 const TZ = "America/Toronto";
 export const EVIDENCE_ACADEMICS = { method: /** @type {const} */ ("api"), url: "https://portal.uwaterloo.ca/academics" };
@@ -65,10 +68,13 @@ const seenIn = (key, scope, at) => [{ source: /** @type {const} */ ("portal"), k
 const COMP_TYPE = { TUT: "tutorial", LAB: "lab", TST: "exam" };
 
 /**
- * CourseSchedule rows -> meeting items + course patches.
+ * CourseSchedule rows -> meeting items + course patches. `instructors` is the
+ * accumulated {"CODE|section": [{name, email}]} map from enrollments: an
+ * Instructor fact only appears when enrollments were observed first.
+ * @param {Record<string, InstructorName[]>} [instructors]
  * @returns {{items: Item[], patches: {code: string, name?: string, term?: number, sections: string[]}[]}}
  */
-export function mapSchedule(rows, { scope, at }) {
+export function mapSchedule(rows, { scope, at, instructors } = {}) {
   /** @type {Item[]} */
   const items = [];
   const patches = new Map();
@@ -81,6 +87,14 @@ export function mapSchedule(rows, { scope, at }) {
     if (!code || !startAt) continue;
     const key = `sched:${code.replace(/\s+/g, "")}:${comp}${sect}:${startAt}`;
     const isTst = comp === "TST";
+    const names = ((instructors && instructors[`${code}|${section}`]) || [])
+      .map((i) => i.name)
+      .join(", ");
+    const facts = factsOf([
+      ["Instructor", names],
+      ["Room", row.roomDescription],
+      ["Section", section],
+    ]);
     items.push(
       /** @type {Item} */ ({
         id: `portal:${key}`,
@@ -96,6 +110,7 @@ export function mapSchedule(rows, { scope, at }) {
         status: "open",
         confidence: "exact",
         review: "auto",
+        meta: facts ? { facts } : undefined,
         seenIn: seenIn(key, scope, at),
         evidence: { ...EVIDENCE_ACADEMICS },
       }),
@@ -117,6 +132,17 @@ const CODE_START = /^([A-Za-z]{2,8})\s*-?\s*(\d{3}[A-Z]{0,2})(?![A-Za-z0-9])/;
  * its id; true duplicates within one payload get :2, :3.
  * @returns {Item[]}
  */
+/** "2 h 30 min" / "3 h" / "50 min" from an ISO start/end pair. */
+function durationText(startAt, endAt) {
+  const min = Math.round((Date.parse(endAt) - Date.parse(startAt)) / 60000);
+  if (!(min > 0)) return undefined;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h && m) return `${h} h ${m} min`;
+  if (h) return `${h} h`;
+  return `${m} min`;
+}
+
 export function mapExams(rows, { scope, at }) {
   /** @type {Item[]} */
   const items = [];
@@ -125,6 +151,7 @@ export function mapExams(rows, { scope, at }) {
     if (!row.startDate) continue;
     const startAt = portalInstant(row.startDate);
     if (!startAt) continue;
+    const endAt = portalInstant(row.endDate) || undefined;
     const rawTitle = String(row.title || "").trim();
     const cm = rawTitle.match(CODE_START);
     const org = cm ? normCourseCode(`${cm[1]} ${cm[2]}`) : undefined;
@@ -133,6 +160,12 @@ export function mapExams(rows, { scope, at }) {
     const n = (used.get(base) || 0) + 1;
     used.set(base, n);
     const key = `${base.replace(/^portal:/, "")}${n > 1 ? `:${n}` : ""}`;
+    const facts = factsOf([
+      ["Room", row.location],
+      ["Seat", row.seatCode],
+      ["Seat instructions", row.seatInstructions],
+      ["Duration", endAt && durationText(startAt, endAt)],
+    ]);
     items.push(
       /** @type {Item} */ ({
         id: `portal:${key}`,
@@ -142,13 +175,13 @@ export function mapExams(rows, { scope, at }) {
         category,
         title: category === "midterm" ? "Midterm" : "Final exam",
         startAt,
-        endAt: portalInstant(row.endDate) || undefined,
+        endAt,
         location: [row.location, row.seatCode && `Seat ${row.seatCode}`].filter(Boolean).join(" · ") || undefined,
         details: row.seatInstructions || undefined,
         status: "open",
         confidence: "exact",
         review: "auto",
-        meta: { rawTitle },
+        meta: facts ? { rawTitle, facts } : { rawTitle },
         seenIn: seenIn(key, scope, at),
         evidence: { ...EVIDENCE_ACADEMICS },
       }),
@@ -158,11 +191,17 @@ export function mapExams(rows, { scope, at }) {
 }
 
 /**
- * CourseEnrollments rows -> course patches (no items).
- * @returns {{code: string, name?: string, outlineUrl?: string, term?: number, sections: string[]}[]}
+ * CourseEnrollments rows -> course patches (no items) + instructor names.
+ * `instructors` is keyed "CODE|section" for later schedule-item facts;
+ * each course patch also carries `instructors: [{name, email, section}]`.
+ * @returns {{patches: {code: string, name?: string, outlineUrl?: string, term?: number,
+ *   sections: string[], instructors?: CourseInstructor[]}[],
+ *   instructors: Record<string, InstructorName[]>}}
  */
 export function mapEnrollments(rows, { now }) {
   const patches = new Map();
+  /** @type {Record<string, InstructorName[]>} */
+  const instructors = {};
   for (const row of rows || []) {
     if (row.droppedDate != null) continue;
     const code = normCourseCode(`${row.courseSubject || ""} ${row.courseCatalogNumber || ""}`.trim());
@@ -175,9 +214,30 @@ export function mapEnrollments(rows, { now }) {
     const outlineURL = String(row.outlineURL || "").trim();
     if (outlineURL) p.outlineUrl = /^https?:\/\//i.test(outlineURL) ? outlineURL : `https://${outlineURL}`;
     p.term = termCodeFor(now);
+
+    /** @type {InstructorName[]} */
+    const names = [];
+    for (const e of Array.isArray(row.instructorData) ? row.instructorData : []) {
+      const d = e && e.instructorDetail;
+      if (!d) continue;
+      const name = `${d.firstname || ""} ${d.lastname || ""}`.trim();
+      if (!name || names.some((i) => i.name === name)) continue;
+      names.push({ name, email: d.username ? `${d.username}@uwaterloo.ca` : undefined });
+    }
+    if (names.length && section) {
+      const key = `${code}|${section}`;
+      const cur = instructors[key] || [];
+      for (const i of names) if (!cur.some((c) => c.name === i.name)) cur.push(i);
+      instructors[key] = cur;
+      const pi = p.instructors || [];
+      for (const i of names) {
+        if (!pi.some((c) => c.name === i.name && c.section === section)) pi.push({ ...i, section });
+      }
+      p.instructors = pi;
+    }
     patches.set(code, p);
   }
-  return [...patches.values()];
+  return { patches: [...patches.values()], instructors };
 }
 
 /** Titles that mean an academic-calendar date rather than a campus event. */

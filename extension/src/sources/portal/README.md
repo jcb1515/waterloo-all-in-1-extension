@@ -50,6 +50,20 @@ strings carrying `Z` or a `±hh:mm`/`±hhmm` offset are honoured literally.
 - Exam `location` = `"PAC 1-12 · Seat A12"`, `details` = seat instructions,
   `meta.rawTitle` keeps the original title. Event `meta.feed` = the feed
   `name` when `summary` supplied the title.
+- **`meta.facts`** (shared `factsOf` in `learn/classify.js`, label <=40 /
+  value <=300 chars, <=12 facts, empty values dropped) puts the detail fields
+  the calendar renders onto items:
+  - Schedule meetings: Instructor (the accumulated names for
+    `"<CODE>|<section>"`), Room (`roomDescription`), Section.
+  - Exams: Room (`location`), Seat (`seatCode`), Seat instructions, Duration
+    (`end - start` as `"2 h 30 min"` / `"3 h"` / `"50 min"`).
+- **Instructors accumulate in state.** Enrollments read
+  `instructorData[].instructorDetail` (`firstname`/`lastname`/`username`) into
+  `state.instructors["<CODE>|<section>"]` (deduped by name, email =
+  `username@uwaterloo.ca`) and union `[{name, email, section}]` into
+  `state.courses[code].instructors`. An Instructor fact therefore only
+  appears on a meeting when enrollments were observed **before** the
+  schedule — same caveat for `course.instructors`.
 
 ## Failure semantics
 

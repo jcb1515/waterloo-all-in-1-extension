@@ -22,7 +22,20 @@
         "enrolledStatusReasonName": null,
         "droppedDate": null,
         "outlineURL": "outline.uwaterloo.ca/viewer/view/npch7t",
-        "instructorData": [],
+        "instructorData": [
+          {
+            "classMeetingNumber": 1,
+            "instructorDetail": {
+              "firstname": "Jane",
+              "lastname": "Smith",
+              "username": "jsmith",
+              "studentId": "00000000",
+              "usernameLong": null
+            },
+            "instructorRoleCode": "PI",
+            "personId": 1
+          }
+        ],
         "scheduleData": [],
         "termCode": "1269"
       },

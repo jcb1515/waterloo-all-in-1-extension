@@ -21,7 +21,7 @@ const URL_PATTERNS = [
   "^https://portalapi2\\.uwaterloo\\.ca/v2/Calendar/DailyEventsV2",
 ];
 
-/** Merge a course patch into the state map: sections union, fields overwrite. */
+/** Merge a course patch into the state map: sections/instructors union, fields overwrite. */
 function mergeCourse(map, p) {
   const cur = map[p.code] || { code: p.code };
   if (p.name) cur.name = p.name;
@@ -29,6 +29,13 @@ function mergeCourse(map, p) {
   if (p.outlineUrl) cur.outlineUrl = p.outlineUrl;
   const sections = [...new Set([...(cur.sections || []), ...(p.sections || [])])];
   if (sections.length) cur.sections = sections;
+  if (Array.isArray(p.instructors) && p.instructors.length) {
+    const list = cur.instructors || [];
+    for (const i of p.instructors) {
+      if (!list.some((c) => c.name === i.name && c.section === i.section)) list.push(i);
+    }
+    cur.instructors = list;
+  }
   map[p.code] = cur;
 }
 
@@ -81,8 +88,14 @@ const adapter = {
      */
     async parse(payload, ctx) {
       const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-      /** @type {{courses: Record<string, any>, terms: Record<string, any>}} */
-      const state = { ...prev, courses: { ...prev.courses }, terms: { ...prev.terms } };
+      /** @type {{courses: Record<string, any>, terms: Record<string, any>,
+       *   instructors: Record<string, {name: string, email?: string}[]>}} */
+      const state = {
+        ...prev,
+        courses: { ...prev.courses },
+        terms: { ...prev.terms },
+        instructors: { ...prev.instructors },
+      };
 
       if (payload.status === 401 || payload.status === 403) {
         return { items: [], complete: false, scope: "portal:none", session: "signed-out", state };
@@ -115,7 +128,7 @@ const adapter = {
 
       if (/student\/CourseSchedule\/?$/i.test(path)) {
         scope = "portal:schedule";
-        const r = mapSchedule(body.data || [], { scope, at });
+        const r = mapSchedule(body.data || [], { scope, at, instructors: state.instructors });
         items = r.items;
         for (const p of r.patches) mergeCourse(state.courses, p);
       } else if (/student\/ExamSchedule\/?$/i.test(path)) {
@@ -128,7 +141,13 @@ const adapter = {
           : body.data && Array.isArray(body.data.courseEnrollmentData)
             ? body.data.courseEnrollmentData
             : [];
-        for (const p of mapEnrollments(rows, { now: ctx.now || new Date() })) mergeCourse(state.courses, p);
+        const r = mapEnrollments(rows, { now: ctx.now || new Date() });
+        for (const p of r.patches) mergeCourse(state.courses, p);
+        for (const [key, names] of Object.entries(r.instructors)) {
+          const cur = [...(state.instructors[key] || [])];
+          for (const i of names) if (!cur.some((c) => c.name === i.name)) cur.push(i);
+          state.instructors[key] = cur;
+        }
       } else if (/Calendar\/DailyEventsV2/i.test(path)) {
         const start = query && query.get("start");
         const end = query && query.get("end");

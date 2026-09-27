@@ -141,6 +141,45 @@ test("CourseEnrollments list shape -> course patches, dropped rows skipped", asy
   assert.equal(ece2.outlineUrl, "https://outline.uwaterloo.ca/viewer/view/npch7t");
 });
 
+test("enrollments carry instructors onto the course and schedule facts", async () => {
+  const enr = await adapter.observe.parse(payload(URLS.enrollments, json("enrollments")), ctx());
+  const ece = enr.courses.find((c) => c.code === "ECE 150");
+  assert.deepEqual(ece.instructors, [
+    { name: "Jane Smith", email: "jsmith@uwaterloo.ca", section: "LEC 002" },
+  ]);
+
+  // Schedule observed after enrollments picks the Instructor fact up.
+  const res = await adapter.observe.parse(
+    payload(URLS.schedule, json("schedule")),
+    ctx(enr.state),
+  );
+  const lec = res.items.find((i) => i.id.startsWith("portal:sched:ECE150:LEC002:"));
+  assert.deepEqual(lec.meta.facts, [
+    { label: "Instructor", value: "Jane Smith" },
+    { label: "Room", value: "E7 5343" },
+    { label: "Section", value: "LEC 002" },
+  ]);
+  const tut = res.items.find((i) => i.section === "TUT 102");
+  assert.ok(!tut.meta.facts.some((f) => f.label === "Instructor"));
+
+  // Without enrollments state there is no Instructor fact.
+  const bare = await adapter.observe.parse(payload(URLS.schedule, json("schedule")), ctx());
+  const lecBare = bare.items.find((i) => i.id.startsWith("portal:sched:ECE150:LEC002:"));
+  assert.ok(!lecBare.meta.facts.some((f) => f.label === "Instructor"));
+});
+
+test("exam items carry room, seat and duration facts", async () => {
+  const res = await adapter.observe.parse(payload(URLS.exams, json("exams")), ctx());
+  const ece = res.items.find((i) => i.org === "ECE 150");
+  assert.deepEqual(ece.meta.facts, [
+    { label: "Room", value: "PAC 1-12" },
+    { label: "Seat", value: "A12" },
+    { label: "Duration", value: "2 h 30 min" },
+  ]);
+  const math = res.items.find((i) => i.org === "MATH 117");
+  assert.deepEqual(math.meta.facts, [{ label: "Duration", value: "2 h 30 min" }]);
+});
+
 test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => {
   const res = await adapter.observe.parse(payload(URLS.events, json("events")), ctx());
   assert.equal(res.scope, "portal:events:2026-09-01..2026-12-31");
