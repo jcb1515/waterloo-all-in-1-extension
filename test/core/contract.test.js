@@ -12,17 +12,14 @@ test("normCourseCode normalises UW course codes", () => {
   assert.equal(normCourseCode("ece105"), "ECE 105");
   assert.equal(normCourseCode("MATH 117"), "MATH 117");
   assert.equal(normCourseCode("math117"), "MATH 117");
+  assert.equal(normCourseCode("CS 136L"), "CS 136L");
 });
 
-// Frozen contract.js bug: the trailing \b never matches before "_", so
-// instructor-suffixed codes pass through unchanged. Needs a Window 1 fix.
-test(
-  "normCourseCode strips instructor suffix",
-  { skip: "contract.js returns ECE203_pmitran_1269 unchanged (\\b cannot match before _)" },
-  () => {
-    assert.equal(normCourseCode("ECE203_pmitran_1269"), "ECE 203");
-  }
-);
+test("normCourseCode strips instructor suffix", () => {
+  assert.equal(normCourseCode("ECE203_pmitran_1269"), "ECE 203");
+  // A lowercase tail is not a catalog suffix, so this is not a course code.
+  assert.equal(normCourseCode("ECE203pm"), "ECE203pm");
+});
 
 test("itemId builds source:key ids", () => {
   assert.equal(itemId("learn", "123:dropbox:42"), "learn:123:dropbox:42");

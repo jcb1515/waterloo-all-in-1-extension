@@ -249,8 +249,11 @@ export const SITE_BY_HOST = Object.freeze({
  */
 export const itemId = (source, key) => `${source}:${key}`;
 
-/** "ece105" / "ECE 105" / "ECE105" -> "ECE 105" */
+/**
+ * "ece105" / "ECE 105" / "ECE105" -> "ECE 105"
+ * @param {unknown} raw
+ */
 export function normCourseCode(raw) {
-  const m = String(raw || "").match(/^\s*([A-Za-z]{2,8})\s*[_ -]?\s*(\d{3}[A-Za-z]{0,2})\b/);
+  const m = String(raw || "").match(/^\s*([A-Za-z]{2,8})\s*[_ -]?\s*(\d{3}[A-Z]{0,2})(?![A-Za-z0-9])/);
   return m ? `${m[1].toUpperCase()} ${m[2].toUpperCase()}` : String(raw || "").trim();
 }
