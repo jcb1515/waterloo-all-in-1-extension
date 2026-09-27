@@ -213,8 +213,21 @@ export function previewState(nowD = new Date(), variants = {}) {
     startAt: dayAt(nowD, 1, 19, 0),
     endAt: dayAt(nowD, 1, 19, 45),
     location: "#electrical",
-    confidence: "tentative",
+    confidence: "exact",
     seenIn: seen("discord", "wato-sync", "channel:electrical", today),
+  });
+  add("portal:exams:MATH117", {
+    source: "portal",
+    type: "exam",
+    category: "final",
+    title: "Final exam",
+    org: "MATH 117",
+    startAt: dayAt(nowD, 5, 19, 30),
+    endAt: dayAt(nowD, 5, 22, 0),
+    location: "PAC 1-12",
+    confidence: "exact",
+    review: "auto",
+    seenIn: seen("portal", "exams:MATH117", "portal:exams", today),
   });
   add("learn:ece198-lab3", {
     source: "learn",
