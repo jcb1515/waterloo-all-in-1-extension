@@ -305,7 +305,9 @@ export default {
       // really is a layout change.
       const failed = [];
       const file = pathOf(payload.url).split("/").pop() || "";
-      const expectedGroups = Object.hasOwn(EXPECTED_SCOPES, file)
+      // Only full-page DOM snapshots count: WW's POST responses to the same
+      // URLs are often partial fragments (posting modals, slot tables).
+      const expectedGroups = payload.kind === "dom" && Object.hasOwn(EXPECTED_SCOPES, file)
         ? [EXPECTED_SCOPES[file]]
         : [];
       for (const expected of expectedGroups) {

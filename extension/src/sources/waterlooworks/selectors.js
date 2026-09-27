@@ -132,5 +132,4 @@ export const OBSERVE_PATTERNS = Object.freeze([
 export const EXPECTED_SCOPES = Object.freeze({
   "applications.htm": Object.freeze(["applications"]),
   "interviews.htm": Object.freeze(["interviews", "interview-detail"]),
-  "jobs.htm": Object.freeze(["posting"]),
 });
