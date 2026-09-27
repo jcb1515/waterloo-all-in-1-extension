@@ -574,6 +574,92 @@ export function mergeApplications(raws = {}) {
   return out;
 }
 
+/** Email item types that can belong to a WaterlooWorks application. */
+const EMAIL_LINK_TYPES = new Set([
+  "interview",
+  "offer-deadline",
+  "application-deadline",
+  "cycle-date",
+]);
+
+const EMAIL_SOURCES_SET = new Set(["outlook", "gmail"]);
+
+/** Words in an email subject that say nothing about the job itself. */
+const EMAIL_TITLE_NOISE = new Set([
+  "interview", "interviews", "interviewing", "offer", "offers", "deadline",
+  "deadlines", "application", "applications", "apply", "applied", "job",
+  "posting", "position", "invitation", "invite", "update", "updated",
+  "confirmation", "confirmed", "reminder", "rescheduled", "cancelled",
+  "canceled", "selected", "selection", "schedule", "scheduled", "with",
+  "for", "your", "you", "the", "and", "or",
+]);
+
+/** Significant tokens of a title — everything except filler/date words. */
+function jobTokens(title) {
+  return new Set(
+    titleKey(title)
+      .split(" ")
+      .filter((t) => t && !EMAIL_TITLE_NOISE.has(t) && !DATEISH(t))
+  );
+}
+
+/**
+ * Links email-sourced co-op items to WaterlooWorks applications: an item
+ * whose meta.employer fuzzy-matches one application's employer (title
+ * similarity ≥ 0.6) and — when its title carries job-title tokens — shares
+ * at least one significant token with the application's jobTitle. A link is
+ * made only for a unique best match; ambiguous ties link nothing.
+ *
+ * Pure and view-level: returns new maps only when something links. The item
+ * gains meta.applicationId and the application's itemIds gains the item id.
+ * @param {Record<string, any>} items merged items map
+ * @param {Record<string, any>} applications merged applications map
+ * @returns {{items: Record<string, any>, applications: Record<string, any>}}
+ */
+export function linkEmailItems(items = {}, applications = {}) {
+  const apps = Object.values(applications || {}).filter((a) => a && a.id && a.employer);
+  if (!apps.length) return { items, applications };
+  /** @type {Record<string, any> | null} */
+  let itemsOut = null;
+  /** @type {Record<string, any> | null} */
+  let appsOut = null;
+
+  for (const item of Object.values(items || {})) {
+    if (!item || !item.id) continue;
+    if (!EMAIL_LINK_TYPES.has(item.type)) continue;
+    if (!EMAIL_SOURCES_SET.has(item.source)) continue;
+    const employer = item.meta && item.meta.employer;
+    if (!employer) continue;
+
+    const tokens = jobTokens(item.title);
+    const cands = apps.filter(
+      (a) => titleSimilarity(employer, undefined, a.employer, undefined) >= 0.6
+    );
+    const matching = tokens.size
+      ? cands.filter((a) => [...jobTokens(a.jobTitle)].some((t) => tokens.has(t)))
+      : cands;
+    if (matching.length !== 1) continue;
+
+    const app = matching[0];
+    if (!itemsOut) {
+      itemsOut = { ...items };
+      appsOut = { ...applications };
+    }
+    const itemsMap = /** @type {Record<string, any>} */ (itemsOut);
+    const appsMap = /** @type {Record<string, any>} */ (appsOut);
+    itemsMap[item.id] = {
+      ...itemsMap[item.id],
+      meta: { ...(itemsMap[item.id].meta || {}), applicationId: app.id },
+    };
+    const prev = appsMap[app.id] || app;
+    appsMap[app.id] = {
+      ...prev,
+      itemIds: [...new Set([...(Array.isArray(prev.itemIds) ? prev.itemIds : []), item.id])],
+    };
+  }
+  return { items: itemsOut || items, applications: appsOut || applications };
+}
+
 /**
  * Feed updates a SyncResult produced itself: `updates` first, with the older
  * `state.lastUpdates` convention as fallback.
@@ -622,6 +708,33 @@ export function mergeUpdates(existing = [], incoming = [], cap = MAX_UPDATES_CAP
  */
 const COURSE_REPLACE_KEYS = new Set(["grades", "syllabusUrls", "assessments", "gradingSchemes"]);
 
+/** Instructor dedupe key: lowercased name + section (distinct sections stay distinct). */
+const instructorKey = (i) => `${String(i.name).toLowerCase()}|${i.section || ""}`;
+
+/**
+ * Instructor union across sources: first record per (name, section) key wins,
+ * but a later duplicate can fill in a missing email.
+ */
+function mergeInstructors(cur, next) {
+  const out = Array.isArray(cur) ? cur.slice() : [];
+  const seen = new Map();
+  for (const i of out) if (i && i.name) seen.set(instructorKey(i), i);
+  for (const i of next || []) {
+    if (!i || !i.name) continue;
+    const ex = seen.get(instructorKey(i));
+    if (ex) {
+      if (!ex.email && i.email) ex.email = i.email;
+      continue;
+    }
+    const rec = { name: i.name };
+    if (i.email) rec.email = i.email;
+    if (i.section) rec.section = i.section;
+    seen.set(instructorKey(rec), rec);
+    out.push(rec);
+  }
+  return out;
+}
+
 /** Courses merge by code across raws: first non-empty field wins, arrays union. */
 export function mergeCourses(raws = {}) {
   /** @type {Record<string, any>} */
@@ -637,7 +750,9 @@ export function mergeCourses(raws = {}) {
       for (const [k, v] of Object.entries(c)) {
         if (v === undefined || v === null || v === "") continue;
         if (Array.isArray(v) && v.length === 0) continue;
-        if (COURSE_REPLACE_KEYS.has(k)) {
+        if (k === "instructors") {
+          cur[k] = mergeInstructors(cur[k], v);
+        } else if (COURSE_REPLACE_KEYS.has(k)) {
           cur[k] = v;
         } else if (Array.isArray(v)) {
           cur[k] = [...new Set([...(Array.isArray(cur[k]) ? cur[k] : []), ...v])];

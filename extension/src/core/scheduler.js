@@ -5,7 +5,7 @@
   Pure helpers (nextBackoff, shouldRun) are exported for tests.
 */
 
-import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates } from "./merge.js";
+import { recompute, applyResult, mergeApplications, mergeUpdates, mergeCourses, mergeTerms, resultUpdates, linkEmailItems } from "./merge.js";
 import { manualUpsertResult, manualDeleteResult } from "./quickadd.js";
 import {
   getSettings,
@@ -452,7 +452,9 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
       userState: mv.userState,
       now,
     });
-    const applications = mergeApplications(mv.raws);
+    // Email items link to WaterlooWorks applications at the view level —
+    // adapter-persisted application records stay untouched.
+    const linked = linkEmailItems(res.items, mergeApplications(mv.raws));
     // All writes happen inside this one queued task — a nested enqueue()
     // (pushUpdates/mutateKey) would deadlock against the outer task.
     const cur = await chrome.storage.local.get("updates");
@@ -462,10 +464,10 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
       MAX_UPDATES
     );
     await chrome.storage.local.set({
-      items: res.items,
+      items: linked.items,
       links: res.links,
       uidMap: res.uidMap,
-      applications,
+      applications: linked.applications,
       courses: mergeCourses(mv.raws),
       terms: mergeTerms(mv.raws),
       updates,

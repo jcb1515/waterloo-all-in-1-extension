@@ -48,6 +48,9 @@ function CourseDetail({ card, state, actions, now, onBack }) {
   });
   const topics = weekTopics(list, now);
   const officeHours = course.officeHours || (course.meta && course.meta.officeHours) || null;
+  const instructors = (Array.isArray(course.instructors) ? course.instructors : []).filter(
+    (i) => i && i.name
+  );
 
   // Assessments table: prefer the outline's dated assessment rows when present.
   const assessments = Array.isArray(course.assessments) && course.assessments.length
@@ -195,6 +198,24 @@ function CourseDetail({ card, state, actions, now, onBack }) {
           <h3>This week</h3>
           {topics.map((t, i) => (
             <p key={i} class="course-topic">{t}</p>
+          ))}
+        </div>
+      ) : null}
+
+      {instructors.length ? (
+        <div class="card">
+          <h3>Instructors</h3>
+          {instructors.map((i) => (
+            <p key={`${i.name}|${i.section || ""}`} class="course-topic">
+              {i.name}
+              {i.section ? <span class="help"> · {i.section}</span> : null}
+              {i.email ? (
+                <>
+                  {" "}
+                  · <a href={`mailto:${i.email}`}>{i.email}</a>
+                </>
+              ) : null}
+            </p>
           ))}
         </div>
       ) : null}
