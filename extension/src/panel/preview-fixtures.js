@@ -212,6 +212,44 @@ export function previewState(nowD = new Date(), variants = {}) {
     url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/rankings.htm",
     seenIn: seen("waterlooworks", "rank-granite", "applications", today),
   });
+  add("gmail:invite:k7:evt", {
+    source: "gmail",
+    type: "meeting",
+    title: "Robotics design review",
+    startAt: dayAt(nowD, 2, 18, 0),
+    endAt: dayAt(nowD, 2, 19, 0),
+    location: "https://meet.google.com/abc-defg-hij",
+    url: "https://mail.google.com/mail/u/0/#inbox/thread-abc123",
+    meta: {
+      provider: "gmail",
+      facts: [
+        { label: "Organizer", value: "Jane Student" },
+        { label: "Join", value: "meet.google.com/abc-defg-hij" },
+      ],
+    },
+    seenIn: seen("gmail", "invite:k7", "email:gmail:thread-abc123", today),
+  });
+  add("outlook:mail:k41:offer", {
+    source: "outlook",
+    type: "offer-deadline",
+    title: "Acme Analog — Hardware Engineer offer deadline",
+    org: "Acme Analog",
+    dueAt: dayAt(nowD, 4, 23, 59),
+    confidence: "tentative",
+    url: "https://outlook.office.com/mail/inbox/id/k41",
+    evidence: {
+      method: "text",
+      snippet: "Your offer for Hardware Engineer — co-op expires this Friday.",
+      url: "https://outlook.office.com/mail/inbox/id/k41",
+    },
+    meta: {
+      provider: "outlook",
+      employer: "acmeanalog",
+      applicationId: "waterlooworks:408117",
+      facts: [{ label: "From", value: "Talent Team" }],
+    },
+    seenIn: seen("outlook", "mail:k41", "email:outlook:k41", today),
+  });
   add("discord:wato-electrical-sync", {
     source: "discord",
     type: "meeting",
@@ -480,6 +518,15 @@ export function previewState(nowD = new Date(), variants = {}) {
       itemCount: 24,
       state: {},
     },
+    outlook: {
+      lastRunAt: iso(now - 30 * MIN),
+      lastOkAt: iso(now - 30 * MIN),
+      session: "signed-in",
+      error: null,
+      complete: false,
+      failures: 0,
+      itemCount: 2,
+    },
     discord: {
       lastRunAt: iso(now - 20 * MIN),
       lastOkAt: iso(now - 20 * MIN),
@@ -534,6 +581,10 @@ export function previewState(nowD = new Date(), variants = {}) {
         { component: "Final exam", weight: 40, dateText: "Dec exam window", itemId: null, from: "chart" },
       ],
       officeHours: "Mon/Wed 3:30–4:20 PM · MC 5417",
+      instructors: [
+        { name: "J. Rivera", email: "jrivera@example.edu", section: "LEC 002" },
+        { name: "A. Chen", section: "TUT 104" },
+      ],
     },
     "MATH 115": {
       code: "MATH 115",
@@ -670,7 +721,7 @@ export function previewState(nowD = new Date(), variants = {}) {
         { status: "selected-for-interview", at: iso(now - 3 * DAY) },
         { status: "interview-scheduled", at: iso(now - DAY) },
       ],
-      itemIds: ["waterlooworks:int-acme"],
+      itemIds: ["waterlooworks:int-acme", "outlook:mail:k41:offer"],
     },
     "waterlooworks:407890": {
       id: "waterlooworks:407890",

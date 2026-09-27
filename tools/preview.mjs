@@ -117,7 +117,17 @@ const SHOTS_3B = [
   { name: "options-calendar-download-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
 ];
 
+const SHOTS_CP3 = [
+  { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-agenda-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
+  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "options-sources-email-light", url: "/src/options/options.html?preview=1&adv=1#sources", size: [1280, 900] },
+  { name: "panel-course-instructors-light", url: "/src/panel/panel.html?preview=1&tab=courses&course=MATH%20117", size: [400, 900] },
+  { name: "panel-coop-linked-light", url: "/src/panel/panel.html?preview=1&tab=coop", size: [400, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "cp3" ? SHOTS_CP3 :
   process.env.WA1_SHOT_DIR === "phase3b" ? SHOTS_3B :
   process.env.WA1_SHOT_DIR === "phase3a" ? SHOTS_3A :
   process.env.WA1_SHOT_DIR === "cp2" ? SHOTS_CP2 :
