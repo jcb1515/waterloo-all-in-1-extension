@@ -35,6 +35,34 @@ function fnv(text) {
 
 const cancelled = (text) => /cancel/i.test(text || "");
 
+/** meta.facts builder: keeps only non-empty values, in order. */
+function factsOf(pairs) {
+  const out = [];
+  for (const pair of pairs) {
+    if (!pair) continue;
+    const [label, value] = pair;
+    const v = value == null ? "" : String(value).trim();
+    if (v) out.push({ label, value: v });
+  }
+  return out.length ? out : undefined;
+}
+
+/** "Thu Oct 8, 4:00 PM" — Toronto wall-clock rendering of an ISO instant. */
+const WW_LOCAL_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Toronto",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+const wwLocalText = (value) => {
+  const ms = Date.parse(String(value || ""));
+  if (!Number.isFinite(ms)) return undefined;
+  return WW_LOCAL_FMT.format(new Date(ms)).replace(/^(\w+),\s*/, "$1 ");
+};
+
 /**
  * @param {any[]} rows  parseApplications rows
  * @returns {Application[]}
@@ -110,6 +138,16 @@ export function interviewItems(rows, now) {
         method: row.method,
         scheduleStatus: row.scheduleStatus,
         confirmationStatus: row.confirmationStatus,
+        facts: factsOf([
+          ["Employer", row.employer],
+          ["Job", row.jobTitle ? `${row.jobId} - ${row.jobTitle}` : row.jobId],
+          ["Method", row.method],
+          ["Type", row.type],
+          ["Where", row.location || row.method],
+          /\bconfirm(ed)?\b/i.test(row.confirmationStatus || "")
+            ? ["Booking", "Booked"]
+            : null,
+        ]),
         prep: {
           jobId: row.jobId,
           format: row.type || row.method,
@@ -169,6 +207,26 @@ export function interviewDetailItems(detail, now) {
       meta: {
         jobId: detail.jobId,
         division: detail.division,
+        facts: factsOf([
+          ["Employer", detail.employer],
+          [
+            "Job",
+            detail.jobTitle
+              ? `${detail.jobId} - ${detail.jobTitle}`
+              : detail.jobId,
+          ],
+          ["Method", detail.method],
+          ["Type", detail.interviewType],
+          ["Where", detail.where],
+          ["Interviewer", detail.interviewer],
+          ["Booking", detail.booked ? "Booked" : detail.bookingPermission],
+          [
+            "Instructions",
+            detail.instructions
+              ? String(detail.instructions).slice(0, 300)
+              : undefined,
+          ],
+        ]),
         prep: {
           jobId: detail.jobId,
           jobTitle: detail.jobTitle,
@@ -220,6 +278,20 @@ export function interviewDetailItems(detail, now) {
         jobId: detail.jobId,
         availableSlots: available.length,
         rule: "24h-before-first-slot",
+        facts: factsOf([
+          [
+            "Job",
+            detail.jobTitle
+              ? `${detail.jobId} - ${detail.jobTitle}`
+              : detail.jobId,
+          ],
+          ["Employer", detail.employer],
+          ["Earliest slot", wwLocalText(firstStart)],
+          [
+            "Rule",
+            "WaterlooWorks picks a slot for you if you haven't booked one day before",
+          ],
+        ]),
       },
     });
   }
@@ -282,7 +354,22 @@ export function postingItems(posting, now) {
       confidence: "exact",
       review: "auto",
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: iso(now) }],
-      meta: { jobId: posting.jobId, division: posting.division },
+      meta: {
+        jobId: posting.jobId,
+        division: posting.division,
+        facts: factsOf([
+          [
+            "Job",
+            posting.jobTitle
+              ? `${posting.jobId} - ${posting.jobTitle}`
+              : posting.jobId,
+          ],
+          ["Employer", posting.employer],
+          ["Work term", posting.fields?.["Work Term"]],
+          ["Level", posting.fields?.Level],
+          ["City", posting.fields?.["Job - City"] || posting.fields?.City],
+        ]),
+      },
     },
   ];
 }
@@ -417,6 +504,10 @@ export function messageDateItems(msg, extractDates, nowIso) {
         messageOrigin: msg.origin === "list" ? "list" : "detail",
         category: msg.category || undefined,
         weekdayMismatch: Boolean(hit.weekdayMismatch),
+        facts: factsOf([
+          ["Category", msg.category],
+          ["From message", msg.subject],
+        ]),
       },
     };
     if (hit.allDay) {
@@ -545,7 +636,14 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
       confidence: "exact",
       review: "auto",
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
-      meta: { workTerm, cycle: cycle || undefined },
+      meta: {
+        workTerm,
+        cycle: cycle || undefined,
+        facts: factsOf([
+          ["Cycle", cycle],
+          ["Work term", workTerm],
+        ]),
+      },
     };
     items.push(item);
   };
@@ -644,6 +742,8 @@ export function mergeInterviewScopes(listItems, detailItems) {
         ...detail.meta,
         ...item.meta,
         prep: { ...listPrep, ...detailPrep },
+        // The detail knows more; its facts win on a shared label.
+        facts: mergeFacts(detail.meta?.facts, item.meta?.facts),
       },
       seenIn: dedupeSeenIn(item.seenIn, detail.seenIn),
     };
@@ -655,6 +755,19 @@ export function mergeInterviewScopes(listItems, detailItems) {
  * @param {string|undefined} a  list-side details
  * @param {string|undefined} b  detail-side details
  */
+/** Facts union: `a` entries first; same-label (case-insensitive) `b` dropped. */
+function mergeFacts(a, b) {
+  const out = [];
+  const seen = new Set();
+  for (const f of [...(a || []), ...(b || [])]) {
+    const key = String(f?.label || "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out.length ? out : undefined;
+}
+
 function mergeDetails(a, b) {
   const lines = [];
   for (const line of `${a || ""}\n${b || ""}`.split("\n")) {
