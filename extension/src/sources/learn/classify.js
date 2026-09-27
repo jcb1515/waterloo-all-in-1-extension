@@ -35,6 +35,45 @@ export function isDueish(sentence) {
 }
 
 /**
+ * The sentence a date hit sits in: text up to the nearest sentence boundary
+ * on each side, whitespace-collapsed, capped at 300 chars. `.`/`!`/`?` only
+ * end a sentence when a new uppercase sentence (or the end of the text)
+ * follows, so abbreviations ("Ch. 3", "Oct. 9") don't cut it; "\n" always
+ * ends one. Shared by the Learn announcement scan and the email rules.
+ * @param {string} text @param {number} index @param {number} length
+ */
+export function sentenceOf(text, index, length) {
+  text = String(text || "");
+  const isBoundary = (i) => {
+    if (text[i] === "\n") return true;
+    if (text[i] !== "." && text[i] !== "!" && text[i] !== "?") return false;
+    const rest = text.slice(i + 1).replace(/^\s+/, "");
+    return rest === "" || /^[A-Z]/.test(rest);
+  };
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    if (isBoundary(i)) {
+      start = i + 1;
+      break;
+    }
+  }
+  let end = text.length;
+  for (let i = index + length; i < text.length; i++) {
+    if (isBoundary(i)) {
+      end = i + 1;
+      break;
+    }
+  }
+  if (end - start > 300) {
+    // A sentence longer than the cap is cropped around the hit, not at its start.
+    const mid = index + Math.floor(length / 2);
+    start = Math.max(0, mid - 150);
+    end = Math.min(text.length, start + 300);
+  }
+  return text.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+/**
  * Build `meta.facts` from [label, value] pairs: trimmed non-empty values,
  * label <= 40 chars, value <= 300 chars, at most 12 facts (the server
  * renders at most 12 per event). Shared by Learn, Portal and outline.

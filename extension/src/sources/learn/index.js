@@ -10,7 +10,7 @@
 
 import { itemId, normCourseCode } from "../../core/contract.js";
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
-import { classify, factsOf, isDueish, TRIGGER_RE } from "./classify.js";
+import { classify, factsOf, isDueish, sentenceOf, TRIGGER_RE } from "./classify.js";
 import { cleanEventTitle, LiveSource, liveBase } from "./live-source.js";
 
 /** @typedef {import("../../core/contract.js").FetchResult} FetchResult */
@@ -62,40 +62,6 @@ function toLive(r) {
     out.body = String(r.text || "").slice(0, 2000);
   }
   return out;
-}
-
-/** The sentence a date hit sits in: text up to the nearest sentence boundary on each side. */
-function sentenceOf(text, index, length) {
-  // . ! ? only end a sentence when a new uppercase sentence (or the end of the
-  // text) follows, so abbreviations ("Ch. 3", "Oct. 9") don't cut it. \n always
-  // ends one.
-  const isBoundary = (i) => {
-    if (text[i] === "\n") return true;
-    if (text[i] !== "." && text[i] !== "!" && text[i] !== "?") return false;
-    const rest = text.slice(i + 1).replace(/^\s+/, "");
-    return rest === "" || /^[A-Z]/.test(rest);
-  };
-  let start = 0;
-  for (let i = index - 1; i >= 0; i--) {
-    if (isBoundary(i)) {
-      start = i + 1;
-      break;
-    }
-  }
-  let end = text.length;
-  for (let i = index + length; i < text.length; i++) {
-    if (isBoundary(i)) {
-      end = i + 1;
-      break;
-    }
-  }
-  if (end - start > 300) {
-    // A sentence longer than the cap is cropped around the hit, not at its start.
-    const mid = index + Math.floor(length / 2);
-    start = Math.max(0, mid - 150);
-    end = Math.min(text.length, start + 300);
-  }
-  return text.slice(start, end).replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
 /** A normalised title for grade matching: case/spacing-insensitive, Learn decorations off. */

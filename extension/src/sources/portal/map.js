@@ -72,10 +72,10 @@ const COMP_TYPE = { TUT: "tutorial", LAB: "lab", TST: "exam" };
  * accumulated {"CODE|section": [{name, email}]} map from enrollments: an
  * Instructor fact only appears when enrollments were observed first.
  * @param {any[]} rows
- * @param {{scope: string, at: string, instructors?: Record<string, InstructorName[]>}} ctx
+ * @param {{scope?: string, at?: string, instructors?: Record<string, InstructorName[]>}} [ctx]
  * @returns {{items: Item[], patches: {code: string, name?: string, term?: number, sections: string[]}[]}}
  */
-export function mapSchedule(rows, { scope, at, instructors } = {}) {
+export function mapSchedule(rows, { scope = "", at = "", instructors } = {}) {
   /** @type {Item[]} */
   const items = [];
   const patches = new Map();
