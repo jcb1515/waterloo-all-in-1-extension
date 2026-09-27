@@ -23,6 +23,8 @@ import { t1Fetch, relayFetch } from "../capture/fetch.js";
 import { parseHtml } from "../capture/parse.js";
 import { extractDates } from "../lib/textdates/index.js";
 import { scheduleFeedPublish } from "../calendar/publish.js";
+import { effectiveItem, isVisible } from "./effective.js";
+import { rescheduleReminders } from "./remind.js";
 
 const MAX_CONCURRENT = 2;
 const MINUTE = 60 * 1000;
@@ -43,7 +45,7 @@ export function nextBackoff(failures) {
  * Should the adapter run now?
  * @param {{state?: any, lastRunAt?: string, backoffUntil?: string} | null} state sourceState entry
  * @param {number} now Date.now()
- * @param {"alarm"|"manual"|"tab"|"startup"|"scope"} reason
+ * @param {"alarm"|"manual"|"tab"|"startup"|"scope"|"reminder"} reason
  * @param {number} intervalMinutes adapter's sync interval
  */
 export function shouldRun(state, now, reason, intervalMinutes) {
@@ -182,7 +184,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Runs one adapter sync. At most one run per adapter at a time and at most
  * MAX_CONCURRENT overall; manual runs skip backoff.
  * @param {string} adapterId
- * @param {"alarm"|"manual"|"tab"|"startup"|"scope"} reason
+ * @param {"alarm"|"manual"|"tab"|"startup"|"scope"|"reminder"} reason
  */
 export async function runSync(adapterId, reason) {
   const adapter = ADAPTERS.find((a) => a.id === adapterId);
@@ -402,6 +404,8 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
     await refreshBadge();
     // Republish the calendar feed (debounced) when it's enabled.
     scheduleFeedPublish().catch(() => {});
+    // Re-arm the reminder/briefing alarms for the new merged view.
+    rescheduleReminders().catch(() => {});
     return res;
   });
 }
@@ -427,20 +431,19 @@ export async function setUserState(id, patch) {
  */
 export async function refreshBadge() {
   try {
-    const mv = await getMergedView();
+    const [mv, settings] = await Promise.all([getMergedView(), getSettings()]);
+    const acceptPending = !!(settings.review && settings.review.showPending);
     const endToday = new Date();
     endToday.setHours(23, 59, 59, 999);
     const endMs = endToday.getTime();
     const nowMs = Date.now();
     let n = 0;
     for (const it of Object.values(mv.items)) {
-      if (it.status !== "open") continue;
-      if (it.review === "pending" || it.review === "dismissed") continue;
-      if (it.type === "class" || it.type === "tutorial" || it.type === "lab" || it.type === "term-date") continue;
-      const us = mv.userState[it.id] || {};
-      if (us.hidden) continue;
-      if (us.snoozedUntil && Date.parse(us.snoozedUntil) > nowMs) continue;
-      const anchor = it.dueAt || it.startAt;
+      const eff = effectiveItem(it, mv.userState[it.id], { acceptPending });
+      if (eff.status !== "open") continue;
+      if (!isVisible(eff, nowMs)) continue;
+      if (eff.type === "class" || eff.type === "tutorial" || eff.type === "lab" || eff.type === "term-date") continue;
+      const anchor = eff.dueAt || eff.startAt;
       if (!anchor || Date.parse(anchor) > endMs) continue;
       n++;
     }

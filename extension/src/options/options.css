@@ -413,3 +413,46 @@ kbd {
   padding-left: var(--sp-4);
   font-size: var(--fs-xs);
 }
+
+/* ------------------------------- reminders -------------------------------- */
+
+.lead-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.lead-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 26px;
+}
+.lead-label {
+  width: 150px;
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.lead-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.lead-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.lead-none {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-style: italic;
+}
+.lead-add {
+  font-size: var(--fs-xs);
+  padding: 2px 6px;
+}
+.time-input {
+  width: 110px;
+}

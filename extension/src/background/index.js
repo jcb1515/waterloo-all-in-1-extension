@@ -35,6 +35,14 @@ import {
   PUBLISH_ALARM,
   DAILY_ALARM,
 } from "../calendar/publish.js";
+import {
+  rescheduleReminders,
+  fireDueReminders,
+  sendBriefing,
+  installNotificationHandlers,
+  REMIND_ALARM,
+  BRIEFING_ALARM,
+} from "../core/remind.js";
 
 const BADGE_BG = "#FED34C"; // school bus yellow
 const BADGE_TEXT = "#16181D";
@@ -71,7 +79,9 @@ async function setup() {
   } catch (e) {
     console.warn(`[wa1] alarm ${DAILY_ALARM}`, e);
   }
-  await recomputeAll(); // rebuild merged view + badge from stored raws
+  installNotificationHandlers();
+  await recomputeAll(); // rebuild merged view + badge; also arms the reminders
+  await rescheduleReminders().catch(() => {});
 }
 
 /** On startup, run adapters whose last run is older than their interval. */
@@ -110,6 +120,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (m) runSync(m[1], "alarm").catch(() => {});
   if (alarm.name === PUBLISH_ALARM || alarm.name === DAILY_ALARM) {
     publishFeed().catch((e) => console.warn("[wa1] publish", e && e.message));
+  }
+  if (alarm.name === REMIND_ALARM) {
+    fireDueReminders().catch((e) => console.warn("[wa1] remind", e && e.message));
+  }
+  if (alarm.name === BRIEFING_ALARM) {
+    sendBriefing().catch((e) => console.warn("[wa1] briefing", e && e.message));
   }
 });
 
@@ -156,8 +172,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     stopFeed().then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
+  if (msg.type === UI.TEST_NOTIFY) {
+    testNotification().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   return false;
 });
+
+/** Settings -> Reminders "Send test notification". */
+async function testNotification() {
+  try {
+    await chrome.notifications.create(`wa1:test:${Date.now()}`, {
+      type: "basic",
+      iconUrl: "icons/icon-128.png",
+      title: "ECE 105 · Quiz #3",
+      message: "Due in 1 hour · 11:59 PM",
+      buttons: [{ title: "Mark done" }, { title: "Snooze 1 h" }],
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && /** @type {any} */ (e).message) || e) };
+  }
+}
 
 /**
  * A site tab announced itself. Reply with the adapter's observe patterns and
@@ -218,6 +254,13 @@ try {
     const after = /** @type {any} */ (s && s.newValue) || {};
     if (s && JSON.stringify(before.calendar) !== JSON.stringify(after.calendar)) {
       scheduleFeedPublish().catch(() => {});
+    }
+    if (
+      s &&
+      (JSON.stringify(before.reminders) !== JSON.stringify(after.reminders) ||
+        JSON.stringify(before.review) !== JSON.stringify(after.review))
+    ) {
+      rescheduleReminders().catch(() => {});
     }
   });
 } catch {

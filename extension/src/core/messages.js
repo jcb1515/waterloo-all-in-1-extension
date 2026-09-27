@@ -18,4 +18,6 @@ export const UI = Object.freeze({
   CALENDAR_PUBLISH: "wa1:calendar-publish",
   /** options -> background: { type } delete the feed and disable sync */
   CALENDAR_STOP: "wa1:calendar-stop",
+  /** options -> background: { type } fire a sample reminder notification */
+  TEST_NOTIFY: "wa1:test-notification",
 });

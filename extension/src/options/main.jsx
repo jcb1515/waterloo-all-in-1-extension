@@ -10,10 +10,9 @@ import { GeneralSection } from "./sections/General.jsx";
 import { ProfileSection } from "./sections/Profile.jsx";
 import { SourcesSection } from "./sections/SourcesSection.jsx";
 import { CalendarSection } from "./sections/Calendar.jsx";
+import { RemindersSection } from "./sections/Reminders.jsx";
 import { PrivacySection } from "./sections/Privacy.jsx";
 import { AboutSection } from "./sections/About.jsx";
-import { SoonCard } from "./bits.jsx";
-import { BellIcon } from "../ui/icons.jsx";
 
 const SECTIONS = [
   ["welcome", "Welcome", WelcomeSection],
@@ -25,18 +24,6 @@ const SECTIONS = [
   ["privacy", "Privacy & discovery", PrivacySection],
   ["about", "About", AboutSection],
 ];
-
-function RemindersSection() {
-  return (
-    <div class="opt-stack">
-      <SoonCard
-        icon={BellIcon}
-        title="Reminders"
-        text="Reminder schedules arrive in the next update."
-      />
-    </div>
-  );
-}
 
 function currentSection() {
   const h = (location.hash || "#general").slice(1);
