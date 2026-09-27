@@ -31,8 +31,11 @@ Discord page ──REST responses──> recorder.content.js ──net payload�
                        applyResult(raw, result, {mode:"scope", scope:"discord"})
 ```
 
-`observe.urlPatterns` (GET only; non-GET and non-2xx are ignored, 401 means
-`session: "signed-out"`):
+`observe.urlPatterns` (GET responses produce items; 401 means
+`session: "signed-out"`, other non-2xx are ignored. One non-GET exception:
+a **200/201 POST** to `/api/v*/channels/:id/messages` is the user's own
+just-sent message — used only for identity and to-do completion, never
+for candidates. Every other non-GET method is ignored):
 
 - `/api/v*/channels/:id/messages` — channel history (sweep reads)
 - `/api/v*/channels/:id/messages/pins` — pins
@@ -116,7 +119,52 @@ a bare @everyone.
 
 Identity inference (`identity.js`): mentions-endpoint messages that ping
 the user directly intersect their `mentions[].id` sets to a single selfId;
-once known, mentions messages not mentioning selfId are role pings.
+once known, mentions messages not mentioning selfId are role pings. A
+successful message POST also proves selfId when nothing else has.
+
+## Reply to-dos
+
+A message that pings the user — direct selfId mention, a known role ping,
+a non-broadcast mentions-endpoint message, or the DOM "mentioned"
+highlight — AND asks something (a literal `?` or a request phrase:
+`can you`/`could you`/`would you`/`can we`/`please`/`pls`/`plz`/
+`thoughts`/`what do you think`/`when are you free`/`are you free`/
+`are you available`/`let me know`/`lmk`/`any update(s)`/`can someone`/
+`need you to` — `REPLY_REQUEST_RE` in `selectors.js`) produces
+`replyCandidate`: one `type:"task", category:"reply"` item,
+`id discord:reply:<messageId>`, title `Reply in #<channel> (<team>)`
+(falling back to `Reply in Discord (…)` / `Reply in Discord`), `dueAt`
+the Toronto calendar day two days after the ask at 17:00 Toronto
+(DST-safe via `zonedIso`), `confidence:"exact"`, `review:"auto"`,
+`meta.reply = {channelId, messageId, askedAt}`, and an Asked fact with
+the Toronto wall time. One to-do per ask: a ping that already produced a
+task candidate gets no extra reply item. Self-authored questions and
+@everyone/@here-only broadcasts are skipped.
+
+Completion (`completeOpenItems` in `index.js`, run after each ingest): a
+self-authored message marks the reply item `done` when it references the
+question via `message_reference`, or is a later message in the same
+channel or in the thread rooted at the question (Discord gives a thread
+its starter message's id as its channel id). `state.repliesDone =
+{messageId: doneAt}` (cap 500, newest kept) re-applies `done` when the
+question re-reads.
+
+Assigned tasks complete the same way, best effort: `meta.assignerKey =
+hashString(author.id)` is stored on task items, and a
+`message_reference` reply matching `DONE_RE` (`done|finished|merged|
+completed|shipped|fixed`) closes the task when authored by the user or
+by the original assigner (hash match — third parties don't count).
+`state.tasksDone` mirrors `repliesDone` (cap 500).
+
+Privacy and limits: only the user's own id is ever persisted (`selfId`,
+learned from the mentions endpoint or a POST response); the assigner is
+a one-way FNV hash, other authors' ids are compared and dropped; message
+bodies never persist beyond the ≤300-char snippet on the item. DOM
+extracts carry no author id, so DOM messages can open a reply to-do but
+never complete one — that needs a REST read (history/search/pins) or a
+POST response. A reply to-do follows the same output rules as other
+assigned-to-me items: visible in watched guilds even when the channel
+isn't watched.
 
 ## State shape
 
@@ -139,6 +187,8 @@ state.rsvps = [eventId, …]                          // cap 500
 state.lastGood.events[guildId] = { items, at }      // scheduled events;
                                                     // 50 guilds, 100 items each
 state.identity = { selfId?, roleIds: [], evidence: n }
+state.repliesDone = { [messageId]: doneAtIso }      // reply to-dos, cap 500
+state.tasksDone = { [messageId]: doneAtIso }        // assigned tasks, cap 500
 ```
 
 Scheduled events (`events.js`): a list-modal read replaces the guild's

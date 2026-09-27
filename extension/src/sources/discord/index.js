@@ -15,7 +15,7 @@
 // is filtered to watched channels only at output time, so the adapter is
 // authoritative under the single scope "discord".
 
-import { OBSERVE_URL_PATTERNS } from "./selectors.js";
+import { OBSERVE_URL_PATTERNS, DONE_RE } from "./selectors.js";
 import {
   watchConfig,
   watchForGuild,
@@ -30,9 +30,11 @@ import {
   normalizeRestBody,
   stripMarkup,
   candidatesForMessage,
+  replyCandidate,
   domMessageToRest,
 } from "./messages.js";
 import { inferIdentity } from "./identity.js";
+import { hashString } from "../../capture/redact.js";
 import { meetingKey, textWeeklyHint, recurringSuggestions } from "./recurring.js";
 import { parseEventsExtract } from "./events.js";
 
@@ -55,6 +57,102 @@ const GUILD_CAP = 50;
 const GUILD_CHANNEL_CAP = 250;
 const EVENT_GUILD_CAP = 50;
 const EVENT_ITEMS_CAP = 100;
+/** repliesDone/tasksDone maps — {messageId: doneAtIso}, newest kept. */
+const DONE_CAP = 500;
+
+/** Keep the newest DONE_CAP entries of a {messageId: doneAtIso} map. */
+const capDoneMap = (m) => {
+  const es = Object.entries(m);
+  if (es.length <= DONE_CAP) return m;
+  es.sort((a, b) => String(b[1]).localeCompare(String(a[1])));
+  return Object.fromEntries(es.slice(0, DONE_CAP));
+};
+
+/** ISO instant for a Discord message (fallback: the read time). */
+const msgInstantIso = (m, atIso) => {
+  const ms = Date.parse(String(m?.timestamp || ""));
+  if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  return String(atIso || new Date().toISOString());
+};
+
+/**
+ * Close open reply to-dos and assigned tasks whose completion evidence
+ * arrived in this read. Reply items: a self-authored reply reference, or
+ * any later self message in the same channel / starter-message thread.
+ * Assigned tasks: a DONE_RE reply from the assigner (hash match) or self.
+ * Rebuilds the items array rather than mutating shared item objects.
+ * @param {any} state @param {any[]} selfMsgs
+ * @param {{refId: string, msg: any}[]} replyMsgs  any-author replies
+ * @param {string} [selfId] @param {string} [atIso]
+ */
+function completeOpenItems(state, selfMsgs, replyMsgs, selfId, atIso) {
+  const wrap = obj(state.lastGood?.messages);
+  const items = arr(wrap.items);
+  if (!items.length) return;
+  const repliesDone = { ...obj(state.repliesDone) };
+  const tasksDone = { ...obj(state.tasksDone) };
+  let changed = false;
+  const next = items.map((item) => {
+    if (!item || item.status === "done") return item;
+    const meta = obj(item.meta);
+    if (meta.reply && typeof meta.reply === "object") {
+      const target = String(meta.reply.messageId || "");
+      const askedMs = Date.parse(String(meta.reply.askedAt || ""));
+      if (!target || !arr(selfMsgs).length) return item;
+      /** @type {string|null} */
+      let doneAt = null;
+      for (const m of arr(selfMsgs)) {
+        const ref = String(m?.message_reference?.message_id || "");
+        if (ref && ref === target) {
+          doneAt = msgInstantIso(m, atIso);
+          break;
+        }
+        const ch = String(m?.channel_id || "");
+        const ts = Date.parse(String(m?.timestamp || ""));
+        // Same channel, or the starter-message thread (its channel id is
+        // the starter message's id), strictly later than the ask.
+        if (
+          (ch === String(meta.reply.channelId) || ch === target) &&
+          Number.isFinite(ts) &&
+          Number.isFinite(askedMs) &&
+          ts > askedMs
+        ) {
+          doneAt = msgInstantIso(m, atIso);
+          break;
+        }
+      }
+      if (doneAt) {
+        repliesDone[target] = doneAt;
+        changed = true;
+        return { ...item, status: "done" };
+      }
+      return item;
+    }
+    if (item.type === "task" && meta.messageId) {
+      const target = String(meta.messageId);
+      for (const { refId, msg } of arr(replyMsgs)) {
+        if (refId !== target) continue;
+        if (!DONE_RE.test(stripMarkup(msg?.content))) continue;
+        const aid = String(msg?.author?.id || "");
+        const mine = Boolean(selfId) && aid === selfId;
+        const byAssigner =
+          Boolean(meta.assignerKey) &&
+          aid !== "" &&
+          hashString(aid) === meta.assignerKey;
+        if (!mine && !byAssigner) continue;
+        tasksDone[target] = msgInstantIso(msg, atIso);
+        changed = true;
+        return { ...item, status: "done" };
+      }
+    }
+    return item;
+  });
+  if (changed) {
+    state.lastGood.messages = { ...wrap, items: next };
+    state.repliesDone = capDoneMap(repliesDone);
+    state.tasksDone = capDoneMap(tasksDone);
+  }
+}
 
 /** Non-array input (garbage persisted state / extracts) reads as empty. */
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -253,12 +351,23 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
   const seenIds = [];
   /** @type {Map<string, {msgs: any[], items: number}>} */
   const stats = new Map();
+  /** Self-authored messages — they can complete open reply to-dos.
+   * @type {any[]} */
+  const selfMsgs = [];
+  /** Any-author replies (message_reference) — can close assigned tasks.
+   * @type {{refId: string, msg: any}[]} */
+  const replyMsgs = [];
 
   for (const msg of arr(messages)) {
     const channelId = String(msg?.channel_id || src.channelId || "");
     if (!channelId || !msg?.id) continue;
     if (dmSet.has(channelId)) continue; // DM channels: never stored
     seenIds.push(String(msg.id));
+    if (selfId && String(msg?.author?.id || "") === selfId) {
+      selfMsgs.push(msg);
+    }
+    const refId = String(msg?.message_reference?.message_id || "");
+    if (refId) replyMsgs.push({ refId, msg });
 
     const loc = locateChannel(state, channelId);
     const guildId = loc?.guildId || msg?.guild_id || src.guildId;
@@ -281,7 +390,35 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
       via: src.via,
       nowIso,
     });
+    // A task that was closed earlier stays done when its message re-reads.
+    for (const it of items) {
+      const mid = String(it?.meta?.messageId || "");
+      if (mid && it.type === "task" && obj(state.tasksDone)[mid]) {
+        it.status = "done";
+      }
+    }
     fresh.push(...items);
+
+    // A question/request pinged at me that didn't produce a task -> one
+    // reply to-do. One to-do per ask: a task candidate suppresses it.
+    if (!items.some((i) => i.type === "task")) {
+      const rc = replyCandidate(msg, {
+        selfId,
+        roleIds,
+        fromMentions: src.fromMentions === true,
+        guildId,
+        channelId,
+        channelName: loc?.channel?.name,
+        team: srv?.team,
+        via: src.via,
+        nowIso,
+      });
+      if (rc) {
+        const mid = String(rc.meta?.messageId || "");
+        if (mid && obj(state.repliesDone)[mid]) rc.status = "done";
+        fresh.push(rc);
+      }
+    }
 
     // Meeting cadence: log timed meeting items, plus explicit weekly hints.
     for (const item of items) {
@@ -336,6 +473,12 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
     items: accumulateMessages(prevItems, fresh, seenIds, state, nowMs, src.via || "rest"),
     at,
   };
+
+  // Completion passes over the merged items so a to-do generated and
+  // answered inside the same read still closes.
+  if (selfMsgs.length || replyMsgs.length) {
+    completeOpenItems(state, selfMsgs, replyMsgs, selfId, at);
+  }
 }
 
 /**
@@ -673,7 +816,45 @@ export default {
 
       if (payload.kind === "net") {
         const method = String(payload.method || "GET").toUpperCase();
-        if (method !== "GET") return finish();
+        if (method !== "GET") {
+          // The user's own send POST: a 200/201 response body is the sent
+          // message. Identity + completion only — never candidates, and
+          // no other non-GET method is trusted as self-authored.
+          if (method === "POST") {
+            const status = payload.status ?? 0;
+            if (
+              (status === 200 || status === 201) &&
+              typeof payload.url === "string" &&
+              /\/api\/v\d+\/channels\/\d+\/messages(?:\?|$)/.test(payload.url)
+            ) {
+              /** @type {any} */
+              let sent = null;
+              try {
+                sent = JSON.parse(String(payload.body || ""));
+              } catch {
+                sent = null;
+              }
+              if (sent && typeof sent === "object" && sent.author?.id != null) {
+                const authorId = String(sent.author.id);
+                const selfId = settings.userId || state.identity?.selfId;
+                if (!selfId) {
+                  // The author of our own send is the user — that's how
+                  // selfId gets learned before the mentions endpoint sees it.
+                  state.identity = { ...obj(state.identity), selfId: authorId };
+                }
+                result.session = "signed-in";
+                completeOpenItems(
+                  state,
+                  [sent],
+                  [sent],
+                  selfId || authorId,
+                  payload.at
+                );
+              }
+            }
+          }
+          return finish();
+        }
         const status = payload.status ?? 0;
         if (status === 401) {
           state.signedOutAt = payload.at;
