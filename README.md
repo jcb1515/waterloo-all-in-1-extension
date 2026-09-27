@@ -2,8 +2,9 @@
 
 A Chrome/Edge extension that gathers every dated thing in a University of
 Waterloo student's life — Learn deadlines, class times, course-outline
-deliverables, WaterlooWorks applications and interviews — into one side
-panel agenda, and one Google Calendar subscription, with no duplicates.
+deliverables, WaterlooWorks applications and interviews, Discord meetings,
+and Outlook/Gmail invites — into one side panel agenda, and one Google
+Calendar subscription, with no duplicates.
 
 It works with the logins you already have in your browser: no API keys, no
 passwords, no OAuth setup.
@@ -23,6 +24,9 @@ passwords, no OAuth setup.
   while you browse the site (no sync button — just use WaterlooWorks).
 - **Discord** — meetings, tasks and deadlines in design-team servers you
   watch. Read-only and passive; optional host permission.
+- **Email (Outlook + Gmail)** — calendar invites and dated mail
+  (interviews, offer deadlines, course mail) read passively in the mail
+  tabs you open, with a separate optional permission per provider.
 - **Agenda panel** — click the toolbar icon for today's classes and
   deadlines, what's next, and a searchable, filterable list. Press `/` to
   search, `+` to quick-add your own items.
@@ -40,7 +44,9 @@ passwords, no OAuth setup.
 
 **In progress**
 
-- Outlook / Gmail events
+- Email selectors are best-guess (no live captures yet) — Outlook/Gmail
+  reading may need tuning against the real DOM.
+- WaterlooWorks offers/employment records and the open-rankings layout.
 
 Chrome and Edge only (Manifest V3, `sidePanel`). No Firefox or Safari
 support.
@@ -89,8 +95,8 @@ The extension asks for the smallest set it can work with:
   behalf as you browse: Learn, the course-outline site, Portal (and its
   API), WaterlooWorks, and the public co-op dates page.
 - **Optional hosts** are asked for only when you enable the source:
-  `discord.com` for the Teams view, and the Outlook/Gmail hosts for email
-  invites (coming soon). Grant them from Settings → Sources, the panel's
+  `discord.com` for the Teams view, and Outlook and Gmail separately for
+  reading email invites. Grant them from Settings → Sources, the panel's
   Sources overlay or the Welcome checklist; revoke them any time from the
   browser's extension details.
 - `storage`, `alarms` and `notifications` keep your data on-device, run
