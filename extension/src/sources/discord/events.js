@@ -19,6 +19,7 @@ import {
   EVENT_SERIES_RE,
   EVENT_CREATED_BY_RE,
   EVENT_LOCATION_RE,
+  EVENT_LOCATION_TBD_RE,
   EVENT_UI_RES,
 } from "./selectors.js";
 
@@ -241,11 +242,15 @@ function parseCard(card, nowMs, tz, guildName) {
         l.text !== ev.title &&
         (!guildName || l.text.trim().toLowerCase() !== guildName.trim().toLowerCase())
     );
-    // Location: an icon line if present, else the last location-looking line.
+    // Location: an icon line if present, else the last location-looking
+    // line. A slot that only says TBD/TBA is no location at all — the
+    // line is consumed (it held the location slot) but yields nothing.
     const iconLine = rest.find((l) => l.icon);
     const locLine =
       iconLine || [...rest].reverse().find((l) => EVENT_LOCATION_RE.test(l.text));
-    ev.location = locLine ? locLine.text.slice(0, 200) : null;
+    const locText = locLine ? locLine.text.slice(0, 200) : null;
+    ev.location =
+      locText && !EVENT_LOCATION_TBD_RE.test(locText) ? locText : null;
     const desc = rest
       .filter((l) => l !== locLine)
       .map((l) => l.text)

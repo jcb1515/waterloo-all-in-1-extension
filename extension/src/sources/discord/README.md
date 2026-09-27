@@ -185,11 +185,15 @@ suggestion on its own (`weeks: 0, fromText: true`).
   messages ("Monday and Wednesday") collapse to the first.
 - Guild/channel names come from aria-label prefixes — locale strings other
   than en need their own `GUILD_LABEL_PREFIX_RE`.
-- Events modal markup is unverified against live Discord: card split via
-  "Copy Link" buttons, `INTERESTED_ON_RE` class heuristic, heading/icon
-  line flags, and the member-list skip selector
-  (`EVENT_MEMBER_ROW_SEL`) all need tuning at CP2. If Interested-button
-  state is unreliable the RSVP REST read covers it.
+- Events modal card DOM structure is still unverified against live
+  Discord: card split via "Copy Link" buttons, heading/icon line flags,
+  and the member-list skip selector (`EVENT_MEMBER_ROW_SEL`) need
+  tuning. The Interested ON/OFF look IS confirmed from a screenshot —
+  ON is a green fill (`rgb(36,128,70)`-ish) with a checkmark, OFF a
+  grey button with a bell — so `interestedState` reads the computed
+  `background-color` (thresholds in selectors.js) before the
+  `INTERESTED_ON_RE` class heuristic; the RSVP REST read remains the
+  fallback when neither signal is reliable.
 - `Time:`/`Location:` announcement lines upgrade an all-day date hit to a
   timed, located item (timezone labels ignored — always Toronto wall
   time).

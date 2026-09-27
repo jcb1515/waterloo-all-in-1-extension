@@ -12,6 +12,7 @@ import {
   readChannels,
   readMessages,
   inventoryExtract,
+  eventsModalExtract,
 } from "../../extension/src/sources/discord/dom.js";
 
 const FIXTURES = path.resolve(
@@ -91,4 +92,46 @@ test("inventoryExtract bundles location + guilds + channels", () => {
   assert.equal(inv.location.guildId, "1000000000000000001");
   assert.ok(inv.guilds.length >= 4);
   assert.equal(inv.channels.length, 8);
+});
+
+test("eventsModalExtract: Interested ON reads the computed green background", () => {
+  const orig = globalThis.getComputedStyle;
+  const url = "https://discord.com/channels/1000000000000000001/2001";
+  const stub = (bg) => {
+    // @ts-ignore — test stub of a browser global absent under linkedom.
+    globalThis.getComputedStyle = () => ({ backgroundColor: bg });
+  };
+  try {
+    // Card 2's Interested button has no aria-pressed — the computed
+    // background decides: green fill = ON (real screenshot), grey = OFF.
+    stub("rgb(36, 128, 70)");
+    let ex = eventsModalExtract(doc("events-modal.html"), url);
+    assert.equal(ex.cards[0].interested, true); // aria-pressed still wins
+    assert.equal(ex.cards[1].interested, true);
+
+    stub("rgb(78, 80, 88)"); // Discord's grey OFF button
+    ex = eventsModalExtract(doc("events-modal.html"), url);
+    assert.equal(ex.cards[1].interested, false);
+
+    // Transparent -> falls back to the class heuristic (no class -> false).
+    stub("rgba(0, 0, 0, 0)");
+    ex = eventsModalExtract(doc("events-modal.html"), url);
+    assert.equal(ex.cards[1].interested, false);
+
+    // Transparent + an ON-looking class -> true.
+    const d = doc("events-modal.html");
+    const btn = [...d.querySelectorAll("button")].find(
+      (b) =>
+        b.textContent.trim() === "Interested" &&
+        !b.getAttribute("aria-pressed")
+    );
+    assert.ok(btn);
+    btn.setAttribute("class", "selected");
+    ex = eventsModalExtract(d, url);
+    assert.equal(ex.cards[1].interested, true);
+  } finally {
+    // @ts-ignore — restore the absent/browser global.
+    if (orig === undefined) delete globalThis.getComputedStyle;
+    else globalThis.getComputedStyle = orig;
+  }
 });

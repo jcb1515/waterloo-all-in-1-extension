@@ -115,6 +115,12 @@ export const EVENT_COPY_LINK_TEXT = "Copy Link";
 export const EVENT_INTERESTED_TEXT = "Interested";
 /** The Interested toggle when ON: aria-pressed/checked or a class hint. */
 export const INTERESTED_ON_RE = /selected|active|green|filled|checked|on\b/i;
+/**
+ * Interested ON is a green filled button (Discord ≈ rgb(36,128,70) with a
+ * checkmark); OFF is grey (≈ rgb(78,80,88)) with a bell. A non-transparent
+ * computed background is decisive: ON when g >= minG, g-r >= dr, g-b >= db.
+ */
+export const INTERESTED_GREEN = { minG: 90, dr: 40, db: 25, minAlpha: 0.5 };
 /** "Repeats every Tuesday" line. */
 export const EVENT_REPEAT_RE = /^\s*repeats?\s+every\s+(.+)$/i;
 /** The "Events in series" occurrences section heading. */
@@ -144,8 +150,16 @@ export const EVENT_UI_RES = [
   /^\s*start\s+event\s*$/i,
   /^\s*edit\s+event\s*$/i,
   /^\s*close\s*$/i,
+  /^\s*view\s+(?:future|past)\s+events\s*$/i, // series pager link
   /^@[\w.]+$/, // stray handles (member lists)
 ];
+
+/**
+ * A location slot that only says TBD / TBA / "To be determined" /
+ * "To be announced" (optional "Location" prefix) is no location at all.
+ */
+export const EVENT_LOCATION_TBD_RE =
+  /^\s*(?:location\s*[:\-–]?\s*)?(?:tbd|tba|to\s+be\s+determined|to\s+be\s+announced)\s*$/i;
 
 /** Lines that look like a place: room codes, links, venue words. */
 export const EVENT_LOCATION_RE =

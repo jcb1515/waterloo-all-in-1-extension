@@ -34,6 +34,7 @@ import {
   EVENT_COPY_LINK_TEXT,
   EVENT_INTERESTED_TEXT,
   INTERESTED_ON_RE,
+  INTERESTED_GREEN,
   EVENT_REF_RE,
   EVENT_CREATED_BY_RE,
   EVENT_MEMBER_ROW_SEL,
@@ -395,6 +396,27 @@ function collectLines(root) {
   return lines;
 }
 
+/**
+ * The element's computed background-color parsed to {r,g,b,a}, or null
+ * when getComputedStyle is unavailable (linkedom tests) or the color
+ * isn't an rgb()/rgba() string.
+ */
+function computedBg(el) {
+  try {
+    const g = globalThis.getComputedStyle;
+    if (typeof g !== "function") return null;
+    const m = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})(?:[\s,/]+([\d.]+%?))?\s*\)$/i.exec(
+      String(g(el)?.backgroundColor || "")
+    );
+    if (!m) return null;
+    let a = m[4] === undefined ? 1 : parseFloat(m[4]);
+    if (/%$/.test(m[4] || "")) a /= 100;
+    return { r: +m[1], g: +m[2], b: +m[3], a: Number.isFinite(a) ? a : 1 };
+  } catch {
+    return null;
+  }
+}
+
 /** Interested toggle state: true / false / null (no such button). */
 function interestedState(root) {
   try {
@@ -407,6 +429,18 @@ function interestedState(root) {
         el.getAttribute?.("aria-checked") === "true"
       ) {
         return true;
+      }
+      // Confirmed from a live screenshot: ON = green filled background
+      // (≈ rgb(36,128,70), checkmark), OFF = grey (≈ rgb(78,80,88), bell).
+      // A visible computed color decides; transparent/missing falls back
+      // to the class heuristic.
+      const bg = computedBg(el);
+      if (bg && bg.a > INTERESTED_GREEN.minAlpha) {
+        return (
+          bg.g >= INTERESTED_GREEN.minG &&
+          bg.g - bg.r >= INTERESTED_GREEN.dr &&
+          bg.g - bg.b >= INTERESTED_GREEN.db
+        );
       }
       return INTERESTED_ON_RE.test(String(el.getAttribute?.("class") || ""));
     }
