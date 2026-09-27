@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { applyPublish, buildCalendar, feedGroupOf } from "../src/worker.js";
+import worker, { applyPublish, buildCalendar, feedGroupOf, serializeState } from "../src/worker.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const T1 = new Date("2026-09-01T12:00:00Z");
@@ -398,6 +398,73 @@ test("calendar.uid wins, bare ids get the default domain, client seq is a floor"
   ]), T3);
   assert.equal(prop(blockFor(buildCalendar(s3), "c@waterloo-all-in-1"), "SEQUENCE:"), "SEQUENCE:8");
 });
+
+// --- state size / timezone hash / date-only ---------------------------------
+
+test("serializeState flags states too large for a D1 row", () => {
+  const small = serializeState({ version: 2, events: [], seqs: {}, tombstones: {} });
+  assert.equal(small.ok, true);
+  const huge = serializeState({
+    version: 2,
+    events: [ev({ details: "x".repeat(2_000_000) })],
+    seqs: {},
+    tombstones: {}
+  });
+  assert.equal(huge.ok, false);
+  assert.ok(huge.bytes > 1_900_000);
+});
+
+test("publishing a state larger than the D1 row limit returns 413", async () => {
+  const db = fakeD1();
+  // ~1.7 MB payload: under the 2 MiB body cap, but the stored state (events +
+  // uid + seqs bookkeeping) exceeds the D1 row limit.
+  const events = Array.from({ length: 3000 }, (_, i) =>
+    ev({ id: `big:${i}`, title: `T${i}` + "x".repeat(490) }));
+  const res = await call(req("POST", "/v1/calendars", payload(events)), db);
+  assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), { error: "Calendar feed is too large to store." });
+  assert.equal(db.feeds.size, 0);
+});
+
+test("republishing with a different timeZone bumps SEQUENCE but keeps UIDs", () => {
+  const { state: s1 } = applyPublish(null, payload([
+    ev({ id: "day", title: "All day", allDay: true, dueAt: "2026-10-06T02:00:00Z" })
+  ]), T1);
+  const { state: s2 } = applyPublish(s1, payload([
+    ev({ id: "day", title: "All day", allDay: true, dueAt: "2026-10-06T02:00:00Z" })
+  ], { timeZone: "Pacific/Auckland" }), T2);
+  const ics2 = buildCalendar(s2);
+  const block = blockFor(ics2, "day@waterloo-all-in-1");
+  assert.equal(prop(block, "SEQUENCE:"), "SEQUENCE:1");
+  // Auckland is UTC+13, so Oct 6 02:00Z is still Oct 6 there but Oct 5 in Toronto.
+  assert.equal(prop(block, "DTSTART;VALUE=DATE:"), "DTSTART;VALUE=DATE:20261006");
+});
+
+test("date-only startAt or dueAt implies an all-day event", () => {
+  const { state } = applyPublish(null, payload([
+    ev({ id: "d1", dueAt: "2026-10-05" }),
+    ev({ id: "d2", title: "Start only", dueAt: undefined, startAt: "2026-10-05" }),
+    ev({ id: "d3", title: "Timed", dueAt: undefined,
+      startAt: "2026-10-05T14:00:00Z", endAt: "2026-10-05" })
+  ]), T1);
+  const ics = buildCalendar(state);
+  assert.equal(prop(blockFor(ics, "d1@waterloo-all-in-1"), "DTSTART"), "DTSTART;VALUE=DATE:20261005");
+  assert.equal(prop(blockFor(ics, "d2@waterloo-all-in-1"), "DTSTART"), "DTSTART;VALUE=DATE:20261005");
+  // Timed startAt stays timed even when endAt is date-only.
+  assert.equal(prop(blockFor(ics, "d3@waterloo-all-in-1"), "DTSTART"), "DTSTART:20261005T140000Z");
+});
+
+test("slim tombstones keep only seq and removedAt; fat ones still resurrect", () => {
+  const { state: s1 } = applyPublish(null, payload([ev({ id: "a" }), ev({ id: "b", title: "B" })]), T1);
+  const { state: s2 } = applyPublish(s1, payload([ev({ id: "a" })]), T2);
+  assert.deepEqual(Object.keys(s2.tombstones["b@waterloo-all-in-1"]).sort(), ["removedAt", "seq"]);
+  // A legacy fat tombstone {hash, seq, at, removedAt} still bumps on return.
+  s2.tombstones["b@waterloo-all-in-1"] = { hash: "h", seq: 4, at: icsIso(T1), removedAt: icsIso(T2) };
+  const { state: s3 } = applyPublish(s2, payload([ev({ id: "a" }), ev({ id: "b", title: "B" })]), T3);
+  assert.equal(s3.seqs["b@waterloo-all-in-1"].seq, 5);
+});
+
+const icsIso = (d) => d.toISOString();
 
 // --- legacy v1 ------------------------------------------------------------
 

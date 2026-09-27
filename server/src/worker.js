@@ -7,6 +7,7 @@
 
 const FEED_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
 const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_STATE_BYTES = 1900000; // D1 rejects rows over ~2,000,000 bytes
 const MAX_EVENTS = 3000;
 const MAX_SKIPPED = 20;
 const MAX_ALARMS = 3;
@@ -117,13 +118,17 @@ async function createFeed(request, env, origin) {
   if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status);
 
   const { state, accepted, skipped } = applyPublish(null, parsed.payload, new Date());
+  const stored = serializeState(state);
+  if (!stored.ok) {
+    return jsonResponse({ error: "Calendar feed is too large to store." }, 413);
+  }
   const feedId = randomToken(24);
   const updateToken = randomToken(32);
   const updateTokenHash = await hashToken(updateToken);
   const now = Date.now();
   const expiresAt = now + FEED_LIFETIME_SECONDS * 1000;
   await env.DB.prepare(SQL.insertFeed)
-    .bind(feedId, updateTokenHash, JSON.stringify(state), expiresAt, now).run();
+    .bind(feedId, updateTokenHash, stored.json, expiresAt, now).run();
   const aliases = await ensureAliases(env, feedId);
 
   return jsonResponse({
@@ -148,10 +153,14 @@ async function updateFeed(request, feedId, env, origin) {
   if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status);
   const prevState = stateFromStored(safeJsonParse(record.calendar_json), record.updated_at);
   const { state, accepted, skipped } = applyPublish(prevState, parsed.payload, new Date());
+  const stored = serializeState(state);
+  if (!stored.ok) {
+    return jsonResponse({ error: "Calendar feed is too large to store." }, 413);
+  }
   const now = Date.now();
   const expiresAt = now + FEED_LIFETIME_SECONDS * 1000;
   await env.DB.prepare(SQL.updateFeed)
-    .bind(JSON.stringify(state), expiresAt, now, feedId).run();
+    .bind(stored.json, expiresAt, now, feedId).run();
   const aliases = await ensureAliases(env, feedId);
 
   return jsonResponse({
@@ -329,7 +338,8 @@ export function applyPublish(prevState, payload, now = new Date()) {
   const seqs = {};
   const events = [];
   for (const { event, clientSeq } of entries) {
-    const hash = stableHash(JSON.stringify(event));
+    // timeZone changes all-day local dates, so it is part of the event hash.
+    const hash = stableHash(`${JSON.stringify(event)}\n${timeZone}`);
     const prevEntry = prevSeqs[event.uid];
     const tombstone = tombstones[event.uid];
     let seq;
@@ -354,12 +364,9 @@ export function applyPublish(prevState, payload, now = new Date()) {
 
   for (const [uid, entry] of Object.entries(prevSeqs)) {
     if (seqs[uid] || tombstones[uid]) continue;
-    tombstones[uid] = {
-      hash: entry.hash,
-      seq: entry.seq ?? 0,
-      at: entry.at || nowIso,
-      removedAt: nowIso
-    };
+    // Slim tombstones keep state small; only seq is needed on resurrection.
+    // Older tombstones may still carry hash/at — they read back fine.
+    tombstones[uid] = { seq: entry.seq ?? 0, removedAt: nowIso };
   }
   pruneTombstones(tombstones, nowDate);
 
@@ -455,7 +462,13 @@ function normalizeEvent(raw, typeAlarms, seenUids) {
   if (startAt) event.startAt = startAt;
   const endAt = parseDateField(source.endAt);
   if (endAt) event.endAt = endAt;
-  if (source.allDay === true) event.allDay = true;
+  // A date-only value ("YYYY-MM-DD") implies an all-day event: parsing it as an
+  // instant would land on UTC midnight, the previous evening in local time.
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+  const primaryIsDateOnly = startAt
+    ? dateOnly.test(startAt)
+    : Boolean(dueAt && dateOnly.test(dueAt));
+  if (source.allDay === true || primaryIsDateOnly) event.allDay = true;
   const location = clampText(source.location, 500);
   if (location) event.location = location;
   const url = safeHttpsUrl(source.url);
@@ -714,6 +727,13 @@ function normalizeSeenIn(seenIn) {
     }
   }
   return out.length ? out : undefined;
+}
+
+/** Serialize feed state for the calendar_json column, guarding the D1 row limit. */
+export function serializeState(state) {
+  const json = JSON.stringify(state);
+  const bytes = encoder.encode(json).length;
+  return { json, bytes, ok: bytes <= MAX_STATE_BYTES };
 }
 
 function stableHash(text) {

@@ -61,7 +61,7 @@ Event fields (anything else is ignored):
 | `type` | required, one of `deadline quiz exam presentation class tutorial lab meeting interview application-deadline offer-deadline cycle-date task event term-date` |
 | `title` | required, trimmed, ≤500 chars |
 | `source`, `org`, `location`, `section`, `details` | strings, clamped to 50 / 100 / 500 / 50 / 2000 chars |
-| `dueAt`, `startAt`, `endAt` | ISO timestamps; a bare `YYYY-MM-DD` is taken literally (no timezone shift) |
+| `dueAt`, `startAt`, `endAt` | ISO timestamps; a bare `YYYY-MM-DD` is taken literally (no timezone shift) and implies an all-day event |
 | `allDay` | boolean; renders `DTSTART;VALUE=DATE` |
 | `url` | kept only if `https:`, ≤2000 chars |
 | `status` | `open` (default), `submitted`, `done`, `cancelled` |
@@ -78,7 +78,8 @@ everything). Invalid events are **skipped**, not fatal; the response carries
 `accepted: n` and `skipped: [{id, reason}]` (first 20) with reasons
 `missing id | bad type | missing title | no valid date | duplicate uid`.
 400 only when the body isn't JSON or `events` isn't an array.
-Limits: 3000 events and 2 MiB per publish (413 beyond).
+Limits: 3000 events and 2 MiB per publish; the normalized feed state must also
+fit one D1 row (~1.9 MB serialized) — anything beyond gets 413.
 
 ### Legacy v1
 
@@ -95,8 +96,11 @@ already published. Stored v1 rows (a plain JSON array) render the same way.
   `DTSTAMP`/`LAST-MODIFIED` stay put, so republishing identical input is
   byte-identical. A changed event bumps to `max(stored + 1, calendar.seq)`;
   `calendar.seq` acts only as a floor.
-- A UID that disappears becomes a tombstone (kept 180 days, capped at 5000);
-  if it returns, its SEQUENCE continues upward instead of restarting.
+- A UID that disappears becomes a tombstone (`{seq, removedAt}`; kept 180 days,
+  capped at 5000); if it returns, its SEQUENCE continues upward instead of
+  restarting.
+- `timeZone` is part of each event's change hash: republishing with a
+  different timezone re-dates all-day events and counts as a change.
 
 ## Group feeds
 
@@ -113,6 +117,9 @@ filtered. An event lands in: its valid `feedGroup`, else `waterlooworks` →
 
 - Timed events render in UTC (`Z` form); no `VTIMEZONE` is emitted. The feed
   carries `X-WR-TIMEZONE` for clients that use it.
+- A bare `YYYY-MM-DD` value for `startAt` (or `dueAt` when there's no
+  `startAt`) implies `allDay` — as an instant it would land on UTC midnight,
+  i.e. the previous evening in local time.
 - `allDay` → `DTSTART;VALUE=DATE` is the local (feed timezone) date of
   `startAt || dueAt`; `DTEND` is the local date of `endAt` + 1 day (inclusive
   end) or start + 1 day.
