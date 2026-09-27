@@ -98,8 +98,10 @@ test("class items carry Instructor, Week topic and Office hours facts", () => {
   const facts = Object.fromEntries((cls.meta.facts || []).map((f) => [f.label, f.value]));
   assert.equal(facts.Instructor, "Instructor"); // redacted placeholder
   assert.match(facts["Office hours"] || "", /Tuesdays 10:30am - 12:30pm in EIT 3114/);
-  assert.ok(typeof course.officeHours === "string" && course.officeHours.length > 0);
-  assert.match(course.officeHours, /EIT 3114/);
+  // The whole office-hours block, bullet markers stripped, no dangling "and".
+  assert.ok(course.officeHours.startsWith("Tuesdays 10:30am"), course.officeHours);
+  assert.ok(!/and\s*$/i.test(course.officeHours));
+  assert.match(course.officeHours, /Thursdays 10:30am - 12:30pm in EIT 3114/);
 
   // A class with a plan-week details line repeats it as the Week topic fact.
   const m = build("MATH117");

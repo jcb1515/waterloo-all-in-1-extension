@@ -275,14 +275,27 @@ export function buildOutline(data, opts = {}) {
   }
   lecDates.sort();
 
-  // The first team-text line office-hours parsing reads — reused as the
-  // "Office hours" fact on class items and Course.officeHours.
+  // The office-hours block: consecutive team-text lines matching OFFICE_RE,
+  // bullet markers stripped, joined — reused as the "Office hours" fact on
+  // class items and Course.officeHours.
   /** @type {string|undefined} */
   let officeHoursText;
-  for (const line of String((data.text && data.text.team) || "").split("\n")) {
-    if ([...line.matchAll(OFFICE_RE)].length) {
-      officeHoursText = line.trim();
-      break;
+  {
+    const tlines = String((data.text && data.text.team) || "").split("\n");
+    const first = tlines.findIndex((l) => [...l.matchAll(OFFICE_RE)].length > 0);
+    if (first >= 0) {
+      const parts = [];
+      for (const line of tlines.slice(first)) {
+        if (![...line.matchAll(OFFICE_RE)].length) break;
+        parts.push(line.replace(/^\s*(?:[o•·▪◦*–-])\s+/, "").replace(/\s+/g, " ").trim());
+      }
+      officeHoursText =
+        parts
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .replace(/[\s,]+(?:and|or)?[\s,]*$/i, "")
+          .trim()
+          .slice(0, 300) || undefined;
     }
   }
 
