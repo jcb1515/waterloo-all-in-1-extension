@@ -89,7 +89,7 @@ const adapter = {
       // replaced; a list view's scope matches no item, so nothing is removed.
       const keys = new Set(msgs.map((m) => String(m.key)));
       const scope =
-        data.view === "message" && keys.size === 1
+        allowed && data.view === "message" && keys.size === 1
           ? `email:${provider}:${[...keys][0]}`
           : `email:${provider}:list`;
 

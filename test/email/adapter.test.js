@@ -224,6 +224,14 @@ test("observe: provider off and folder filters", async () => {
     ctx({}),
   );
   assert.deepEqual(sent.items, []);
+
+  // Opening a thread in an excluded folder must not wipe its inbox items.
+  const archived = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "archive")),
+    ctx({}),
+  );
+  assert.deepEqual(archived.items, []);
+  assert.equal(archived.scope, "email:gmail:list");
 });
 
 test("observe: message scope keys items; list scope matches none", async () => {
