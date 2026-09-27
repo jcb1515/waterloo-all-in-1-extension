@@ -171,14 +171,20 @@
   position: relative;
   display: flex;
   align-items: center;
-  margin-bottom: var(--sp-2);
+  flex: 1;
+  min-width: 0;
   color: var(--text-3);
 }
 .search-wrap svg { position: absolute; left: 10px; pointer-events: none; }
 .search-input { width: 100%; padding-left: 30px; height: 32px; font-size: var(--fs-12); }
 
-/* filter chips */
+/* filter rows: search + org select, then the scrollable chips */
 .filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.filter-row {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -188,14 +194,15 @@
   gap: var(--sp-1);
   overflow-x: auto;
   scrollbar-width: none;
-  flex: 1;
   min-width: 0;
+  padding-bottom: 1px;
 }
 .chip-scroll::-webkit-scrollbar {
   display: none;
 }
 .filter-chip {
   appearance: none;
+  flex: none;
   border: 1px solid var(--border);
   background: var(--surface);
   cursor: pointer;

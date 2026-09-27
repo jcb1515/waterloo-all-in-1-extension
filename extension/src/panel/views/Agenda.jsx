@@ -68,9 +68,11 @@ export function Agenda({ state, actions, now, onGoSources }) {
   const learnSynced = !!(state.sourceState.learn && state.sourceState.learn.lastOkAt);
   const s = agenda.summary;
 
-  // Error / stale strip: the first live source that needs attention.
+  // Error / stale strip: the first *actively synced* source that needs
+  // attention. Passive sources (WaterlooWorks) stay silent — they read only
+  // while you browse, so a stale/signed-out state is normal, not a nag.
   const troubled = ADAPTERS.find((a) => {
-    if (stageForAdapter(a.id) !== "live") return false;
+    if (stageForAdapter(a.id) !== "live" || !(a.intervalMinutes > 0)) return false;
     const st = (state.sourceState || {})[a.id];
     return st && (st.error || st.session === "signed-out");
   });
@@ -110,17 +112,34 @@ export function Agenda({ state, actions, now, onGoSources }) {
       </section>
 
       <div class="filter-bar" role="toolbar" aria-label="Filters">
-        <div class="search-wrap">
-          <SearchIcon size={14} />
-          <input
-            id="agenda-search"
-            class="input search-input"
-            type="search"
-            placeholder="Search titles, courses, rooms…"
-            aria-label="Search agenda"
-            value={q}
-            onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
-          />
+        <div class="filter-row">
+          <div class="search-wrap">
+            <SearchIcon size={14} />
+            <input
+              id="agenda-search"
+              class="input search-input"
+              type="search"
+              placeholder="Search titles, courses, rooms…"
+              aria-label="Search agenda"
+              value={q}
+              onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
+            />
+          </div>
+          {orgs.length > 1 ? (
+            <select
+              class="select org-select"
+              aria-label="Filter by course or team"
+              value={org || ""}
+              onChange={(e) => setOrg(/** @type {any} */ (e.target).value || null)}
+            >
+              <option value="">All courses &amp; teams</option>
+              {orgs.map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
         <div class="chip-scroll" role="group" aria-label="Type filter">
           {FILTERS.map(([id, label]) => (
@@ -135,21 +154,6 @@ export function Agenda({ state, actions, now, onGoSources }) {
             </button>
           ))}
         </div>
-        {orgs.length > 1 ? (
-          <select
-            class="select org-select"
-            aria-label="Filter by course or team"
-            value={org || ""}
-            onChange={(e) => setOrg(/** @type {any} */ (e.target).value || null)}
-          >
-            <option value="">All courses &amp; teams</option>
-            {orgs.map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        ) : null}
       </div>
 
       {!hasItems && !learnSynced ? <FirstRun actions={actions} onGoSources={onGoSources} /> : null}

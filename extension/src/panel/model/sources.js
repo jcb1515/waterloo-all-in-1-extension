@@ -41,8 +41,11 @@ export function sourceStatus(adapter, st, stage, now) {
 }
 
 /**
- * Header pill for the whole store: "Needs attention" if any live source is in
- * trouble, otherwise "Synced Xm ago" from the newest lastOkAt.
+ * Header pill for the whole store: "Needs attention" if any live source that
+ * the extension actively syncs (intervalMinutes > 0) is in trouble, otherwise
+ * "Synced Xm ago" from the newest lastOkAt. Passive sources — WaterlooWorks
+ * reads only while you browse — are excluded from the nag: logging out there
+ * constantly is normal.
  * @param {import("../../core/contract.js").Adapter[]} adapters
  * @param {Record<string, any>} sourceState
  * @param {(id: string) => "live"|"soon"} stageFor
@@ -53,10 +56,11 @@ export function storeSyncSummary(adapters, sourceState, stageFor, now) {
   let trouble = false;
   for (const a of adapters) {
     if (stageFor(a.id) !== "live") continue;
-    const s = sourceStatus(a, (sourceState || {})[a.id], "live", now);
-    if (s.key === "error" || s.key === "signed-out") trouble = true;
     const st = (sourceState || {})[a.id];
     if (st && st.lastOkAt) newest = Math.max(newest, Date.parse(st.lastOkAt));
+    if (!(a.intervalMinutes > 0)) continue; // passive: never a "Needs attention" trigger
+    const s = sourceStatus(a, st, "live", now);
+    if (s.key === "error" || s.key === "signed-out") trouble = true;
   }
   if (trouble) return { label: "Needs attention", tone: "warn" };
   if (newest === -Infinity) return { label: "Not synced yet", tone: "muted" };

@@ -57,22 +57,27 @@ export function Sources({ state, actions, now }) {
             </span>
             <div class="source-title">
               <h3>{adapter.label}</h3>
-              <span class="source-meta tabular">
-                {st && st.lastOkAt
-                  ? `Synced ${fmtAgo(st.lastOkAt, now)}`
-                  : st && st.lastRunAt
-                    ? `Tried ${fmtAgo(st.lastRunAt, now)}`
-                    : "Not synced yet"}
-                {st && typeof st.itemCount === "number" && st.itemCount > 0
-                  ? ` · ${st.itemCount} items`
-                  : ""}
-              </span>
+              {st || stage !== "soon" ? (
+                <span class="source-meta tabular">
+                  {st && st.lastOkAt
+                    ? `Synced ${fmtAgo(st.lastOkAt, now)}`
+                    : st && st.lastRunAt
+                      ? `Tried ${fmtAgo(st.lastRunAt, now)}`
+                      : "Not synced yet"}
+                  {st && typeof st.itemCount === "number" && st.itemCount > 0
+                    ? ` · ${st.itemCount} items`
+                    : ""}
+                </span>
+              ) : null}
             </div>
             <span class={`badge ${TONE_BADGE[status.tone]}`}>{status.label}</span>
           </div>
           {status.detail ? <p class="source-detail">{status.detail}</p> : null}
+          {!(adapter.intervalMinutes > 0) ? (
+            <p class="source-detail">Updates while you browse {adapter.label}.</p>
+          ) : null}
           <div class="source-actions">
-            {stage === "live" && adapter.sync ? (
+            {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 ? (
               <button
                 type="button"
                 class="btn btn-sm"

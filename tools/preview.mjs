@@ -56,6 +56,7 @@ function serve() {
 
 const SHOTS = [
   { name: "panel-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-light-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
   { name: "panel-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
   { name: "panel-compact-light", url: "/src/panel/panel.html?preview=1&density=compact", size: [400, 900] },
   { name: "panel-sources", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },

@@ -14,6 +14,11 @@ const DAY = 86400000;
 const at = (base, h, m = 0) =>
   new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m).toISOString();
 
+/** Calendar-day anchor: `dayOffset` days from `base`, at local h:m — so due
+ * times stay realistic (11:59 PM deadlines, not "1:33 AM"). */
+const dayAt = (base, dayOffset, h, m = 0) =>
+  at(new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayOffset), h, m);
+
 /** Next occurrence of weekday `dow` (0=Sun) at h:m, strictly after `now`. */
 function nextWeekday(now, dow, h, m = 0) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
@@ -73,7 +78,7 @@ export function previewState(nowD = new Date()) {
     type: "deadline",
     title: "Reading response worksheet",
     org: "ENGL 192",
-    dueAt: iso(now - 2 * DAY),
+    dueAt: dayAt(nowD, -2, 23, 59),
     url: "https://learn.uwaterloo.ca/d2l/home/106",
     seenIn: seen("learn", "engl192-worksheet", "dropbox", today),
   });
@@ -92,7 +97,7 @@ export function previewState(nowD = new Date()) {
     type: "deadline",
     title: "Deliverable 1 (Part 1)",
     org: "ECE 190",
-    dueAt: iso(now + 2 * DAY),
+    dueAt: dayAt(nowD, 2, 23, 59),
     weight: 8,
     group: "5",
     url: "https://learn.uwaterloo.ca/d2l/home/104",
@@ -114,10 +119,10 @@ export function previewState(nowD = new Date()) {
     type: "deadline",
     title: "Project 1 — Battleship milestone",
     org: "ECE 150",
-    dueAt: at(new Date(now + 5 * DAY), 22, 0),
+    dueAt: dayAt(nowD, 5, 22, 0),
     weight: 12,
     url: "https://learn.uwaterloo.ca/d2l/home/103",
-    moved: { from: at(new Date(now + 4 * DAY), 22, 0), at: iso(now - DAY) },
+    moved: { from: dayAt(nowD, 4, 22, 0), at: iso(now - DAY) },
     seenIn: seen("learn", "ece150-project1", "dropbox", today),
   });
   add("outline:ece190-midterm", {
@@ -125,7 +130,7 @@ export function previewState(nowD = new Date()) {
     type: "exam",
     title: "ECE 190 Midterm test",
     org: "ECE 190",
-    dueAt: iso(now + 8 * DAY),
+    dueAt: dayAt(nowD, 8, 23, 59),
     weight: 20,
     confidence: "tentative",
     details: "Date TBD on the course outline — confirm on Learn.",
@@ -150,8 +155,8 @@ export function previewState(nowD = new Date()) {
     type: "meeting",
     title: "WATonomous — Electrical sync",
     org: "WATonomous",
-    startAt: at(new Date(now + DAY), 19, 0),
-    endAt: at(new Date(now + DAY), 19, 45),
+    startAt: dayAt(nowD, 1, 19, 0),
+    endAt: dayAt(nowD, 1, 19, 45),
     location: "#electrical",
     confidence: "tentative",
     seenIn: seen("discord", "wato-sync", "channel:electrical", today),
@@ -161,7 +166,7 @@ export function previewState(nowD = new Date()) {
     type: "deadline",
     title: "Lab 3 report",
     org: "ECE 198",
-    dueAt: iso(now - 26 * HOUR),
+    dueAt: dayAt(nowD, -2, 23, 59),
     status: "submitted",
     url: "https://learn.uwaterloo.ca/d2l/home/105",
     seenIn: seen("learn", "ece198-lab3", "dropbox", today),
@@ -171,7 +176,7 @@ export function previewState(nowD = new Date()) {
     type: "deadline",
     title: "Assignment 4",
     org: "MATH 115",
-    dueAt: iso(now - 3 * DAY),
+    dueAt: dayAt(nowD, -3, 23, 59),
     seenIn: seen("learn", "math115-asn4", "dropbox", today),
   });
 
@@ -198,15 +203,8 @@ export function previewState(nowD = new Date()) {
       failures: 0,
       itemCount: 1,
     },
-    portal: {
-      lastRunAt: iso(now - 3 * DAY),
-      lastOkAt: iso(now - 3 * DAY),
-      session: null,
-      error: null,
-      complete: true,
-      failures: 0,
-      itemCount: 0,
-    },
+    // Portal is "soon"-stage and has never run: no sourceState entry, so the
+    // card shows neither a synced line nor Clear data.
   };
 
   const courses = {
