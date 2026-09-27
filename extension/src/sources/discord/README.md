@@ -124,19 +124,20 @@ once known, mentions messages not mentioning selfId are role pings.
 state.guilds[guildId] = { name, team|null, focus?, unread, mentions,
   lastInventoryAt, channels: { [channelId]: { name, type, category,
   limited, unread, mentions, order, oldestSeenId, newestSeenId,
-  messagesSeen, datesFound } } }
+  messagesSeen, datesFound } } }   // caps: 50 guilds, 250 channels per guild
 state.dmChannels = [channelId, …]              // ids seen under @me (cap 500)
 state.lastGood.messages = { items, at }        // keyed by meta.messageId,
                                                // 45-day prune, cap 600
 state.watch[guildId] = { channelIds, from }    // "settings" | "suggested"
-state.sweep = { startedAt, done: {channelId: iso} }
+state.sweep = { startedAt, done: {channelId: iso} }  // done capped at 12 500
 state.sweepQueue = [{guildId, guildName, channelId, name, url}]
 state.unreadWatched = [{guildId, guildName, channelId, name, url, mentions}]
 state.unreadGuilds = [{guildId, name, mentions}]
 state.meetingLog = [{guildId, channelId, key, startAt?, endAt?, url, at,
                      fromText?, weekday?, hhmm?}]   // cap 300, 120 days
 state.rsvps = [eventId, …]                          // cap 500
-state.lastGood.events[guildId] = { items, at }      // scheduled events
+state.lastGood.events[guildId] = { items, at }      // scheduled events;
+                                                    // 50 guilds, 100 items each
 state.identity = { selfId?, roleIds: [], evidence: n }
 ```
 
@@ -192,3 +193,42 @@ suggestion on its own (`weeks: 0, fromText: true`).
 - `Time:`/`Location:` announcement lines upgrade an all-day date hit to a
   timed, located item (timezone labels ignored — always Toronto wall
   time).
+
+## Maintaining
+
+**Where the selectors and regexes live.** `selectors.js` holds every DOM
+selector and regex: the guild rail / channel sidebar rows, message rows,
+the events-modal card structure (`EVENT_*`, `INTERESTED_ON_RE`), the
+REST `OBSERVE_URL_PATTERNS`, and the events-modal date-line grammar.
+`dom.js` reads those selectors into extracts; `events.js`,
+`messages.js` and `recurring.js` turn extracts into Items; `rules.js`
+owns the watch config, channel scoring and trigger vocabulary; `time.js`
+holds the loose "5:00 PM" clock parser shared by messages and recurring.
+`content.js` is extraction only (no imports, no requests).
+
+**Turning a saved page into a fixture.** Save the page with the relevant
+DOM open (guild rail + sidebar, the chat pane, or the events modal),
+redact, then drop it into `test/fixtures/discord/`. Redaction rules: no
+real server or channel names (placeholders like "Robotics Club",
+`#general`); no user names, avatars or ids; no message bodies —
+placeholder text only; no tokens or CDN urls carrying auth params; use
+placeholder snowflakes (`100000000000000001`). Raw captures stay outside
+git in `captures/` (gitignored).
+
+**Tests.** `node --test "test/discord/*.test.js"` runs everything; one
+file with `node --test test/discord/<name>.test.js`. `dom.test.js` — the
+DOM readers against the html fixtures; `events.test.js` — events-modal
+parsing and items; `messages.test.js` — candidate extraction including
+the `Time:`/`Location:` upgrades; `normalize.test.js` — REST body
+normalization; `recurring.test.js` — weekly suggestions;
+`rules.test.js` — watch config + channel scoring; `identity.test.js` —
+selfId/role inference; `adapter.test.js` — end-to-end parse/sync and the
+REST-vs-DOM dedupe; `static.test.js` — greps the sources for forbidden
+APIs (the passive-only guarantee); `fuzz.test.js` — ~300 malformed
+payloads plus a 1000-read growth bound.
+
+**Open / needs tuning.** The list above is current — highlights: the
+events-modal markup is unverified against live Discord, the
+Interested-button state heuristic may misread, whether `<t:>` markers
+render as `<time datetime>` in message content is unconfirmed, and the
+sidebar aria-label attributes are en-only guesses.

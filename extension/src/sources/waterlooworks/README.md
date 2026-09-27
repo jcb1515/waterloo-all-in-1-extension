@@ -131,3 +131,39 @@ entry's month: Sep–Dec Y → Winter Y+1, Jan–Apr → Spring Y, May–Aug →
 `meta.prep` on interview items: `format`/`method`, `location`/`where`,
 `interviewer`, `interviewType`, `bookingPermission`, `confirmedAt`,
 `instructions`, `postingTitle`, `jobId`, `employer`.
+
+## Maintaining
+
+**Where the selectors and regexes live.** `selectors.js` holds every URL
+pattern (`OBSERVE_PATTERNS` for the recorder), the page-detection regexes
+and the per-section CSS selectors/label lists. `parsers.js` holds the
+text regexes (logged-out wording, slot/row formats, the co-op calendar
+layout) — new page wording goes there, not in `index.js`. `map.js` turns
+parsed sections into Items and owns the `meta.facts` lists; `status.js`
+owns the application-status vocabulary; `dates.js` the Toronto-local
+conversions.
+
+**Turning a saved page into a fixture.** Save the rendered page (or copy
+the network body from a capture), redact, then drop it into
+`test/fixtures/waterlooworks/`. Redaction rules: no names, emails,
+student numbers or employer contacts; no message bodies (placeholder
+sentences only); no session material — WW embeds encrypted `action`
+tokens in every form/link, strip or replace them; job ids, titles and
+rooms may stay as placeholders (`400001`, "Employer A"). Raw captures
+stay outside git in `captures/` (gitignored).
+
+**Tests.** `node --test "test/waterlooworks/*.test.js"` runs everything;
+one file at a time with `node --test test/waterlooworks/<name>.test.js`.
+`parsers.test.js` — each section parser against its fixture;
+`map.test.js` — item mapping and `meta.facts`; `diff.test.js` —
+application status diffs; `dates.test.js` — Toronto conversions;
+`status.test.js` — status normalization; `adapter.test.js` — end-to-end
+parse/sync including the accumulator caps; `fuzz.test.js` — ~300
+deterministic malformed payloads plus a 1000-read growth bound.
+
+**Open / needs tuning.** The grids' JSON response shape is still unknown
+(the recorder should capture one; `lastJsonAt` is stored meanwhile).
+Offers/employment records, the open-rankings layout (only
+`rankings-closed` is captured), posting fields beyond the known labels
+(new labels fall through to `fields` automatically), and whether the
+auto-pick deadline is exactly 24 h before the first slot.
