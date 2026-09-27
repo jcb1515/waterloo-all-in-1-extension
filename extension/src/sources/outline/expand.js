@@ -29,27 +29,27 @@ const KIND_TYPE = /** @type {Record<string, Item["type"]>} */ ({
   SEM: "class",
 });
 const KIND_WORD = { LEC: "lecture", TUT: "tutorial", LAB: "lab", SEM: "seminar" };
-const KIND_TITLE = { LEC: "Lecture", TUT: "Tutorial", LAB: "Lab", SEM: "Seminar" };
+export const KIND_TITLE = { LEC: "Lecture", TUT: "Tutorial", LAB: "Lab", SEM: "Seminar" };
 
-const pad = (n) => String(n).padStart(2, "0");
-const dNum = (iso) => {
+export const pad = (n) => String(n).padStart(2, "0");
+export const dNum = (iso) => {
   const [y, m, d] = String(iso).split("-").map(Number);
   return Date.UTC(y, m - 1, d) / DAY_MS;
 };
-const fromNum = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
-const addDays = (iso, n) => fromNum(dNum(iso) + n);
-const inRanges = (iso, ranges) => ranges.some(([a, b]) => a <= iso && iso <= b);
-const dow = (iso) => {
+export const fromNum = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
+export const addDays = (iso, n) => fromNum(dNum(iso) + n);
+export const inRanges = (iso, ranges) => ranges.some(([a, b]) => a <= iso && iso <= b);
+export const dow = (iso) => {
   const [y, m, d] = iso.split("-").map(Number);
   return weekdayOf(y, m, d);
 };
 /** Monday of the Mon–Sun week containing an ISO date. */
 const mondayOf = (iso) => addDays(iso, -((dow(iso) + 6) % 7));
-const torontoDate = (isoInstant) => {
+export const torontoDate = (isoInstant) => {
   const p = zonedParts(new Date(isoInstant));
   return `${p.y}-${pad(p.m)}-${pad(p.d)}`;
 };
-const slug = (s) =>
+export const slug = (s) =>
   String(s || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -79,7 +79,7 @@ const OFFICE_RE =
 const OFFICE_DAY = { mon: 1, tues: 2, wednes: 3, thurs: 4, fri: 5 };
 
 /** "10:30am" / "2 pm" -> {h, mi} in 24h time. */
-function clockOf(text) {
+export function clockOf(text) {
   const m = String(text).match(/(\d{1,2})(?::(\d{2}))?\s*([ap])m/i);
   if (!m) return null;
   let h = Number(m[1]) % 12;
@@ -627,7 +627,6 @@ export function buildOutline(data, opts = {}) {
     code,
     name: data.title || undefined,
     term: termCode,
-    sections: opts.sections,
     outlineUrl: url,
     weights: (scheme0 ? scheme0.rows : [])
       .filter((r) => r.weight != null)

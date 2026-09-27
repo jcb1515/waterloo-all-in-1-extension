@@ -1,0 +1,73 @@
+{
+  "meta": { "datetime": "2026-09-27T03:10:00Z", "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": {
+    "studentId": "00000000",
+    "username": "student",
+    "usernameLong": null,
+    "courseEnrollmentData": [
+      {
+        "courseSubject": "ECE",
+        "courseCatalogNumber": "150",
+        "courseCatalogName": "ECE 150",
+        "courseCode": "ECE 150",
+        "courseComponent": "LEC",
+        "classSection": 2,
+        "classNumber": 4321,
+        "courseTitle": "Fundamentals of Engineering",
+        "academicCareer": "UG",
+        "enrolledDate": "2026-07-15T00:00:00",
+        "enrolledStatusCode": "E",
+        "enrolledStatusName": null,
+        "enrolledStatusReasonCode": null,
+        "enrolledStatusReasonName": null,
+        "droppedDate": null,
+        "outlineURL": "outline.uwaterloo.ca/viewer/view/npch7t",
+        "instructorData": [],
+        "scheduleData": [],
+        "termCode": "1269"
+      },
+      {
+        "courseSubject": "ECE",
+        "courseCatalogNumber": "150",
+        "courseCatalogName": "ECE 150",
+        "courseCode": "ECE 150",
+        "courseComponent": "TUT",
+        "classSection": 102,
+        "classNumber": 4322,
+        "courseTitle": "Fundamentals of Engineering",
+        "academicCareer": "UG",
+        "enrolledDate": "2026-07-15T00:00:00",
+        "enrolledStatusCode": "E",
+        "enrolledStatusName": null,
+        "enrolledStatusReasonCode": null,
+        "enrolledStatusReasonName": null,
+        "droppedDate": null,
+        "outlineURL": "",
+        "instructorData": [],
+        "scheduleData": [],
+        "termCode": "1269"
+      },
+      {
+        "courseSubject": "CHE",
+        "courseCatalogNumber": "102",
+        "courseCatalogName": "CHE 102",
+        "courseCode": "CHE 102",
+        "courseComponent": "LEC",
+        "classSection": 1,
+        "classNumber": 4401,
+        "courseTitle": "Chemistry for Engineers",
+        "academicCareer": "UG",
+        "enrolledDate": "2026-07-15T00:00:00",
+        "enrolledStatusCode": "E",
+        "enrolledStatusName": null,
+        "enrolledStatusReasonCode": null,
+        "enrolledStatusReasonName": null,
+        "droppedDate": "2026-09-20T00:00:00",
+        "outlineURL": "",
+        "instructorData": [],
+        "scheduleData": [],
+        "termCode": "1269"
+      }
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "meta": { "datetime": null, "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": [
+    {
+      "courseSubject": "ECE",
+      "courseCatalogNumber": "150",
+      "courseCatalogName": "ECE 150",
+      "courseCode": "ECE 150",
+      "courseComponent": "LEC",
+      "classSection": 2,
+      "classNumber": 4321,
+      "courseTitle": "Fundamentals of Engineering",
+      "academicCareer": "UG",
+      "enrolledDate": "2026-07-15T00:00:00",
+      "enrolledStatusCode": "E",
+      "enrolledStatusName": null,
+      "enrolledStatusReasonCode": null,
+      "enrolledStatusReasonName": null,
+      "droppedDate": null,
+      "outlineURL": "outline.uwaterloo.ca/viewer/view/npch7t",
+      "instructorData": [],
+      "scheduleData": [],
+      "termCode": "1269"
+    },
+    {
+      "courseSubject": "ECE",
+      "courseCatalogNumber": "150",
+      "courseCatalogName": "ECE 150",
+      "courseCode": "ECE 150",
+      "courseComponent": "TUT",
+      "classSection": 102,
+      "classNumber": 4322,
+      "courseTitle": "Fundamentals of Engineering",
+      "academicCareer": "UG",
+      "enrolledDate": "2026-07-15T00:00:00",
+      "enrolledStatusCode": "E",
+      "enrolledStatusName": null,
+      "enrolledStatusReasonCode": null,
+      "enrolledStatusReasonName": null,
+      "droppedDate": null,
+      "outlineURL": "",
+      "instructorData": [],
+      "scheduleData": [],
+      "termCode": "1269"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "meta": { "datetime": "2026-09-27T03:10:00Z", "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": [
+    {
+      "subjectCode": "ECE",
+      "catalog": "150",
+      "componentCode": "LEC",
+      "sectionCode": "002",
+      "courseTitle": "Fundamentals of Engineering",
+      "startDate": "2026-09-10T08:30:00",
+      "endDate": "2026-09-10T09:20:00",
+      "roomDescription": "E7 5343",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    },
+    {
+      "subjectCode": "ECE",
+      "catalog": "150",
+      "componentCode": "TUT",
+      "sectionCode": "102",
+      "courseTitle": "Fundamentals of Engineering",
+      "startDate": "2026-09-11T13:30:00",
+      "endDate": "2026-09-11T14:20:00",
+      "roomDescription": "E7 5353",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    },
+    {
+      "subjectCode": "ECE",
+      "catalog": "150",
+      "componentCode": "LAB",
+      "sectionCode": "203",
+      "courseTitle": "Fundamentals of Engineering",
+      "startDate": "2026-09-15T14:30:00",
+      "endDate": "2026-09-15T17:20:00",
+      "roomDescription": "E7 2314",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    },
+    {
+      "subjectCode": "MATH",
+      "catalog": "117",
+      "componentCode": "TST",
+      "sectionCode": "101",
+      "courseTitle": "Calculus 1 for Engineering",
+      "startDate": "2026-10-22T16:30:00",
+      "endDate": "2026-10-22T18:20:00",
+      "roomDescription": "MC 4020",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    }
+  ]
+}
