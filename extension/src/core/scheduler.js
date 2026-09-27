@@ -230,6 +230,14 @@ function makeCtx(adapter, settings, state, mv, extras) {
     state: state || {},
     courses: Object.values(mv.courses),
     terms: Object.values(mv.terms),
+    // Slim application view for adapters that need it (e.g. email linking)
+    applications: Object.values(mv.applications || {}).map((a) => ({
+      id: a && a.id,
+      employer: a && a.employer,
+      jobTitle: a && a.jobTitle,
+      jobId: a && a.jobId,
+      status: a && a.status,
+    })),
     fetch: t1Fetch,
     relay: relayFetch,
     parseHtml,

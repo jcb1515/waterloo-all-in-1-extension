@@ -168,6 +168,8 @@
  * @property {Record<string, any>} state        This source's private state from the last run (read-only)
  * @property {Course[]} courses
  * @property {TermInfo[]} terms
+ * @property {{id: string, employer?: string, jobTitle?: string, jobId?: string,
+ *   status?: ApplicationStatus}[]} [applications]  known applications (slim view)
  * @property {(url: string, init?: {method?: string, headers?: Record<string,string>, body?: string, binary?: boolean}) => Promise<FetchResult>} fetch   T1, credentials included
  * @property {(origin: string, path: string, init?: {method?: string, headers?: Record<string,string>, body?: string, binary?: boolean}) => Promise<FetchResult>} relay   T2 through an open tab
  * @property {(html: string, parser: string, opts?: Record<string, any>) => Promise<any>} parseHtml   Runs a registered parser ("<source>/<name>") in the offscreen document
