@@ -28,6 +28,13 @@ import {
   clearSource,
 } from "../core/scheduler.js";
 import { handleDiscoveryMessage } from "../capture/discovery-store.js";
+import {
+  publishFeed,
+  scheduleFeedPublish,
+  stopFeed,
+  PUBLISH_ALARM,
+  DAILY_ALARM,
+} from "../calendar/publish.js";
 
 const BADGE_BG = "#FED34C"; // school bus yellow
 const BADGE_TEXT = "#16181D";
@@ -55,6 +62,14 @@ async function setup() {
     } catch (e) {
       console.warn(`[wa1] alarm ${name}`, e);
     }
+  }
+  // Daily publish alarm so a quiet week still refreshes the feed's expiry.
+  try {
+    if (!(await chrome.alarms.get(DAILY_ALARM))) {
+      chrome.alarms.create(DAILY_ALARM, { periodInMinutes: 24 * 60 });
+    }
+  } catch (e) {
+    console.warn(`[wa1] alarm ${DAILY_ALARM}`, e);
   }
   await recomputeAll(); // rebuild merged view + badge from stored raws
 }
@@ -93,6 +108,9 @@ setup().catch(() => {}); // SW reloads (dev reloads) don't fire onStartup
 chrome.alarms.onAlarm.addListener((alarm) => {
   const m = /^sync:(.+)$/.exec(alarm.name || "");
   if (m) runSync(m[1], "alarm").catch(() => {});
+  if (alarm.name === PUBLISH_ALARM || alarm.name === DAILY_ALARM) {
+    publishFeed().catch((e) => console.warn("[wa1] publish", e && e.message));
+  }
 });
 
 /* ------------------------------ messages ------------------------------ */
@@ -128,6 +146,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === UI.CLEAR_SOURCE) {
     if (!msg.source) return false;
     clearSource(msg.source).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.CALENDAR_PUBLISH) {
+    publishFeed({ force: true }).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.CALENDAR_STOP) {
+    stopFeed().then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
   return false;
@@ -183,7 +209,16 @@ async function openOrFocus(url) {
 
 try {
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && (changes.items || changes.userState)) refreshBadge().catch(() => {});
+    if (area !== "local") return;
+    if (changes.items || changes.userState) refreshBadge().catch(() => {});
+    // Any settings change that touches calendar.* re-arms the debounced
+    // publish (scheduleFeedPublish itself checks enabled).
+    const s = changes.wa1Settings;
+    const before = /** @type {any} */ (s && s.oldValue) || {};
+    const after = /** @type {any} */ (s && s.newValue) || {};
+    if (s && JSON.stringify(before.calendar) !== JSON.stringify(after.calendar)) {
+      scheduleFeedPublish().catch(() => {});
+    }
   });
 } catch {
   /* ignore */

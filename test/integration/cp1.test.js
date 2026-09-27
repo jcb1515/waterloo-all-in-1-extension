@@ -194,3 +194,32 @@ test("adapterSettings merges profile and source settings; object urls -> list", 
   const ww = adapterSettings("waterlooworks", TEST_SETTINGS);
   assert.equal(ww.sections["ECE 150"][0], "LEC 002");
 });
+
+test("adapterSettings extras: outline files and the course group fallback", () => {
+  const s = adapterSettings("outline", TEST_SETTINGS, {
+    courses: [{ code: "ECE 105", group: "7" }, { code: "MATH 115" }],
+    outlineFiles: [
+      { id: "f1", name: "a.html", kind: "html", html: "<p>x</p>", size: 10 },
+      { id: "f2", name: "b.pdf", kind: "pdf", base64: "AAAA", size: 20 },
+    ],
+  });
+  // Course groups fill in where the profile has none; profile wins on overlap.
+  assert.equal(s.groups["ECE 105"], "7");
+  assert.equal(s.groups["ECE 190"], "5");
+  assert.deepEqual(s.files, [
+    { name: "a.html", kind: "html", html: "<p>x</p>" },
+    { name: "b.pdf", kind: "pdf", base64: "AAAA" },
+  ]);
+
+  const profWins = adapterSettings(
+    "outline",
+    { profile: { sections: {}, groups: { "ECE 105": "9" } }, sources: {} },
+    { courses: [{ code: "ECE 105", group: "7" }] }
+  );
+  assert.equal(profWins.groups["ECE 105"], "9");
+
+  // No extras -> no files key, groups unchanged.
+  const plain = adapterSettings("outline", TEST_SETTINGS);
+  assert.equal(plain.files, undefined);
+  assert.equal(plain.groups["ECE 190"], "5");
+});

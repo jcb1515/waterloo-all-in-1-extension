@@ -22,6 +22,7 @@ import { ADAPTERS, adapterForSource } from "./registry.js";
 import { t1Fetch, relayFetch } from "../capture/fetch.js";
 import { parseHtml } from "../capture/parse.js";
 import { extractDates } from "../lib/textdates/index.js";
+import { scheduleFeedPublish } from "../calendar/publish.js";
 
 const MAX_CONCURRENT = 2;
 const MINUTE = 60 * 1000;
@@ -59,23 +60,54 @@ export function shouldRun(state, now, reason, intervalMinutes) {
 }
 
 /**
+ * Course -> group map derived from stored Course.group values. The Portal
+ * adapter reports groups once it's live; until then this is empty and the
+ * profile's own groups apply.
+ * @param {any[]} [courses]
+ */
+export function groupsFromCourses(courses) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const c of courses || []) {
+    if (c && c.code && c.group != null && c.group !== "") {
+      out[String(c.code)] = String(c.group);
+    }
+  }
+  return out;
+}
+
+/**
  * The settings slice an adapter sees: the shared profile (sections, groups)
  * plus its own `sources[adapterId]` block. Stored shapes are normalised here
  * so adapters get what they expect — e.g. `sources.outline.urls` is stored
  * as an object code->url but the adapter iterates it as a URL list.
  * @param {string} adapterId
  * @param {Record<string, any>} settings full settings object
+ * @param {{courses?: any[], outlineFiles?: any[]}} [extras]
+ *   courses feeds the group fallback (profile.groups still wins);
+ *   outlineFiles (stored `outlineFiles` entries) becomes `files` for outline.
  * @returns {Record<string, any>}
  */
-export function adapterSettings(adapterId, settings) {
+export function adapterSettings(adapterId, settings, extras) {
   const s = settings || {};
   const src = (s.sources && s.sources[adapterId]) || {};
+  const groups = {
+    ...groupsFromCourses(extras && extras.courses),
+    ...((s.profile && s.profile.groups) || {}),
+  };
   const out = {
-    ...(s.profile ? { sections: s.profile.sections || {}, groups: s.profile.groups || {} } : {}),
+    ...(s.profile ? { sections: s.profile.sections || {}, groups } : {}),
     ...src,
   };
   if (out.urls && !Array.isArray(out.urls) && typeof out.urls === "object") {
     out.urls = Object.values(out.urls).map(String).filter(Boolean);
+  }
+  if (adapterId === "outline" && extras && Array.isArray(extras.outlineFiles)) {
+    out.files = extras.outlineFiles.map((f) =>
+      f && f.kind === "pdf"
+        ? { name: f.name, kind: "pdf", base64: f.base64 }
+        : { name: f && f.name, kind: "html", html: f && f.html }
+    );
   }
   return out;
 }
@@ -175,12 +207,16 @@ export async function runSync(adapterId, reason) {
   }
 }
 
-/** The SyncContext handed to adapters. */
-function makeCtx(adapter, settings, state, mv) {
+/**
+ * The SyncContext handed to adapters. `extras` carries per-adapter extras:
+ * the merged courses (group fallback) for everyone, `outlineFiles` for
+ * outline only.
+ */
+function makeCtx(adapter, settings, state, mv, extras) {
   const id = adapter.id;
   return {
     now: new Date(),
-    settings: adapterSettings(id, settings),
+    settings: adapterSettings(id, settings, { courses: Object.values(mv.courses), ...(extras || {}) }),
     state: state || {},
     courses: Object.values(mv.courses),
     terms: Object.values(mv.terms),
@@ -191,6 +227,17 @@ function makeCtx(adapter, settings, state, mv) {
     log: (message, data) =>
       appendLog(id, data === undefined ? String(message) : `${message} ${safeJson(data)}`),
   };
+}
+
+/**
+ * Per-adapter extras for adapterSettings. Only outline needs its imported
+ * files (`outlineFiles` storage key); nothing else reads that key.
+ * @param {string} adapterId
+ */
+async function adapterExtras(adapterId) {
+  if (adapterId !== "outline") return undefined;
+  const files = await getLocal("outlineFiles");
+  return { outlineFiles: Array.isArray(files) ? files : [] };
 }
 
 function safeJson(v) {
@@ -211,7 +258,7 @@ async function doSync(adapter, settings, reason) {
   const now = new Date();
   const prevState = ((await getLocal("sourceState")) || {})[id];
   const mv = await getMergedView();
-  const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv);
+  const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv, await adapterExtras(adapter.id));
 
   /** @type {any} */
   let result;
@@ -270,7 +317,7 @@ export async function handleObserved(payload) {
     const st = ((await getLocal("sourceState")) || {})[adapter.id];
     let result;
     try {
-      result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv));
+      result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv, await adapterExtras(adapter.id)));
     } catch (e) {
       const err = /** @type {any} */ (e);
       await appendLog(source, `observe failed: ${(err && err.message) || err}`);
@@ -353,6 +400,8 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
       updates,
     });
     await refreshBadge();
+    // Republish the calendar feed (debounced) when it's enabled.
+    scheduleFeedPublish().catch(() => {});
     return res;
   });
 }
