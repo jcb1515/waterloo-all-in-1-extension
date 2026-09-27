@@ -2,7 +2,7 @@
 /*
   Course-outline adapter: outline.uwaterloo.ca pages (or offline .html files in
   settings) -> classes, exams, deadlines and office hours. All DOM work happens
-  in the offscreen document via ctx.parseHtml("outline/parseOutline", html);
+  in the offscreen document via ctx.parseHtml(html, "outline/parseOutline");
   expansion is the pure buildOutline() in expand.js.
 */
 
@@ -47,7 +47,7 @@ const adapter = {
           ctx.log(`outline: fetch ${url} -> ${res.status}`);
           continue;
         }
-        const data = await ctx.parseHtml("outline/parseOutline", res.text);
+        const data = await ctx.parseHtml(res.text, "outline/parseOutline");
         if (!data) {
           complete = false;
           ctx.log(`outline: ${url} is not a course outline`);
@@ -61,7 +61,7 @@ const adapter = {
     }
     for (const file of files) {
       try {
-        const data = await ctx.parseHtml("outline/parseOutline", String(file.html || ""));
+        const data = await ctx.parseHtml(String(file.html || ""), "outline/parseOutline");
         if (!data) {
           complete = false;
           ctx.log(`outline: file ${file.name} is not a course outline`);

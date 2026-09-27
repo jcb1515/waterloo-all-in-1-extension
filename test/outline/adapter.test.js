@@ -34,9 +34,11 @@ function makeCtx(settings) {
       if (!r) return { status: 404 };
       return { status: r.status, text: r.text };
     },
-    async parseHtml(name, text) {
-      assert.equal(name, "outline/parseOutline");
-      return parseOutline(parseHTML(text).document);
+    async parseHtml(html, parser) {
+      // Contract order is (html, "<source>/<name>"); anything else throws.
+      if (!/^[\w-]+\/[\w-]+$/.test(String(parser))) throw new Error(`bad parser name: ${parser}`);
+      assert.equal(parser, "outline/parseOutline");
+      return parseOutline(parseHTML(html).document);
     },
   };
 }
