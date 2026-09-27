@@ -568,7 +568,7 @@ export class LiveSource {
     // is only dropped when every source it came from read completely.
     this.readOk = new Map();
     this.report = {
-      kind: "watnow-live-debug",
+      kind: "learn-live-debug",
       startedAt: this.now.toISOString(),
       base: this.base,
       via: null,

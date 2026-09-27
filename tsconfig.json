@@ -8,7 +8,9 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["chrome"],
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
-  "include": ["extension/src/**/*.js"]
+  "include": ["extension/src/**/*.js", "extension/src/**/*.jsx"]
 }

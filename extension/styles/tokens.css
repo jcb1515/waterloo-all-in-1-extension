@@ -1,288 +1,228 @@
 /*
-  WATnow design tokens. Source of truth for the extension and the landing page.
-  extension/styles/tokens.css is a copy of this file (Chrome extensions cannot
-  load files outside their own folder). Run `node scripts/sync.mjs` after
-  editing, or copy the file by hand.
+  Waterloo All-in-1 design tokens.
 
-  Direction: claymorphism, matched to watnow.ugmi.ca. Every surface is soft
-  modelling clay on a powder blue ground: one outer drop shadow, a darker inner
-  shade at the lower right, a lighter inner edge at the upper left. Brand yellow
-  stays reserved for the product: primary buttons, changed dates, section
-  titles and the mark. Red pen is still red pen.
-
-  Font paths below are relative to this file. Both design/fonts and
-  extension/fonts hold the same files.
+  Direction: clean minimal structure, colour-coded org chips and bars, dense
+  calendar rhythm with a density toggle. Waterloo gold on warm neutrals.
+  Follows the system theme; html[data-theme="light"|"dark"] overrides it.
+  Density tightens under html[data-density="compact"].
 */
 
-@font-face {
-  font-family: "Bricolage Grotesque";
-  src: url("../fonts/bricolage-latin-opsz-wght.woff2") format("woff2");
-  font-weight: 200 800;
-  font-style: normal;
-  font-display: swap;
+:root {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
+
+  /* type scale */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-xxl: 24px;
+
+  /* weights */
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+
+  /* radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* spacing (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* motion */
+  --t-fast: 120ms;
+  --t-med: 180ms;
+  --ease: ease-out;
+
+  /* semantic */
+  --danger: #e5484d;
+  --warn: #f59e0b;
+  --ok: #2fa36b;
+  --info: #3b82f6;
+
+  /* org palette — 8 hues (index via src/ui/colors.js orgColorIndex) */
+  --org-0: #3b82f6;
+  --org-1: #14b8a6;
+  --org-2: #8b5cf6;
+  --org-3: #f43f5e;
+  --org-4: #f97316;
+  --org-5: #22c55e;
+  --org-6: #06b6d4;
+  --org-7: #ec4899;
+
+  --row-min: 52px;
 }
 
-@font-face {
-  font-family: "Figtree";
-  src: url("../fonts/figtree-latin-wght.woff2") format("woff2");
-  font-weight: 300 900;
-  font-style: normal;
-  font-display: swap;
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-med: 0ms;
+  }
 }
+
+html[data-density="compact"] {
+  --row-min: 36px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+}
+
+/* ---------------------------------- light --------------------------------- */
 
 :root {
   color-scheme: light;
 
-  /* ---------- Primitives ---------- */
-  --ground: #dde6f3;          /* the powder blue the clay sits on */
-  --glow-a: #e9eefa;
-  --glow-b: #d1dcef;
-  --slab: #eef2f9;            /* big panels */
-  --tile: #f8f9fd;            /* rows, buttons, inputs */
-  --tile-hover: #ffffff;
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --surface-2: #f0eee9;
+  --surface-3: #e8e5de;
+  --border: #e3e0d8;
+  --border-strong: #d3cfc4;
+  --text: #15171c;
+  --text-2: #565b65;
+  --text-3: #8a8f99;
 
-  --graphite-900: #1f2440;
-  --graphite-600: #4f5675;
-  --graphite-400: #8a90aa;
+  --gold: #fed34c;
+  --gold-strong: #e9b92a;
+  --gold-ink: #9a6f00;
+  --gold-soft: #fff4cc;
+  --on-gold: #15171c;
+  --focus: #e9b92a;
 
-  --yellow-400: #ffe15a;      /* brand highlighter */
-  --yellow-500: #f5cf1b;
-  --yellow-wash: #fff5c4;     /* behind a moved date */
-  --time-wash: #fff0b0;       /* behind an unusual due time */
-  --yellow-600: #8a6d00;
+  --danger-soft: rgb(229 72 77 / 0.14);
+  --warn-soft: rgb(245 158 11 / 0.14);
+  --ok-soft: rgb(47 163 107 / 0.14);
+  --info-soft: rgb(59 130 246 / 0.14);
 
-  --red-pen-600: #c93a31;
-  --green-pen-600: #2c7449;
+  --org-0-soft: rgb(59 130 246 / 0.14);
+  --org-1-soft: rgb(20 184 166 / 0.14);
+  --org-2-soft: rgb(139 92 246 / 0.14);
+  --org-3-soft: rgb(244 63 94 / 0.14);
+  --org-4-soft: rgb(249 115 22 / 0.14);
+  --org-5-soft: rgb(34 197 94 / 0.14);
+  --org-6-soft: rgb(6 182 212 / 0.14);
+  --org-7-soft: rgb(236 72 153 / 0.14);
 
-  /* Course highlighters. Always carry ink text on top; never used as text. */
-  --hl-pink: #ffb3cf;
-  --hl-green: #a6e6bb;
-  --hl-orange: #ffc98a;
-  --hl-blue: #a9d3ff;
-  --hl-violet: #cfbfff;
-  --hl-mint: #9fe3da;
+  --org-0-ink: #1d4ed8;
+  --org-1-ink: #0f766e;
+  --org-2-ink: #6d28d9;
+  --org-3-ink: #be123c;
+  --org-4-ink: #c2410c;
+  --org-5-ink: #15803d;
+  --org-6-ink: #0e7490;
+  --org-7-ink: #be185d;
 
-  /* ---------- Semantic roles (light) ---------- */
-  --paper: var(--ground);               /* page and panel ground */
-  --sheet: var(--tile);                 /* raised surfaces: rows, cards, inputs */
-  --sheet-hover: var(--tile-hover);
-  --ink: var(--graphite-900);
-  --ink-muted: var(--graphite-600);
-  --ink-faint: var(--graphite-400);
-  --rule: rgba(80, 98, 150, 0.14);      /* only where clay cannot carry a break */
-  --rule-strong: rgba(80, 98, 150, 0.26);
-
-  --accent: var(--yellow-400);
-  --accent-press: var(--yellow-500);
-  --on-accent: var(--graphite-900);
-  --accent-text: var(--yellow-400);
-  --link: #2f6fd0;               /* a deadline title on hover */
-
-  --selected: var(--graphite-900);
-  --on-selected: #f8f9fd;
-
-  --late: var(--red-pen-600);           /* overdue, closing soon, due times */
-  --late-wash: #fbe3e0;
-  --done: var(--green-pen-600);
-  --focus: var(--graphite-900);
-
-  --chip-ink: var(--graphite-900);
-  --chip-done-opacity: 0.55;
-
-  /* ---------- Clay ---------- */
-  --clay: 16px 20px 40px -8px rgba(62, 78, 128, 0.3),
-    inset -6px -8px 14px rgba(98, 116, 168, 0.2),
-    inset 6px 8px 14px rgba(255, 255, 255, 0.95);
-  --clay-sm: 6px 9px 18px -4px rgba(62, 78, 128, 0.28),
-    inset -3px -4px 8px rgba(98, 116, 168, 0.16),
-    inset 3px 4px 8px rgba(255, 255, 255, 0.95);
-  --clay-lift: 18px 24px 36px -10px rgba(62, 78, 128, 0.42),
-    inset -5px -7px 12px rgba(98, 116, 168, 0.2),
-    inset 5px 7px 12px rgba(255, 255, 255, 1);
-  --clay-yellow: 8px 12px 22px -6px rgba(170, 120, 0, 0.42),
-    inset -4px -6px 10px rgba(196, 140, 0, 0.35),
-    inset 4px 5px 9px rgba(255, 250, 215, 0.95);
-  --clay-yellow-press: 2px 3px 8px -4px rgba(170, 120, 0, 0.4),
-    inset 5px 7px 12px rgba(196, 140, 0, 0.35),
-    inset -3px -3px 8px rgba(255, 250, 215, 0.8);
-  --blob: inset -3px -4px 7px rgba(40, 40, 90, 0.16), inset 3px 4px 6px rgba(255, 255, 255, 0.75);
-  --groove: inset 4px 6px 10px rgba(80, 98, 150, 0.2), inset -4px -5px 10px rgba(255, 255, 255, 0.85);
-
-  --shadow-lift: var(--clay-lift);
-  --shadow-menu: var(--clay);
-
-  /* ---------- Type ---------- */
-  --font: "Figtree", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
-  --font-display: "Bricolage Grotesque", "Figtree", "Segoe UI", system-ui, sans-serif;
-  --stretch-ui: 100%;
-  --stretch-heading: 100%;
-  --stretch-display: 100%;
-
-  /* Fixed rem scale for product UI. Base 16px. */
-  --text-xs: 0.8125rem;   /* 13px */
-  --text-sm: 0.875rem;    /* 14px */
-  --text-md: 1rem;        /* 16px */
-  --text-lg: 1.125rem;    /* 18px */
-  --text-xl: 1.375rem;    /* 22px */
-  --text-2xl: 1.75rem;    /* 28px */
-  --text-display-sm: clamp(2.25rem, 1.6rem + 2.8vw, 3.5rem);
-  --text-display: clamp(2.75rem, 1.6rem + 5vw, 5.75rem);
-
-  --leading-tight: 1.15;
-  --leading-snug: 1.3;
-  --leading-body: 1.5;
-
-  --weight-regular: 450;
-  --weight-medium: 550;
-  --weight-semibold: 650;
-  --weight-bold: 720;
-  --weight-black: 800;
-
-  --tracking-display: -0.025em;
-  --tracking-heading: -0.018em;
-  --tracking-ui: 0;
-
-  /* ---------- Radii: clay is round ---------- */
-  --radius-xs: 9px;     /* course chips */
-  --radius-sm: 999px;   /* buttons, pills */
-  --radius-md: 20px;    /* rows, cards */
-  --radius-lg: 32px;    /* sections */
-  --radius-xl: 44px;    /* the panel slab */
-  --radius-icon: 22%;
-
-  /* Kept so older rules that clip a chip stay harmless. */
-  --chisel: none;
-
-  /* ---------- Spacing (4px base) ---------- */
-  --space-0: 0;
-  --space-1: 2px;
-  --space-2: 4px;
-  --space-3: 8px;
-  --space-4: 12px;
-  --space-5: 16px;
-  --space-6: 20px;
-  --space-7: 24px;
-  --space-8: 32px;
-  --space-9: 40px;
-  --space-10: 56px;
-  --space-11: 80px;
-  --space-12: 120px;
-
-  --gutter-panel: 14px;
-  --target-min: 40px;
-
-  /* ---------- Motion ---------- */
-  --dur-instant: 90ms;
-  --dur-fast: 140ms;
-  --dur-base: 220ms;
-  --dur-slow: 360ms;
-  --dur-focal: 680ms;
-  --dur-swipe: 460ms;
-
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);         /* arrivals */
-  --ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);        /* exits */
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);      /* travel between positions */
-  --ease-swipe: cubic-bezier(0.3, 0.6, 0.15, 1);      /* highlighter and pen strokes */
-  --ease-squish: cubic-bezier(0.3, 1.6, 0.5, 1);      /* clay press */
+  --shadow: 0 1px 2px rgb(21 23 28 / 0.06), 0 4px 12px rgb(21 23 28 / 0.06);
+  --shadow-pop: 0 4px 8px rgb(21 23 28 / 0.08), 0 12px 32px rgb(21 23 28 / 0.12);
 }
 
-/* ---------- Dark: the same clay under a dim lamp ---------- */
+/* ---------------------------------- dark ---------------------------------- */
+
+/* Dark values duplicated so the override works with or without the system. */
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --ground: #1a1e2c;
-    --glow-a: #232a3e;
-    --glow-b: #161a26;
-    --slab: #232839;
-    --tile: #2b3146;
-    --tile-hover: #313851;
-    --ink: #eef0f8;
-    --ink-muted: #b3b9cf;
-    --ink-faint: #737a95;
-    --rule: rgba(255, 255, 255, 0.08);
-    --rule-strong: rgba(255, 255, 255, 0.16);
-    --yellow-wash: #3d3a2a;
-    --time-wash: #574616;
-    --late: #ff8a7a;
-    --late-wash: #3a2624;
-    --done: #7ed39b;
-    --focus: #ffe15a;
-    --selected: #eef0f8;
-    --on-selected: #1a1e2c;
-    --accent-text: var(--yellow-400);
-    --link: #8ab8ff;
-    --chip-done-opacity: 0.5;
-    --hl-pink: #f7a6c6;
-    --hl-green: #97dcae;
-    --hl-orange: #f7bf80;
-    --hl-blue: #9bc9f5;
-    --hl-violet: #c4b3f7;
-    --hl-mint: #8fd8ce;
-    --clay: 16px 20px 40px -8px rgba(0, 0, 0, 0.55),
-      inset -6px -8px 14px rgba(0, 0, 0, 0.3),
-      inset 6px 8px 14px rgba(255, 255, 255, 0.06);
-    --clay-sm: 6px 9px 18px -4px rgba(0, 0, 0, 0.5),
-      inset -3px -4px 8px rgba(0, 0, 0, 0.28),
-      inset 3px 4px 8px rgba(255, 255, 255, 0.07);
-    --clay-lift: 18px 24px 36px -10px rgba(0, 0, 0, 0.7),
-      inset -5px -7px 12px rgba(0, 0, 0, 0.3),
-      inset 5px 7px 12px rgba(255, 255, 255, 0.09);
-    --clay-yellow: 8px 12px 22px -6px rgba(0, 0, 0, 0.55),
-      inset -4px -6px 10px rgba(196, 140, 0, 0.4),
-      inset 4px 5px 9px rgba(255, 250, 215, 0.8);
-    --clay-yellow-press: 2px 3px 8px -4px rgba(0, 0, 0, 0.5),
-      inset 5px 7px 12px rgba(196, 140, 0, 0.4),
-      inset -3px -3px 8px rgba(255, 250, 215, 0.6);
-    --blob: inset -3px -4px 7px rgba(20, 20, 50, 0.22), inset 3px 4px 6px rgba(255, 255, 255, 0.5);
-    --groove: inset 4px 6px 10px rgba(0, 0, 0, 0.35), inset -3px -4px 8px rgba(255, 255, 255, 0.05);
+
+    --bg: #0e1014;
+    --surface: #15181e;
+    --surface-2: #1c2027;
+    --surface-3: #242932;
+    --border: #2a2f38;
+    --border-strong: #3a404b;
+    --text: #f1f0ec;
+    --text-2: #a9aeb8;
+    --text-3: #737a86;
+
+    --gold: #fed34c;
+    --gold-strong: #f5c63a;
+    --gold-ink: #fed34c;
+    --gold-soft: rgb(254 211 76 / 0.12);
+    --on-gold: #15171c;
+    --focus: #f5c63a;
+
+    --danger-soft: rgb(229 72 77 / 0.14);
+    --warn-soft: rgb(245 158 11 / 0.14);
+    --ok-soft: rgb(47 163 107 / 0.14);
+    --info-soft: rgb(59 130 246 / 0.14);
+
+    --org-0-soft: rgb(59 130 246 / 0.16);
+    --org-1-soft: rgb(20 184 166 / 0.16);
+    --org-2-soft: rgb(139 92 246 / 0.16);
+    --org-3-soft: rgb(244 63 94 / 0.16);
+    --org-4-soft: rgb(249 115 22 / 0.16);
+    --org-5-soft: rgb(34 197 94 / 0.16);
+    --org-6-soft: rgb(6 182 212 / 0.16);
+    --org-7-soft: rgb(236 72 153 / 0.16);
+
+    --org-0-ink: #93c5fd;
+    --org-1-ink: #5eead4;
+    --org-2-ink: #c4b5fd;
+    --org-3-ink: #fda4af;
+    --org-4-ink: #fdba74;
+    --org-5-ink: #86efac;
+    --org-6-ink: #67e8f9;
+    --org-7-ink: #f9a8d4;
+
+    --shadow: none;
+    --shadow-pop: none;
   }
 }
 
-:root[data-theme="dark"] {
+html[data-theme="dark"] {
   color-scheme: dark;
-  --ground: #1a1e2c;
-  --glow-a: #232a3e;
-  --glow-b: #161a26;
-  --slab: #232839;
-  --tile: #2b3146;
-  --tile-hover: #313851;
-  --ink: #eef0f8;
-  --ink-muted: #b3b9cf;
-  --ink-faint: #737a95;
-  --rule: rgba(255, 255, 255, 0.08);
-  --rule-strong: rgba(255, 255, 255, 0.16);
-  --yellow-wash: #3d3a2a;
-  --time-wash: #574616;
-  --late: #ff8a7a;
-  --late-wash: #3a2624;
-  --done: #7ed39b;
-  --focus: #ffe15a;
-  --selected: #eef0f8;
-  --on-selected: #1a1e2c;
-  --accent-text: var(--yellow-400);
-  --link: #8ab8ff;
-  --chip-done-opacity: 0.5;
-  --hl-pink: #f7a6c6;
-  --hl-green: #97dcae;
-  --hl-orange: #f7bf80;
-  --hl-blue: #9bc9f5;
-  --hl-violet: #c4b3f7;
-  --hl-mint: #8fd8ce;
-  --clay: 16px 20px 40px -8px rgba(0, 0, 0, 0.55),
-    inset -6px -8px 14px rgba(0, 0, 0, 0.3),
-    inset 6px 8px 14px rgba(255, 255, 255, 0.06);
-  --clay-sm: 6px 9px 18px -4px rgba(0, 0, 0, 0.5),
-    inset -3px -4px 8px rgba(0, 0, 0, 0.28),
-    inset 3px 4px 8px rgba(255, 255, 255, 0.07);
-  --clay-lift: 18px 24px 36px -10px rgba(0, 0, 0, 0.7),
-    inset -5px -7px 12px rgba(0, 0, 0, 0.3),
-    inset 5px 7px 12px rgba(255, 255, 255, 0.09);
-  --clay-yellow: 8px 12px 22px -6px rgba(0, 0, 0, 0.55),
-    inset -4px -6px 10px rgba(196, 140, 0, 0.4),
-    inset 4px 5px 9px rgba(255, 250, 215, 0.8);
-  --clay-yellow-press: 2px 3px 8px -4px rgba(0, 0, 0, 0.5),
-    inset 5px 7px 12px rgba(196, 140, 0, 0.4),
-    inset -3px -3px 8px rgba(255, 250, 215, 0.6);
-  --blob: inset -3px -4px 7px rgba(20, 20, 50, 0.22), inset 3px 4px 6px rgba(255, 255, 255, 0.5);
-  --groove: inset 4px 6px 10px rgba(0, 0, 0, 0.35), inset -3px -4px 8px rgba(255, 255, 255, 0.05);
+
+  --bg: #0e1014;
+  --surface: #15181e;
+  --surface-2: #1c2027;
+  --surface-3: #242932;
+  --border: #2a2f38;
+  --border-strong: #3a404b;
+  --text: #f1f0ec;
+  --text-2: #a9aeb8;
+  --text-3: #737a86;
+
+  --gold: #fed34c;
+  --gold-strong: #f5c63a;
+  --gold-ink: #fed34c;
+  --gold-soft: rgb(254 211 76 / 0.12);
+  --on-gold: #15171c;
+  --focus: #f5c63a;
+
+  --danger-soft: rgb(229 72 77 / 0.14);
+  --warn-soft: rgb(245 158 11 / 0.14);
+  --ok-soft: rgb(47 163 107 / 0.14);
+  --info-soft: rgb(59 130 246 / 0.14);
+
+  --org-0-soft: rgb(59 130 246 / 0.16);
+  --org-1-soft: rgb(20 184 166 / 0.16);
+  --org-2-soft: rgb(139 92 246 / 0.16);
+  --org-3-soft: rgb(244 63 94 / 0.16);
+  --org-4-soft: rgb(249 115 22 / 0.16);
+  --org-5-soft: rgb(34 197 94 / 0.16);
+  --org-6-soft: rgb(6 182 212 / 0.16);
+  --org-7-soft: rgb(236 72 153 / 0.16);
+
+  --org-0-ink: #93c5fd;
+  --org-1-ink: #5eead4;
+  --org-2-ink: #c4b5fd;
+  --org-3-ink: #fda4af;
+  --org-4-ink: #fdba74;
+  --org-5-ink: #86efac;
+  --org-6-ink: #67e8f9;
+  --org-7-ink: #f9a8d4;
+
+  --shadow: none;
+  --shadow-pop: none;
 }

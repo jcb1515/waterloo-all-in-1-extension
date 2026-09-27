@@ -51,6 +51,28 @@ export function redactText(text, extraWords = []) {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** True when a segment's decoded form carries an email address. */
+function hasEmail(seg) {
+  let d;
+  try {
+    d = decodeURIComponent(seg);
+  } catch {
+    d = seg;
+  }
+  return d.includes("@") || seg.toLowerCase().includes("%40");
+}
+
+/**
+ * A long opaque token: base64-ish with % and = (Outlook message ids), mixed
+ * letters and digits, or very long.
+ */
+function isOpaqueToken(seg) {
+  const base = String(seg || "").replace(/\.[a-z0-9]{1,5}$/i, "");
+  if (base.length < 16 || !/^[A-Za-z0-9_\-+~%=]+$/.test(base)) return false;
+  if (/[A-Za-z]/.test(base) && /\d/.test(base)) return true; // mixed letters+digits
+  return base.length >= 32; // long base64-ish token
+}
+
 /**
  * A path segment that identifies one user, object or session rather than a
  * route: long numbers (Discord snowflakes are 17-20 digits), UUIDs and long
@@ -60,39 +82,52 @@ function isIdSegment(seg) {
   if (!seg) return false;
   if (/^\d{3,}$/.test(seg)) return true;
   if (UUID_RE.test(seg)) return true;
-  const base = seg.replace(/\.[a-z0-9]{1,5}$/i, "");
-  if (base.length >= 16 && /^[A-Za-z0-9_\-+~]+$/.test(base)) {
-    if (/[A-Za-z]/.test(base) && /\d/.test(base)) return true; // mixed letters+digits
-    if (base.length >= 32) return true; // long base64-ish token
-  }
-  return false;
+  return isOpaqueToken(seg);
+}
+
+/** A JSON object key that is an id rather than a field name. */
+function isIdKey(key) {
+  const s = String(key);
+  return /^\d{8,}$/.test(s) || UUID_RE.test(s) || isOpaqueToken(s);
 }
 
 const normSegments = (p) =>
   String(p || "")
     .split("/")
-    .map((seg) => (isIdSegment(seg) ? "{id}" : seg))
+    .map((seg) => (hasEmail(seg) ? "{email}" : isIdSegment(seg) ? "{id}" : seg))
     .join("/");
+
+/** Sorted unique query keys; keys carrying an email collapse to "{email}". */
+function queryKeys(query) {
+  const keys = new Set();
+  for (const k of new URLSearchParams(query).keys()) keys.add(hasEmail(k) ? "{email}" : k);
+  return [...keys].sort().join("&");
+}
 
 /**
  * "https://discord.com/api/v9/channels/123…/messages?limit=50&before=…"
  * -> "discord.com/api/v9/channels/{id}/messages?before&limit".
- * Query keys are kept sorted, values dropped. A hash route is normalised the
- * same way. Relative input keeps just its path.
+ * Query keys are kept sorted, values dropped. Path/hash segments carrying an
+ * email become {email}. A hash that looks like a query string is reduced to
+ * its sorted keys too; otherwise a hash route is normalised like the path.
+ * Relative input keeps just its path. extraWords are redacted from the result.
  */
-export function normalizePath(url) {
+export function normalizePath(url, extraWords = []) {
   let u;
   try {
     u = new URL(String(url || ""), "https://wa1-relative.invalid");
   } catch {
-    return String(url || "").slice(0, 300);
+    return replaceRedactWords(String(url || "").slice(0, 300), extraWords);
   }
   let out = u.hostname === "wa1-relative.invalid" ? "" : u.host;
   out += normSegments(u.pathname);
-  const keys = [...new Set(u.searchParams.keys())].sort();
-  if (keys.length) out += `?${keys.join("&")}`;
-  if (u.hash.length > 1) out += `#${normSegments(u.hash.slice(1))}`;
-  return out;
+  const q = queryKeys(u.search);
+  if (q) out += `?${q}`;
+  if (u.hash.length > 1) {
+    const h = u.hash.slice(1);
+    out += `#${/[=&]/.test(h) ? queryKeys(h) : normSegments(h)}`;
+  }
+  return replaceRedactWords(out, extraWords);
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,8 +232,21 @@ export function shapeOf(value, key = "", depth = 0, extraWords = []) {
     const nameIsPersonal = NAME_SIBLINGS.some((s) => siblings.has(s));
     /** @type {Record<string, any>} */
     const out = {};
+    const idShapes = [];
+    let idCount = 0;
     for (const [k2, v] of Object.entries(value)) {
+      // Keys that are themselves ids (snowflakes, UUIDs, opaque tokens) are
+      // collapsed: one "{id}" entry holds the merged shape of up to 3 values.
+      if (isIdKey(k2)) {
+        idCount++;
+        if (idShapes.length < 3) idShapes.push(shapeOf(v, "", depth + 1, extraWords));
+        continue;
+      }
       out[k2] = k2.toLowerCase() === "name" && nameIsPersonal ? (v == null ? null : "<redacted>") : shapeOf(v, k2, depth + 1, extraWords);
+    }
+    if (idCount) {
+      out["{id}"] = mergeShapes(idShapes);
+      out["{id}#count"] = idCount;
     }
     return out;
   }
@@ -209,7 +257,7 @@ export function shapeOf(value, key = "", depth = 0, extraWords = []) {
     return redactText(s, extraWords);
   }
   if (ISO_RE.test(s)) return "<iso-datetime>";
-  if (URLISH_RE.test(s)) return `<url ${normalizePath(s)}>`;
+  if (URLISH_RE.test(s)) return `<url ${normalizePath(s, extraWords)}>`;
   if (s.length <= 60 && isDateLike(s)) {
     return datePattern(s);
   }
@@ -349,7 +397,7 @@ export function htmlOutline(doc, opts = {}) {
     if (out.forms.length >= 30) break;
     const action = attr(form, "action");
     out.forms.push({
-      action: action ? normalizePath(action) : "",
+      action: action ? normalizePath(action, extraWords) : "",
       fields: [...form.querySelectorAll("input,select,textarea")]
         .slice(0, 60)
         .map((f) => attr(f, "name"))
@@ -360,7 +408,7 @@ export function htmlOutline(doc, opts = {}) {
   for (const f of doc.querySelectorAll("iframe")) {
     if (out.iframes.length >= 30) break;
     const src = attr(f, "src");
-    if (src) out.iframes.push(normalizePath(src));
+    if (src) out.iframes.push(normalizePath(src, extraWords));
   }
 
   if (navSel) {
@@ -418,6 +466,37 @@ export function htmlOutline(doc, opts = {}) {
     }
   }
   return out;
+}
+
+/**
+ * Reduce a response body to its redacted shape for a discovery entry. JSON
+ * wins whenever the body actually parses — some sites serve JSON with a
+ * text/html content type. HTML bodies go through the caller's htmlShape.
+ * @param {unknown} body
+ * @param {unknown} contentType
+ * @param {string[]} [extraWords]
+ * @param {(html: string) => any} [htmlShape] returns the outline (or null)
+ */
+export function bodyShape(body, contentType, extraWords = [], htmlShape) {
+  if (typeof body !== "string" || !body) return null;
+  const t = body.trimStart();
+  const ct = String(contentType || "");
+  if (/json/i.test(ct) || t.startsWith("{") || t.startsWith("[")) {
+    try {
+      return shapeOf(JSON.parse(body), "", 0, extraWords);
+    } catch {
+      /* not really JSON — fall through */
+    }
+  }
+  if (htmlShape && /html/i.test(ct)) {
+    try {
+      const s = htmlShape(body);
+      return s === undefined ? null : s;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /** Small stable string hash (FNV-1a, hex) for dedupe keys. */

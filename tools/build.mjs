@@ -8,7 +8,7 @@
 // entry's own relative path (src/panel/panel.js -> dist/src/panel/panel.js).
 
 import * as esbuild from "esbuild";
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { watch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,14 +19,16 @@ const DIST = path.join(REPO, "dist");
 
 const ESM_ENTRIES = [
   "src/background/index.js",
-  "src/panel/panel.js",
-  "src/options/options.js",
+  "src/panel/main.jsx",
+  "src/options/main.jsx",
+  "src/capture/offscreen.js",
 ];
 
 const IIFE_ENTRIES = [
   "src/capture/observer.main.js",
   "src/capture/recorder.content.js",
   "src/sources/learn/content.js",
+  "src/sources/outline/content.js",
   "src/sources/portal/content.js",
   "src/sources/waterlooworks/content.js",
   "src/sources/discord/content.js",
@@ -42,7 +44,7 @@ async function* walk(dir) {
 }
 
 async function copyStaticFile(absPath) {
-  if (absPath.endsWith(".js")) return;
+  if (absPath.endsWith(".js") || absPath.endsWith(".jsx")) return;
   const dest = path.join(DIST, path.relative(SRC, absPath));
   await mkdir(path.dirname(dest), { recursive: true });
   await copyFile(absPath, dest);
@@ -52,10 +54,25 @@ async function copyStatic() {
   for await (const p of walk(SRC)) await copyStaticFile(p);
 }
 
+/** dist/licenses/THIRD_PARTY_NOTICES.txt — repo LICENSE + every licenses/ file. */
+async function writeNotices() {
+  const parts = [await readFile(path.join(REPO, "LICENSE"), "utf8")];
+  const licDir = path.join(REPO, "licenses");
+  for (const f of (await readdir(licDir)).sort()) {
+    const text = await readFile(path.join(licDir, f), "utf8");
+    parts.push(`\n${"=".repeat(72)}\n\n${f}\n\n${"=".repeat(72)}\n\n${text}`);
+  }
+  const dest = path.join(DIST, "licenses", "THIRD_PARTY_NOTICES.txt");
+  await mkdir(path.dirname(dest), { recursive: true });
+  await writeFile(dest, parts.join("\n"));
+}
+
 const shared = {
   bundle: true,
   minify: false,
   target: "chrome116",
+  jsx: "automatic",
+  jsxImportSource: "preact",
   outdir: DIST,
   outbase: SRC,
   logLevel: "info",
@@ -71,6 +88,7 @@ const watchMode = process.argv.includes("--watch");
 await rm(DIST, { recursive: true, force: true });
 await mkdir(DIST, { recursive: true });
 await copyStatic();
+await writeNotices();
 
 if (!watchMode) {
   await Promise.all(configs.map((c) => esbuild.build(c)));
