@@ -4,6 +4,7 @@ import { DEMO_SCRIPT, COURSES, ITEMS } from "../sources/learn/fixtures.js";
 import { brandMark, esc } from "../ui/icons.js";
 import { fmtAgo } from "../core/dates.js";
 import { TESTER_BUILD } from "../core/build.js";
+import { replaceRedactWords } from "../capture/redact.js";
 
 const APP = chrome.i18n.getMessage("appName") || "WATnow";
 const page = document.getElementById("page");
@@ -36,6 +37,81 @@ function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Discovery recorder                                                  */
+/* ------------------------------------------------------------------ */
+
+const DISCOVERY_SITES = [
+  { id: "portal", label: "Portal" },
+  { id: "waterlooworks", label: "WaterlooWorks" },
+  { id: "discord", label: "Discord" },
+  { id: "outlook", label: "Outlook" },
+  { id: "gmail", label: "Gmail" },
+  { id: "learn", label: "Learn" },
+];
+
+async function getDiscoverySettings() {
+  const { discoverySettings } = await chrome.storage.local.get("discoverySettings");
+  const s = discoverySettings && typeof discoverySettings === "object" ? discoverySettings : {};
+  return { enabled: s.enabled !== false, redactWords: Array.isArray(s.redactWords) ? s.redactWords : [] };
+}
+
+async function setDiscoverySettings(patch) {
+  const cur = await getDiscoverySettings();
+  await chrome.storage.local.set({ discoverySettings: { ...cur, ...patch } });
+}
+
+function discoRowHTML(site, d) {
+  const net = d && d.net ? Object.keys(d.net).length : 0;
+  const pages = d && d.pages ? Object.keys(d.pages).length : 0;
+  const updated = d && d.updatedAt ? fmtAgo(d.updatedAt, new Date()) : "—";
+  const off = d ? "" : "disabled";
+  return `<tr data-disco-row="${site.id}">
+    <td>${esc(site.label)}</td>
+    <td class="num" data-disco-net>${net}</td>
+    <td class="num" data-disco-pages>${pages}</td>
+    <td data-disco-updated>${esc(updated)}</td>
+    <td class="disco-actions">
+      <button class="btn btn-quiet btn-sm" data-disco-dl="${site.id}" ${off}>Download discovery report</button>
+      <button class="btn btn-quiet btn-sm" data-disco-clear="${site.id}" ${off}>Clear</button>
+    </td>
+  </tr>`;
+}
+
+function updateDiscoRow(siteId, d) {
+  const tr = page.querySelector(`tr[data-disco-row="${siteId}"]`);
+  if (!tr) return;
+  tr.querySelector("[data-disco-net]").textContent = d && d.net ? Object.keys(d.net).length : 0;
+  tr.querySelector("[data-disco-pages]").textContent = d && d.pages ? Object.keys(d.pages).length : 0;
+  tr.querySelector("[data-disco-updated]").textContent = d && d.updatedAt ? fmtAgo(d.updatedAt, new Date()) : "—";
+  for (const b of tr.querySelectorAll("button")) b.disabled = !d;
+}
+
+async function downloadDiscovery(siteId) {
+  const key = `discovery:${siteId}`;
+  const data = (await chrome.storage.local.get(key))[key];
+  const { redactWords } = await getDiscoverySettings();
+  const report = {
+    kind: "wa1-discovery",
+    version: 1,
+    site: siteId,
+    generatedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    browser: (navigator.userAgentData && navigator.userAgentData.brands) || null,
+    net: data ? Object.values(data.net || {}) : [],
+    pages: data ? Object.values(data.pages || {}) : [],
+  };
+  // Redact words can be added after captures; apply them to the whole report now.
+  const text = replaceRedactWords(JSON.stringify(report, null, 2), redactWords);
+  const day = new Date().toISOString().slice(0, 10);
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${siteId}-discovery-${day}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 const OUTCOME = {
   "signed-out": "Learn said nobody was signed in.",
   "no-tab": "Learn said nobody was signed in, and no Learn tab was open to try instead.",
@@ -65,6 +141,8 @@ async function render() {
   applyTheme(settings.theme);
   document.title = "Report a Bug";
   const { liveDebug } = await chrome.storage.local.get("liveDebug");
+  const disco = await getDiscoverySettings();
+  const discoData = await chrome.storage.local.get(DISCOVERY_SITES.map((s) => `discovery:${s.id}`));
   let commands = [];
   try {
     commands = await chrome.commands.getAll();
@@ -98,6 +176,22 @@ async function render() {
         <h1>Report a Bug</h1>
       </div>
     </header>
+
+    <div class="sheet">
+      <section class="set-section" aria-labelledby="disco-h">
+        <h2 id="disco-h">Discovery</h2>
+        <p class="set-help">While you browse these sites, the extension records their structure — which URLs load, what shape the JSON answers have, and the page's landmarks — with names, emails and ids removed. Download a report for each site and send it to the developer so the extension can learn where everything lives. Nothing is sent anywhere automatically.</p>
+        <label class="disco-toggle"><input type="checkbox" id="disco-enabled" ${disco.enabled ? "checked" : ""}> <strong>Record site structure (discovery)</strong></label>
+        <label class="field-label" for="disco-words">Words to redact (one per line, e.g. your name)</label>
+        <textarea class="input" id="disco-words" rows="3" spellcheck="false">${esc(disco.redactWords.join("\n"))}</textarea>
+        <table class="disco-table">
+          <thead><tr><th>Site</th><th class="num">Requests</th><th class="num">Pages</th><th>Updated</th><th></th></tr></thead>
+          <tbody>
+            ${DISCOVERY_SITES.map((s) => discoRowHTML(s, discoData[`discovery:${s.id}`])).join("")}
+          </tbody>
+        </table>
+      </section>
+    </div>
 
     ${TESTER_BUILD ? "" : `<div class="sheet">
       <section class="set-section" aria-labelledby="demo-h">
@@ -155,8 +249,19 @@ async function render() {
 }
 
 page.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-demo], [data-act]");
+  const t = e.target.closest("[data-demo], [data-act], [data-disco-dl], [data-disco-clear]");
   if (!t) return;
+  if (t.dataset.discoDl) {
+    t.disabled = true;
+    await downloadDiscovery(t.dataset.discoDl).catch(() => {});
+    t.disabled = false;
+    return;
+  }
+  if (t.dataset.discoClear) {
+    await chrome.storage.local.remove(`discovery:${t.dataset.discoClear}`);
+    updateDiscoRow(t.dataset.discoClear, null);
+    return;
+  }
   if (t.dataset.demo) {
     const status = page.querySelector(`[data-status-for="${t.dataset.demo}"]`);
     t.disabled = true;
@@ -203,6 +308,14 @@ page.addEventListener("click", async (e) => {
 
 page.addEventListener("change", async (e) => {
   const t = e.target;
+  if (t.matches("#disco-enabled")) {
+    await setDiscoverySettings({ enabled: t.checked });
+    return;
+  }
+  if (t.matches("#disco-words")) {
+    await setDiscoverySettings({ redactWords: t.value.split("\n").map((w) => w.trim()).filter(Boolean) });
+    return;
+  }
   if (!t.matches('input[name="mode"]')) return;
   const mode = t.value === "live" ? "live" : "demo";
   await setSettings({ mode });
@@ -219,6 +332,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (btn) btn.disabled = !changes.liveDebug.newValue;
   }
   if (area === "local" && changes.settings && changes.settings.newValue) applyTheme(changes.settings.newValue.theme);
+  if (area === "local") {
+    for (const s of DISCOVERY_SITES) {
+      const ch = changes[`discovery:${s.id}`];
+      if (ch) updateDiscoRow(s.id, ch.newValue);
+    }
+  }
 });
 
 render();

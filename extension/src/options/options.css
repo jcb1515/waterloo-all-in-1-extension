@@ -214,6 +214,62 @@ kbd {
   color: var(--ink-muted);
 }
 
+.disco-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.disco-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+#disco-words {
+  width: 100%;
+  margin-top: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.disco-table {
+  width: 100%;
+  margin-top: 18px;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.disco-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule-strong);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-muted);
+  text-align: left;
+}
+
+.disco-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.disco-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.disco-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.disco-actions .btn + .btn {
+  margin-left: 6px;
+}
+
 @media (max-width: 560px) {
   .page {
     padding: 28px 16px 56px;

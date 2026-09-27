@@ -9,6 +9,8 @@ import { liveBase, assignColors } from "../sources/learn/live-source.js";
 import { DEMO_SCRIPT } from "../sources/learn/fixtures.js";
 import { addDays, endOfWeek, startOfDay } from "../core/dates.js";
 import { plannedReminders, reminderCopy, movedCopy } from "../core/reminders.js";
+import { MSG } from "../core/contract.js";
+import { handleDiscoveryMessage } from "../capture/discovery-store.js";
 
 const BADGE_BG = "#FFE45C";
 const BADGE_TEXT = "#17181C";
@@ -983,7 +985,16 @@ async function handle(msg, sender) {
   }
 }
 
+// Discovery recorder messages live in a separate listener so this switch
+// never sees them (it would answer "unknown message" and race the real one).
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!msg || (msg.type !== MSG.DISCOVERY && msg.type !== MSG.TAB_READY)) return false;
+  handleDiscoveryMessage(msg);
+  return false;
+});
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && typeof msg.type === "string" && msg.type.startsWith("wa1:")) return false;
   handle(msg, _sender).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e) }));
   return true;
 });
