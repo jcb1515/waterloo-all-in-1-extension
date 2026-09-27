@@ -1,0 +1,23 @@
+{
+  "name": "waterloo-all-in-1",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/build.mjs --watch",
+    "test": "node --test \"test/**/*.test.js\" && npm --prefix server test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.0",
+    "esbuild": "0.28.2",
+    "linkedom": "0.18.13",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "chrono-node": "2.10.1",
+    "pdfjs-dist": "6.3.289"
+  }
+}
