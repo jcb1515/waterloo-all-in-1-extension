@@ -468,6 +468,37 @@ export function htmlOutline(doc, opts = {}) {
   return out;
 }
 
+/**
+ * Reduce a response body to its redacted shape for a discovery entry. JSON
+ * wins whenever the body actually parses — some sites serve JSON with a
+ * text/html content type. HTML bodies go through the caller's htmlShape.
+ * @param {unknown} body
+ * @param {unknown} contentType
+ * @param {string[]} [extraWords]
+ * @param {(html: string) => any} [htmlShape] returns the outline (or null)
+ */
+export function bodyShape(body, contentType, extraWords = [], htmlShape) {
+  if (typeof body !== "string" || !body) return null;
+  const t = body.trimStart();
+  const ct = String(contentType || "");
+  if (/json/i.test(ct) || t.startsWith("{") || t.startsWith("[")) {
+    try {
+      return shapeOf(JSON.parse(body), "", 0, extraWords);
+    } catch {
+      /* not really JSON — fall through */
+    }
+  }
+  if (htmlShape && /html/i.test(ct)) {
+    try {
+      const s = htmlShape(body);
+      return s === undefined ? null : s;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Small stable string hash (FNV-1a, hex) for dedupe keys. */
 export function hashString(s) {
   let h = 0x811c9dc5;

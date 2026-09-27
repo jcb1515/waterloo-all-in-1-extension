@@ -15,7 +15,7 @@
 */
 
 import { MSG, PAGE_EVENT, SITE_BY_HOST } from "../core/contract.js";
-import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./redact.js";
+import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from "./redact.js";
 
 (() => {
   const site = /** @type {Record<string, string>} */ (SITE_BY_HOST)[location.hostname];
@@ -182,24 +182,15 @@ import { normalizePath, shapeOf, htmlOutline, redactText, hashString } from "./r
 
     if (!enabled) return;
     try {
-      /** @type {any} */
-      let shape = null;
-      const ct = String(d.contentType || "");
-      if (typeof d.body === "string" && d.body) {
-        if (/json/i.test(ct)) {
-          try {
-            shape = shapeOf(JSON.parse(d.body), "", 0, redactWords);
-          } catch {
-            shape = null;
-          }
-        } else if (/html/i.test(ct)) {
-          try {
-            shape = htmlOutline(new DOMParser().parseFromString(d.body, "text/html"), outlineOpts());
-          } catch {
-            shape = null;
-          }
+      // shapeOf wins whenever the body parses as JSON, whatever the declared
+      // content type — WaterlooWorks serves JSON as text/html.
+      const shape = bodyShape(d.body, d.contentType, redactWords, (html) => {
+        try {
+          return htmlOutline(new DOMParser().parseFromString(html, "text/html"), outlineOpts());
+        } catch {
+          return null;
         }
-      }
+      });
       send({
         type: MSG.DISCOVERY,
         site,
