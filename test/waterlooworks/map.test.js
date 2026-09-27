@@ -312,10 +312,13 @@ test("coopDateItems maps the fixture: times, ranges, ids, exclusions", () => {
   assert.equal(janRun.startAt, "2027-01-22T05:00:00.000Z");
   assert.equal(janRun.endAt, "2027-01-30T05:00:00.000Z");
 
-  // Holidays/classes/exams are excluded; work-term lines stay.
+  // Holidays/classes/exams are excluded; work-term lines stay. A line that
+  // names its term ("Fall 2026 ... work term") uses it instead of the month
+  // rule — September recruiting would otherwise file it under Winter 2027.
   assert.ok(!items.some((i) => /holiday|classes|exam/i.test(i.title)));
-  const termStart = byId.get("waterlooworks:cycle:winter-2027:general:work-term");
+  const termStart = byId.get("waterlooworks:cycle:fall-2026:general:work-term");
   assert.equal(termStart.title, "Fall 2026 co-op work term starts");
+  assert.equal(termStart.meta.workTerm, "Fall 2026");
   assert.equal(termStart.allDay, true);
 
   // Two postings-open items for the same cycle collide -> "-2" suffix,

@@ -12,6 +12,7 @@ import {
   COOP_ZONE_RE,
   COOP_END_OF_DAY_RE,
   COOP_TIME_RE,
+  COOP_WORK_TERM_LINE_RE,
 } from "./selectors.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -371,7 +372,7 @@ function messageType(subject, snippet) {
  * `text` is transient (subject + body text); only the ≤300-char sentence that
  * contains each matched date is stored, in `details` and `evidence.snippet`.
  * @param {{subject?: string, sentAt?: string, text?: string, url?: string,
- *   category?: string, employer?: string}} msg
+ *   category?: string, employer?: string, origin?: "list"|"detail"}} msg
  * @param {(text: string, opts: {now: Date, termCode?: number, tz?: string}) => any[]} extractDates
  *   ctx.textDates — the shared textdates extractor
  * @param {string} nowIso
@@ -413,6 +414,7 @@ export function messageDateItems(msg, extractDates, nowIso) {
       evidence: { snippet, url: msg.url || undefined, method: "text" },
       meta: {
         messageKey: msgKey,
+        messageOrigin: msg.origin === "list" ? "list" : "detail",
         category: msg.category || undefined,
         weekdayMismatch: Boolean(hit.weekdayMismatch),
       },
@@ -440,12 +442,19 @@ const slug = (text, fallback = "general") =>
     .replace(/^-+|-+$/g, "") || fallback;
 
 /**
- * Recruiting in Sep–Dec year Y is for the Winter Y+1 work term; Jan–Apr for
- * Spring Y; May–Aug for Fall Y.
- * @param {string} date  YYYY-MM-DD
+ * An entry's work term. Lines that name their term ("Fall 2026 co-op work
+ * term starts") use the named season/year; otherwise the recruiting-month
+ * rule applies: Sep–Dec year Y is for the Winter Y+1 work term, Jan–Apr for
+ * Spring Y, May–Aug for Fall Y.
+ * @param {{date: string, text?: string}} e
  */
-function coopWorkTerm(date) {
-  const [y, m] = date.split("-").map(Number);
+function coopWorkTerm(e) {
+  const named = COOP_WORK_TERM_LINE_RE.exec(e?.text || "");
+  if (named) {
+    const season = named[1][0].toUpperCase() + named[1].slice(1).toLowerCase();
+    return `${season} ${named[2]}`;
+  }
+  const [y, m] = e.date.split("-").map(Number);
   if (m >= 9) return `Winter ${y + 1}`;
   if (m <= 4) return `Spring ${y}`;
   return `Fall ${y}`;
@@ -499,7 +508,7 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
   const runs = new Map();
   (entries || []).forEach((e, i) => {
     if (!keep(e) || coopCategory(e.text) !== "interviews") return;
-    const key = `${coopWorkTerm(e.date)}|${e.cycle || "general"}`;
+    const key = `${coopWorkTerm(e)}|${e.cycle || "general"}`;
     const run = runs.get(key);
     if (run) {
       run.min = e.date < run.min ? e.date : run.min;
@@ -543,7 +552,7 @@ export function coopDateItems(entries, { url, nowIso } = {}) {
 
   (entries || []).forEach((e, i) => {
     if (!keep(e)) return; // holidays, classes, exams — not co-op items
-    const workTerm = coopWorkTerm(e.date);
+    const workTerm = coopWorkTerm(e);
     const category = coopCategory(e.text);
     if (category === "interviews") {
       const runKey = `${workTerm}|${e.cycle || "general"}`;

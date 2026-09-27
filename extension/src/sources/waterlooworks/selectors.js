@@ -142,6 +142,13 @@ export const COOP_MONTHS = Object.freeze({
 export const COOP_APP_LIMIT_RE = /application\s+limit/i;
 /** "Match results available by end of day" -> 23:59 Toronto. */
 export const COOP_END_OF_DAY_RE = /\bby end of day\b/i;
+
+/**
+ * Lines naming their work term, e.g. "Fall 2026 co-op work term starts".
+ * These override the recruiting-month -> work-term mapping.
+ */
+export const COOP_WORK_TERM_LINE_RE =
+  /\b(fall|winter|spring)\s+(\d{4})\b[^]*?\bwork\s+term\b/i;
 /** First time phrase: "9 a.m." | "2:30 p.m." | "12 p.m." | "noon" | "midnight". */
 export const COOP_TIME_RE =
   /(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?|\bnoon\b|\bmidnight\b/i;
