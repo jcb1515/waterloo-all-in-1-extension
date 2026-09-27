@@ -1,9 +1,9 @@
-import { getSettings, setSettings } from "../src/core/store.js";
-import { applyTheme } from "../src/ui/settings-view.js";
-import { DEMO_SCRIPT, COURSES, ITEMS } from "../src/data/fixtures.js";
-import { brandMark, esc } from "../src/ui/icons.js";
-import { fmtAgo } from "../src/core/dates.js";
-import { TESTER_BUILD } from "../src/core/build.js";
+import { getSettings, setSettings } from "../core/store.js";
+import { applyTheme } from "../ui/settings-view.js";
+import { DEMO_SCRIPT, COURSES, ITEMS } from "../sources/learn/fixtures.js";
+import { brandMark, esc } from "../ui/icons.js";
+import { fmtAgo } from "../core/dates.js";
+import { TESTER_BUILD } from "../core/build.js";
 
 const APP = chrome.i18n.getMessage("appName") || "WATnow";
 const page = document.getElementById("page");

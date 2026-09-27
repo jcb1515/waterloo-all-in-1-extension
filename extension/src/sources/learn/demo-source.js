@@ -2,7 +2,7 @@
 // Demo mode is unreachable here: settings force live mode, so the catalog
 // stays empty and DemoSource is never constructed.
 
-import { startOfDay } from "../core/dates.js";
+import { startOfDay } from "../../core/dates.js";
 
 export { DEMO_SCRIPT } from "./fixtures.js";
 

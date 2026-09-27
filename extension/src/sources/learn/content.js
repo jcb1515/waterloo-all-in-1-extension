@@ -15,7 +15,7 @@
     here -> background  { type: "live:learn-page", login }  sent once per page
       load while in LIVE mode, so a panel stuck on "Sign in to Learn first"
       can try again after the student signs in.
-  See src/data/live-source.js.
+  See src/sources/learn/live-source.js.
 */
 (() => {
   const isMock = location.hostname === "localhost" || location.hostname === "127.0.0.1";

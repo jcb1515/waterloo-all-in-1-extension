@@ -1,14 +1,14 @@
 {
   "appName": {
-    "message": "WATnow",
+    "message": "Waterloo All-in-1",
     "description": "Working product name. Change it here and it updates the manifest, the side panel, the settings page and notifications."
   },
   "appDescription": {
-    "message": "All your Learn deadlines in one side panel, updated when profs move dates, with reminders before things close.",
+    "message": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
     "description": "Chrome Web Store and chrome://extensions description. 132 characters max, no dashes."
   },
   "actionTitle": {
-    "message": "Open your Learn deadlines",
+    "message": "Open Waterloo All-in-1",
     "description": "Tooltip on the toolbar icon."
   }
 }

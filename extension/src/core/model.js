@@ -5,7 +5,7 @@ import {
   addDays, bucketFor, dayDiff, endOfWeek, fmtDate, fmtDueDay, fmtLate, fmtRange, fmtShortDate,
   fmtTime, fmtUntil, sameDay, startOfWeek, HOUR,
 } from "./dates.js";
-import { CATEGORY_LABEL } from "../data/source.js";
+import { CATEGORY_LABEL } from "../sources/learn/source.js";
 
 export const BUCKETS = [
   { id: "overdue", label: "Overdue" },

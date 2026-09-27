@@ -2,14 +2,13 @@
 // keeps state, sets the toolbar badge, sends notifications and runs the demo
 // shortcuts.
 
-import { getState, setState, getSettings, getCatalog, setCatalog, emptyState, DEFAULT_SETTINGS } from "./core/store.js";
-import { buildCatalog, learnUrl } from "./data/demo-source.js";
-import { createSource } from "./data/source.js";
-import { liveBase, assignColors } from "./data/live-source.js";
-import { DEMO_SCRIPT } from "./data/fixtures.js";
-import { addDays, endOfWeek, startOfDay } from "./core/dates.js";
-import { plannedReminders, reminderCopy, movedCopy } from "./core/reminders.js";
-import { pingInstall, pingDayActive } from "./core/usage.js";
+import { getState, setState, getSettings, getCatalog, setCatalog, emptyState, DEFAULT_SETTINGS } from "../core/store.js";
+import { buildCatalog, learnUrl } from "../sources/learn/demo-source.js";
+import { createSource } from "../sources/learn/source.js";
+import { liveBase, assignColors } from "../sources/learn/live-source.js";
+import { DEMO_SCRIPT } from "../sources/learn/fixtures.js";
+import { addDays, endOfWeek, startOfDay } from "../core/dates.js";
+import { plannedReminders, reminderCopy, movedCopy } from "../core/reminders.js";
 
 const BADGE_BG = "#FFE45C";
 const BADGE_TEXT = "#17181C";
@@ -54,8 +53,7 @@ async function setup() {
   await syncLiveAlarm();
 }
 
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") pingInstall();
+chrome.runtime.onInstalled.addListener(() => {
   setup();
 });
 chrome.runtime.onStartup.addListener(() => setup().then(startupCheck));
@@ -217,7 +215,7 @@ async function syncLiveAlarm() {
   if (!existing) chrome.alarms.create(LIVE_SYNC, { delayInMinutes: 30, periodInMinutes: 30 });
 }
 
-/** Runs one GET through an open Learn tab's content script (learn-bridge.js). */
+/** Runs one GET through an open Learn tab's content script (sources/learn/content.js). */
 async function relayFetch(base, path) {
   let tabs = [];
   try {
@@ -645,8 +643,6 @@ async function notify(kind, itemId, copy, seq) {
 chrome.notifications.onClicked.addListener(async (id) => {
   const [, , itemId] = id.split("|");
   chrome.notifications.clear(id);
-  // Acting on a reminder is using WATnow, even if the panel never opens.
-  pingDayActive("reminder");
   if (itemId) await openItem(itemId);
 });
 

@@ -1,11 +1,10 @@
-import { getState, getSettings, getFilter, setFilter, emptyState } from "../src/core/store.js";
-import { buildModel } from "../src/core/model.js";
-import { fmtDate, fmtTime, sameDay } from "../src/core/dates.js";
-import { icon, brandMark, esc, CATEGORY_ICON } from "../src/ui/icons.js";
-import { mountSettings, applyTheme } from "../src/ui/settings-view.js";
-import { liveBase } from "../src/data/live-source.js";
-import { TESTER_BUILD } from "../src/core/build.js";
-import { pingPanelOpen } from "../src/core/usage.js";
+import { getState, getSettings, getFilter, setFilter, emptyState } from "../core/store.js";
+import { buildModel } from "../core/model.js";
+import { fmtDate, fmtTime, sameDay } from "../core/dates.js";
+import { icon, brandMark, esc, CATEGORY_ICON } from "../ui/icons.js";
+import { mountSettings, applyTheme } from "../ui/settings-view.js";
+import { liveBase } from "../sources/learn/live-source.js";
+import { TESTER_BUILD } from "../core/build.js";
 
 const APP = chrome.i18n.getMessage("appName") || "WATnow";
 const PREVIEW = new URLSearchParams(location.search).get("preview");
@@ -726,7 +725,6 @@ setInterval(() => {
   lastSeq = state.seq || 0;
   await document.fonts.ready.catch(() => {});
   route();
-  if (!PREVIEW) pingPanelOpen();
   if (!PREVIEW && (state.scan.status === "idle" || state.scan.status === "running") && !state.deletedAt) send("panel:opened");
   // The last check couldn't read Learn: try again now that the student is looking.
   if (!PREVIEW && state.scan.status === "done" && state.stale) send("panel:check");

@@ -40,7 +40,7 @@ export function icon(name, size = 20, cls = "") {
 
 /** The app logo for the panel header and the settings page. */
 export function brandMark(size = 22) {
-  const src = typeof chrome !== "undefined" && chrome.runtime ? chrome.runtime.getURL("icons/mark.png") : "../icons/mark.png";
+  const src = typeof chrome !== "undefined" && chrome.runtime ? chrome.runtime.getURL("icons/mark.png") : "../../icons/mark.png";
   return `<img class="brand-mark" src="${src}" width="${size}" height="${size}" alt="" aria-hidden="true">`;
 }
 
