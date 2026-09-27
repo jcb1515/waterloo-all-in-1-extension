@@ -53,6 +53,8 @@ export function sourceStatus(adapter, st, stage, now) {
  * @param {Record<string, any>} sourceState
  * @param {(id: string) => "live"|"soon"} stageFor
  * @param {Date} now
+ * @returns {{label: string, tone: "ok"|"warn"|"muted", short: string}}
+ *   `short` is the compact pill text shown under 420 px (a status dot + it).
  */
 export function storeSyncSummary(adapters, sourceState, stageFor, now) {
   let newest = -Infinity;
@@ -65,9 +67,14 @@ export function storeSyncSummary(adapters, sourceState, stageFor, now) {
     const s = sourceStatus(a, st, "live", now);
     if (s.key === "error" || s.key === "signed-out") trouble = true;
   }
-  if (trouble) return { label: "Needs attention", tone: "warn" };
-  if (newest === -Infinity) return { label: "Not synced yet", tone: "muted" };
-  return { label: `Synced ${relAgo(now.getTime() - newest)}`, tone: "ok" };
+  if (trouble) return { label: "Needs attention", tone: "warn", short: "!" };
+  if (newest === -Infinity) return { label: "Not synced yet", tone: "muted", short: "—" };
+  const ago = relAgo(now.getTime() - newest);
+  return {
+    label: `Synced ${ago}`,
+    tone: "ok",
+    short: ago === "just now" ? "now" : ago.replace(/ ago$/, ""),
+  };
 }
 
 /** @param {number} ms */

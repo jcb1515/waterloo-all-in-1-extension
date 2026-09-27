@@ -280,7 +280,7 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
           />
         </div>
         <span class="sheet-label">Snooze</span>
-        <div class="chip-scroll">
+        <div class="chip-scroll chip-wrap">
           {SNOOZE_PRESETS.map(([key, label]) => (
             <button
               key={key}

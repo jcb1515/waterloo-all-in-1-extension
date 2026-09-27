@@ -222,6 +222,43 @@ a:hover {
   margin: var(--sp-1) 0 0;
 }
 
+/* checkbox — tokenised box, gold check (switch toggles keep their own input) */
+input[type="checkbox"]:not(.switch *) {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--text-3);
+  border-radius: 5px;
+  background-color: var(--surface);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  cursor: pointer;
+  vertical-align: -3px;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+input[type="checkbox"]:not(.switch *):hover {
+  border-color: var(--gold-strong);
+}
+input[type="checkbox"]:not(.switch *):checked {
+  background-color: var(--gold);
+  border-color: var(--gold-strong);
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12"><path d="M2.4 6.3l2.4 2.3 4.8-5.2" fill="none" stroke="%231f1a12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+}
+input[type="checkbox"]:not(.switch *):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+input[type="checkbox"]:not(.switch *):disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* toggle switch */
 .switch {
   position: relative;

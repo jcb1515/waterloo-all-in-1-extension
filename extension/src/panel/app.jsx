@@ -223,9 +223,14 @@ export function App() {
               type="button"
               class={`sync-pill tone-${summary.tone}`}
               onClick={() => setOverlay("sources")}
-              title="Source status"
+              title={syncing ? "Syncing…" : summary.label}
+              aria-label={`Sources — ${syncing ? "Syncing…" : summary.label}`}
             >
-              {syncing ? "Syncing…" : summary.label}
+              <span class="sync-dot" aria-hidden="true" />
+              <span class="sync-pill-text">{syncing ? "Syncing…" : summary.label}</span>
+              <span class="sync-pill-short" aria-hidden="true">
+                {syncing ? "…" : summary.short}
+              </span>
             </button>
           )}
           <button

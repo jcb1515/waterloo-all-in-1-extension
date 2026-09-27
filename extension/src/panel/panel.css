@@ -32,6 +32,7 @@
   display: flex;
   flex-direction: column;
   line-height: 1.1;
+  white-space: nowrap;
 }
 .brand-top {
   font-size: var(--fs-xs);
@@ -43,6 +44,7 @@
   font-size: var(--fs-lg);
   font-weight: var(--w-semibold);
   color: var(--text);
+  white-space: nowrap;
 }
 
 .header-actions {
@@ -53,6 +55,9 @@
 
 .sync-pill {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--surface-2);
@@ -68,6 +73,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.sync-dot {
+  display: none;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sync-pill-short {
+  display: none;
+}
 .sync-pill.tone-ok {
   color: var(--ok);
   background: var(--ok-soft);
@@ -77,6 +93,36 @@
   color: var(--warn);
   background: var(--warn-soft);
   border-color: transparent;
+}
+
+.panel-header .btn-icon {
+  width: 30px;
+  height: 30px;
+}
+
+/* Compact header: the wordmark alone carries the brand under 440 px. */
+@media (max-width: 439px) {
+  .brand-top {
+    display: none;
+  }
+}
+
+/* Compact sync pill: a status dot + the short age under 420 px. */
+@media (max-width: 419px) {
+  .sync-pill {
+    padding: 4px 8px;
+    margin-right: var(--sp-1);
+    max-width: none;
+  }
+  .sync-pill-text {
+    display: none;
+  }
+  .sync-dot {
+    display: inline-block;
+  }
+  .sync-pill-short {
+    display: inline;
+  }
 }
 
 /* ---------------------------------- tabs ----------------------------------- */
@@ -205,6 +251,10 @@
 }
 .chip-scroll::-webkit-scrollbar {
   display: none;
+}
+.chip-scroll.chip-wrap {
+  flex-wrap: wrap;
+  overflow-x: visible;
 }
 .filter-chip {
   appearance: none;
