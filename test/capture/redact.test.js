@@ -209,3 +209,63 @@ test("htmlOutline full mode samples table cells (WaterlooWorks-like)", () => {
   const json = JSON.stringify(out);
   assert.ok(!json.includes("Contoso") && !json.includes("Initech"));
 });
+
+test("normalizePath replaces path segments holding an email address", () => {
+  assert.equal(
+    normalizePath("https://mail.x/d2l/m/SMTP:jdoe@uwaterloo.ca"),
+    "mail.x/d2l/m/{email}"
+  );
+  // %40 must be decoded before the email check.
+  assert.equal(
+    normalizePath("https://outlook.office.com/users/careers%40uwaterloo.ca"),
+    "outlook.office.com/users/{email}"
+  );
+  assert.equal(
+    normalizePath("https://outlook.office.com/users('OID:abc@tenant.example')"),
+    "outlook.office.com/{email}"
+  );
+  // Email inside a query KEY is collapsed too (values are dropped anyway).
+  assert.equal(
+    normalizePath("https://x/find?jdoe@uwaterloo.ca=1&kind=mail"),
+    "x/find?kind&{email}"
+  );
+});
+
+test("normalizePath redacts the configured words inside paths", () => {
+  assert.equal(
+    normalizePath("https://discord.com/u/JSmith87/files", ["jsmith87"]),
+    "discord.com/u/<redacted>/files"
+  );
+});
+
+test("normalizePath treats %-encoded opaque tokens as ids", () => {
+  // An Outlook message id ends in %3D (an encoded '=') — the token class
+  // accepts % and = so the whole segment becomes {id}.
+  assert.equal(
+    normalizePath("https://outlook.office.com/mail/inbox/id/AAQkAGI1NjAwZjY4LWEzN2ItNGY0Mi1hOWVl%3D"),
+    "outlook.office.com/mail/inbox/id/{id}"
+  );
+});
+
+test("a query-string-shaped hash keeps sorted keys only", () => {
+  assert.equal(
+    normalizePath("https://outlook.office.com/mail/#parent=xyz&rpctoken=123"),
+    "outlook.office.com/mail/#parent&rpctoken"
+  );
+});
+
+test("shapeOf collapses id-looking object keys into {id}", () => {
+  const shape = shapeOf({
+    "123456789012345678": { text: "hello there", pinned: false },
+    "987654321098765432": { text: "another message body", pinned: true, extra: 1 },
+    "550e8400-e29b-41d4-a716-446655440000": { text: "uuid keyed" },
+    channel: { name: "general" },
+  });
+  assert.equal(shape["123456789012345678"], undefined, "raw snowflake key is gone");
+  assert.equal(shape["{id}#count"], 3);
+  const merged = shape["{id}"];
+  assert.equal(merged.text, "<string 11>", "values are still shaped (first sample wins)");
+  assert.equal(merged["pinned?"], false, "not on every sampled entry -> ? marker");
+  assert.equal(merged["extra?"], "<number>", "non-shared keys get the ? marker");
+  assert.deepEqual(shape.channel, { name: "<string 7>" });
+});
