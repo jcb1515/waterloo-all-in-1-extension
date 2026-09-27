@@ -188,12 +188,17 @@ async function shots() {
       JSON.stringify({ takenAt: new Date().toISOString(), shots: SHOTS }, null, 2)
     );
     cdp.close();
-  } finally {
-    // Kill the whole tree — msedge.exe re-spawns children, a bare kill()
-    // leaves the headless browser and its debug port behind.
-    if (edge.pid) {
-      spawn("taskkill", ["/PID", String(edge.pid), "/T", "/F"], { stdio: "ignore" });
+    // Politely shut the whole headless browser down — msedge.exe is a stub
+    // launcher, so process-tree kills can't reach the real browser.
+    try {
+      const ver = await (await fetch(`${CDP}/json/version`)).json();
+      const browser = connect(ver.webSocketDebuggerUrl);
+      await browser.ready;
+      await browser.send("Browser.close");
+    } catch {
+      /* already gone */
     }
+  } finally {
     edge.kill();
     server.close();
     rm(profile, { recursive: true, force: true }).catch(() => {});
