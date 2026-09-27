@@ -7,6 +7,9 @@
 */
 
 import { normCourseCode } from "../../core/contract.js";
+import { effectiveItem, isVisible } from "../../core/effective.js";
+import { findClashes } from "../../core/clashes.js";
+import { priorityOf } from "../../core/priority.js";
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -102,23 +105,19 @@ const anchor = (/** @type {any} */ item) => item.dueAt || item.startAt || null;
 const isClassish = (/** @type {any} */ i) =>
   i.type === "class" || i.type === "tutorial" || (i.type === "lab" && !!i.startAt);
 
-const doneState = (/** @type {any} */ item, /** @type {any} */ us) =>
-  !!(us && us.done) || item.status === "done" || item.status === "submitted";
+const doneState = (/** @type {any} */ item) =>
+  item.status === "done" || item.status === "submitted";
 
 /**
- * @param {any} item
- * @param {any} us
+ * Agenda-specific visibility on top of the shared isVisible: term dates and
+ * cancelled items never list, even when accepted.
+ * @param {any} eff effective item
  * @param {Date} now
  */
-function visible(item, us, now) {
-  if (!item || item.type === "term-date") return false;
-  if (item.status === "cancelled") return false;
-  if (item.review === "pending" || item.review === "dismissed") return false;
-  if (us) {
-    if (us.hidden) return false;
-    if (us.snoozedUntil && Date.parse(us.snoozedUntil) > now.getTime()) return false;
-  }
-  return true;
+function agendaVisible(eff, now) {
+  if (!eff || eff.type === "term-date") return false;
+  if (eff.status === "cancelled") return false;
+  return isVisible(eff, now);
 }
 
 /**
@@ -182,7 +181,8 @@ export function rowView(item, now) {
  * @param {string} [p.filter]                 "all"|deadlines|classes|exams|meetings|coop
  * @param {string|null} [p.org]               restrict to one org (normalised compare)
  * @param {string} [p.q]                      free-text match on title/org/location
- * @returns {{summary: any, nextClass: any, groups: any[]}}
+ * @returns {{summary: any, nextClass: any, nextUp: any[], clashes: any[],
+ *   clashById: Map<string, any[]>, groups: any[]}}
  */
 export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, q = "" }) {
   const today = startOfDay(now);
@@ -195,8 +195,21 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   const next7End = new Date(today.getTime() + 7 * DAY);
 
   const showClasses = (settings.agenda && settings.agenda.showClasses) || "today";
+  const acceptPending = !!(settings.review && settings.review.showPending);
   const normOrg = org ? normCourseCode(org) : null;
   const needle = q.trim().toLowerCase();
+
+  // Clashes are computed over effective items once, for badges + summary.
+  const clashes = findClashes(items, userState, now, { horizonDays: 7, acceptPending });
+  /** @type {Map<string, any[]>} */
+  const clashById = new Map();
+  for (const c of clashes) {
+    for (const id of c.itemIds) {
+      const list = clashById.get(id) || [];
+      list.push(c);
+      clashById.set(id, list);
+    }
+  }
 
   const buckets = new Map(); // groupId -> rows
   const push = (id, item) => {
@@ -213,16 +226,21 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   /** @type {any} */
   let nextClass = null;
   const nextClassLimit = tomorrow.getTime() + DAY;
+  /** Per-day due counts (non-classish), for the "Busy <day>" summary line. */
+  const dayCounts = new Map();
+  /** Top open items by anchor for the "Next up" line. */
+  const nextUp = [];
 
   const sorted = Object.values(items)
+    .map((it) => (it ? effectiveItem(it, userState[it.id], { acceptPending }) : it))
     .filter((it) => it && anchor(it))
     .sort((a, b) => Date.parse(anchor(a)) - Date.parse(anchor(b)));
 
   for (const item of /** @type {any[]} */ (sorted)) {
-    const us = userState[item.id];
-    if (!visible(item, us, now)) continue;
+    if (!agendaVisible(item, now)) continue;
 
-    if (doneState(item, us)) {
+    if (doneState(item)) {
+      const us = userState[item.id];
       const doneAt = us && us.doneAt ? Date.parse(us.doneAt) : null;
       if (doneAt === null || now.getTime() - doneAt <= DONE_RECENT_MS) doneRecent.push(item);
       continue;
@@ -234,8 +252,11 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
       !`${item.title} ${item.org || ""} ${item.location || ""}`.toLowerCase().includes(needle)
     )
       continue;
-    if (!inFilter(item, filter)) continue;
-    if (filter !== "classes" && isClassish(item)) {
+    if (filter === "clash") {
+      if (!clashById.has(item.id)) continue;
+    } else if (!inFilter(item, filter)) continue;
+    // The clash filter must show both sides, class visibility settings aside.
+    if (filter !== "classes" && filter !== "clash" && isClassish(item)) {
       if (showClasses === "none") continue;
       if (showClasses === "today") {
         const aMs = Date.parse(anchor(item));
@@ -262,7 +283,17 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     if (!classish) {
       if (aMs < today.getTime()) overdueCount++;
       else if (aMs < tomorrow.getTime()) dueToday++;
-      if (aMs >= today.getTime() && aMs < weekEnd.getTime()) dueWeek++;
+      if (aMs >= today.getTime() && aMs < weekEnd.getTime()) {
+        dueWeek++;
+        const dk = new Date(aMs).toDateString();
+        dayCounts.set(dk, (dayCounts.get(dk) || 0) + 1);
+      }
+    }
+
+    // "Next up": open, high/normal priority, anchor in the future.
+    const aPri = priorityOf(item, now);
+    if (aPri !== "low" && aMs >= now.getTime()) {
+      nextUp.push(item);
     }
 
     if (aMs < today.getTime()) push("overdue", item);
@@ -320,13 +351,40 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     });
   }
 
+  // The busiest upcoming day (>= 3 due) earns a "Busy Thursday" line.
+  /** @type {{label: string, count: number} | null} */
+  let busyDay = null;
+  for (const [dk, n] of dayCounts) {
+    if (n >= 3 && (!busyDay || n > busyDay.count)) {
+      busyDay = { label: fmtDay(new Date(dk)), count: n };
+    }
+  }
+  const clashCount = clashes.filter((c) => c.kind === "overlap").length;
+
+  nextUp.sort((a, b) => {
+    const pa = priorityOf(a, now) === "high" ? 0 : 1;
+    const pb = priorityOf(b, now) === "high" ? 0 : 1;
+    return pa - pb || Date.parse(anchor(a)) - Date.parse(anchor(b));
+  });
+
   return {
     summary: {
       dateLabel: fmtLongDay(now),
       dueToday,
       dueWeek,
       overdue: overdueCount,
+      clashCount,
+      busyDay,
     },
+    nextUp: nextUp.slice(0, 3).map((it) => ({
+      id: it.id,
+      title: it.title,
+      org: it.org || "",
+      anchor: anchor(it),
+      priority: priorityOf(it, now),
+    })),
+    clashes,
+    clashById,
     nextClass: nextClass
       ? {
           id: nextClass.id,

@@ -458,3 +458,226 @@ html[data-density="compact"] .item-title {
   align-self: center;
   color: var(--text-2);
 }
+
+/* --------------------------- header icon badges --------------------------- */
+
+.btn-icon.has-badge {
+  position: relative;
+}
+.icon-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--gold);
+  color: var(--gold-ink, #16181d);
+  font-size: 9px;
+  font-weight: var(--w-bold);
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+.back-btn {
+  margin-right: var(--sp-1);
+}
+
+/* ------------------------------ summary extras ----------------------------- */
+
+.summary-extra,
+.summary-nextup {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.summary-clash {
+  color: var(--danger);
+  font-size: var(--fs-xs);
+}
+
+/* ------------------------------ review queue ------------------------------- */
+
+.review-card {
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  margin-bottom: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.review-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--w-semibold);
+  font-size: var(--fs-sm);
+}
+.review-when {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.review-evidence {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  border-left: 2px solid var(--border-strong);
+  padding-left: var(--sp-2);
+}
+.review-evidence mark {
+  background: var(--gold-soft);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.review-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.review-acts {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.review-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.review-edit-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.review-allday {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* --------------------------------- updates --------------------------------- */
+
+.updates-bar {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+  margin-bottom: var(--sp-2);
+}
+.update-day-label {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.update-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+.update-row + .update-row {
+  border-top: 1px solid var(--border);
+}
+.update-icon {
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.update-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.update-text {
+  font-size: var(--fs-sm);
+}
+.update-moved {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.update-moved s {
+  color: var(--text-3);
+}
+.update-side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* --------------------------------- priority -------------------------------- */
+
+.pri-high {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--gold-ink, #16181d);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+}
+
+/* ------------------------------ clash badges ------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: var(--w-semibold, 600);
+  letter-spacing: 0.01em;
+}
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.badge-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ----------------------------------- toast ---------------------------------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-4);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--text);
+  color: var(--surface);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+}
+.toast-act {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--gold);
+  font-weight: var(--w-semibold);
+  cursor: pointer;
+}

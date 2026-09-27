@@ -26,14 +26,23 @@ export const TYPE_LABELS = {
 const NO_CHECK = new Set(["class", "tutorial", "exam", "term-date"]);
 
 /**
- * @param {{item: any, now: Date, actions: any, done?: boolean}} props
+ * @param {{item: any, now: Date, actions: any, done?: boolean,
+ *   clashes?: any[], items?: Record<string, any>, priority?: string}} props
  */
-export function ItemRow({ item, now, actions, done }) {
+export function ItemRow({ item, now, actions, done, clashes, items, priority }) {
   const v = rowView(item, now);
   const style = orgStyle(item.org) || {};
   const Icon = typeIcon(item.type);
   const dimmed = done || item.status === "done" || item.status === "submitted";
   const checkable = !NO_CHECK.has(item.type);
+  const clash = clashes && clashes.length ? clashes[0] : null;
+  const clashNames = clash
+    ? clash.itemIds
+        .filter((id) => id !== item.id)
+        .map((id) => (items && items[id] && items[id].title) || "")
+        .filter(Boolean)
+        .join(", ")
+    : "";
 
   const open = () => {
     if (item.url) actions.open(item.url);
@@ -74,7 +83,12 @@ export function ItemRow({ item, now, actions, done }) {
         <Icon size={17} />
       </span>
       <span class="item-main">
-        <span class="item-title">{item.title}</span>
+        <span class="item-title">
+          {priority === "high" && !dimmed ? (
+            <span class="pri-high" title="High priority" aria-label="High priority">!</span>
+          ) : null}
+          {item.title}
+        </span>
         <span class="item-meta">
           {item.org ? <span class="chip chip-org">{item.org}</span> : null}
           <span class="item-type">{TYPE_LABELS[item.type] || item.type}</span>
@@ -92,6 +106,14 @@ export function ItemRow({ item, now, actions, done }) {
           {v.movedFrom ? (
             <span class="badge badge-warn" title="Rescheduled">
               Moved · was <s>{v.movedFrom}</s>
+            </span>
+          ) : null}
+          {clash ? (
+            <span
+              class={`badge ${clash.severity === "severe" ? "badge-danger" : "badge-warn"}`}
+              title={clashNames ? `Overlaps ${clashNames}` : "Overlaps another item"}
+            >
+              Clash
             </span>
           ) : null}
         </span>

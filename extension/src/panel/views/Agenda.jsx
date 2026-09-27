@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
+import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../components/ItemRow.jsx";
 import { normCourseCode } from "../../core/contract.js";
@@ -111,6 +112,26 @@ export function Agenda({ state, actions, now, onGoSources }) {
           {s.dueToday} due today · {s.dueWeek} this week
           {s.overdue ? <span class="summary-overdue"> · {s.overdue} overdue</span> : null}
         </p>
+        {s.clashCount || s.busyDay ? (
+          <p class="summary-extra">
+            {s.clashCount ? (
+              <button
+                type="button"
+                class="linklike summary-clash"
+                onClick={() => setFilter("clash")}
+              >
+                {s.clashCount} clash{s.clashCount === 1 ? "" : "es"} this week
+              </button>
+            ) : null}
+            {s.clashCount && s.busyDay ? " · " : null}
+            {s.busyDay ? <span>Busy {s.busyDay.label.split(", ")[0]}: {s.busyDay.count} due</span> : null}
+          </p>
+        ) : null}
+        {agenda.nextUp && agenda.nextUp.length ? (
+          <p class="summary-nextup">
+            Next up: {agenda.nextUp.map((u) => u.title).join(" · ")}
+          </p>
+        ) : null}
         {agenda.nextClass ? (
           <div
             class="next-class"
@@ -158,6 +179,16 @@ export function Agenda({ state, actions, now, onGoSources }) {
           ) : null}
         </div>
         <div class="chip-scroll" role="group" aria-label="Type filter">
+          {s.clashCount || filter === "clash" ? (
+            <button
+              type="button"
+              class={`chip filter-chip${filter === "clash" ? " active" : ""}`}
+              aria-pressed={filter === "clash"}
+              onClick={() => setFilter(filter === "clash" ? "all" : "clash")}
+            >
+              Clashes
+            </button>
+          ) : null}
           {FILTERS.map(([id, label]) => (
             <button
               key={id}
@@ -187,7 +218,16 @@ export function Agenda({ state, actions, now, onGoSources }) {
           {(collapsed[g.id] ?? g.collapsedByDefault) ? null : (
             <div class="card row-card" role="list">
               {g.rows.map((item) => (
-                <ItemRow key={item.id} item={item} now={now} actions={actions} done={g.done} />
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  now={now}
+                  actions={actions}
+                  done={g.done}
+                  clashes={agenda.clashById.get(item.id)}
+                  items={state.items}
+                  priority={rowPriority(item, now)}
+                />
               ))}
             </div>
           )}
@@ -195,6 +235,11 @@ export function Agenda({ state, actions, now, onGoSources }) {
       ))}
     </div>
   );
+}
+
+/** Row priority — rows already carry effective fields. */
+function rowPriority(item, now) {
+  return priorityOf(item, now);
 }
 
 /** Open the options page's calendar section. */
