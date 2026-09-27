@@ -99,6 +99,31 @@ test("assigned-to-me + task verb -> task; undated -> +7d follow-up", () => {
   assert.match(item.details || "", /No due date/);
 });
 
+test("items carry meta.facts (Server/Channel/Assigned/Due)", () => {
+  const fmap = (it) =>
+    Object.fromEntries((it.meta.facts || []).map((f) => [f.label, f.value]));
+  const [task] = candidatesForMessage(
+    msg("can you route the new connector footprints", {
+      mentions: [{ id: "42" }],
+    }),
+    O()
+  );
+  const f = fmap(task);
+  assert.equal(f.Server, "Robotics Club");
+  assert.equal(f.Channel, "#elec-general");
+  assert.equal(f["Assigned to you"], "Yes");
+  assert.equal(f.Due, "No date given (follow-up in 7 days)");
+  const [meeting] = candidatesForMessage(
+    msg(`design review at <t:${TS_OCT8_6PM}>`),
+    O()
+  );
+  const g = fmap(meeting);
+  assert.equal(g.Server, "Robotics Club");
+  assert.equal(g.Channel, "#elec-general");
+  assert.equal(g["Assigned to you"], undefined);
+  assert.equal(g.Due, undefined);
+});
+
 test("no trigger and no <t:> -> no item", () => {
   assert.equal(candidatesForMessage(msg("see you October 10"), O()).length, 0);
 });

@@ -34,10 +34,20 @@ test("three weekly occurrences -> one suggestion, DST-crossing stays 18:00 Toron
     occ("2026-11-03T23:00:00.000Z", "2026-11-04T00:00:00.000Z"),
     occ("2026-11-10T23:00:00.000Z", "2026-11-11T00:00:00.000Z"),
   ];
-  const [s] = recurringSuggestions(log, { nowMs: NOW_MS, nowIso: NOW_ISO });
+  const [s] = recurringSuggestions(log, {
+    nowMs: NOW_MS,
+    nowIso: NOW_ISO,
+    teamOf: () => "Robotics Club",
+  });
   assert.equal(s.type, "meeting");
   assert.equal(s.category, "recurring");
   assert.equal(s.title, "Design review (weekly)");
+  const f = Object.fromEntries(
+    (s.meta.facts || []).map((x) => [x.label, x.value])
+  );
+  assert.equal(f.Server, "Robotics Club");
+  assert.equal(f.Pattern, "Weekly, Tue 18:00");
+  assert.equal(f.Seen, "3 weeks");
   // Next Tuesday >= Oct 30 is Nov 3 — 18:00 EST = 23:00Z
   assert.equal(s.startAt, "2026-11-03T23:00:00.000Z");
   assert.equal(s.endAt, "2026-11-04T00:00:00.000Z"); // median 60 min

@@ -6,7 +6,7 @@
 import { itemId } from "../../core/contract.js";
 import { zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { parseLooseTime } from "./time.js";
-import { SOURCE, SCOPE } from "./messages.js";
+import { SOURCE, SCOPE, factsOf } from "./messages.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 
@@ -195,6 +195,14 @@ export function recurringSuggestions(meetingLog, o) {
           fromText: g.fromText || undefined,
           occurrences: g.occurrences.slice(-10),
         },
+        facts: factsOf([
+          ["Server", o.teamOf ? o.teamOf(g.guildId) : undefined],
+          [
+            "Pattern",
+            `Weekly, ${DAY3[g.weekday][0].toUpperCase()}${DAY3[g.weekday].slice(1)} ${String(g.h).padStart(2, "0")}:${String(g.mi).padStart(2, "0")}`,
+          ],
+          ["Seen", g.weeks.size ? `${g.weeks.size} weeks` : undefined],
+        ]),
       },
     });
   }
