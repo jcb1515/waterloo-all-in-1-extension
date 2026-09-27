@@ -88,7 +88,10 @@ const shared = {
   outdir: DIST,
   outbase: SRC,
   logLevel: "info",
-  define: { __WA1_DEV_PROFILE__: JSON.stringify(devProfile ?? null) },
+  define: {
+    __WA1_DEV_PROFILE__: JSON.stringify(devProfile ?? null),
+    __WA1_CALENDAR_SERVICE_URL__: JSON.stringify(process.env.WA1_CALENDAR_SERVICE_URL || ""),
+  },
 };
 
 const configs = [

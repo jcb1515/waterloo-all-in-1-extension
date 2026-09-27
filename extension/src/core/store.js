@@ -16,6 +16,14 @@
     updates       Update[] ring buffer, newest first, max 300
     userState     Record<canonicalId, { done?, doneAt?, notes?, subtasks?,
                     estimateMin?, snoozedUntil?, hidden?, review? }>
+    calendarFeed  runtime state for the feed publish client:
+                  { serviceUrl, feedId, updateToken, feedUrl, groupFeeds,
+                    expiresAt, lastPublishedAt, lastPayloadHash, eventCount,
+                    accepted, skipped, status, error, needsResubscribe,
+                    retryAt, failures }
+                  The updateToken and feed URLs are secrets — never log them.
+    outlineFiles  imported outline pages:
+                  [{id, name, kind: "html"|"pdf", size, addedAt, html?|base64?}]
     log:<source>  the last 100 {at, message} lines per source
 
   Every write goes through one promise queue so writers can't interleave.
@@ -51,6 +59,13 @@ export const DEFAULT_SETTINGS = {
     },
   },
   agenda: { showClasses: "today" },
+  calendar: {
+    enabled: false,
+    serviceUrl: "",
+    split: false,
+    include: { classes: true, tentative: true, completed: true, termDates: true },
+    alarms: false,
+  },
 };
 
 /*
@@ -61,6 +76,15 @@ export const DEFAULT_SETTINGS = {
 */
 const DEV_PROFILE =
   typeof __WA1_DEV_PROFILE__ === "undefined" ? null : __WA1_DEV_PROFILE__;
+
+/*
+  Build-time calendar service URL: a released build can ship a hosted feed
+  server (set WA1_CALENDAR_SERVICE_URL in the environment when building), the
+  same way gurshh's calendar-service-config.js worked. It overrides the dev
+  profile's calendar.serviceUrl; the user's saved setting still wins.
+*/
+const BUILD_SERVICE_URL =
+  typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
 
 /**
  * `defaults` deep-merged with a developer profile: plain objects merge,
@@ -115,7 +139,11 @@ function deepMerge(base, patch) {
  * @param {any} saved raw wa1Settings value
  */
 export function resolveSettings(saved) {
-  return deepMerge(withDevProfile(DEFAULT_SETTINGS, DEV_PROFILE), isObj(saved) ? saved : {});
+  let base = withDevProfile(DEFAULT_SETTINGS, DEV_PROFILE);
+  if (BUILD_SERVICE_URL) {
+    base = deepMerge(base, { calendar: { serviceUrl: BUILD_SERVICE_URL } });
+  }
+  return deepMerge(base, isObj(saved) ? saved : {});
 }
 
 /** Settings deep-merged over DEFAULT_SETTINGS (+ dev profile). */
