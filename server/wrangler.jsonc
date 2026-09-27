@@ -1,5 +1,5 @@
 {
-  "name": "uwlearn-calendar-feed",
+  "name": "waterloo-all-in-1-feed",
   "main": "src/worker.js",
   "compatibility_date": "2026-09-01",
   "triggers": {
@@ -8,8 +8,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "uwlearn-calendar-feed",
-      "database_id": "ea276d8b-ae7b-4a36-b7f0-321510d810c9",
+      "database_name": "waterloo-all-in-1-feed",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
   ]
