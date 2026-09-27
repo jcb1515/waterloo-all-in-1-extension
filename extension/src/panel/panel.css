@@ -543,7 +543,7 @@ html[data-density="compact"] .item-title {
   padding: 0 3px;
   border-radius: 7px;
   background: var(--gold);
-  color: var(--gold-ink, #16181d);
+  color: var(--on-gold, #15171c);
   font-size: 9px;
   font-weight: var(--w-bold);
   line-height: 14px;
@@ -700,7 +700,7 @@ html[data-density="compact"] .item-title {
   margin-right: 4px;
   border-radius: 50%;
   background: var(--gold);
-  color: var(--gold-ink, #16181d);
+  color: var(--on-gold, #15171c);
   font-size: 10px;
   font-weight: var(--w-bold);
 }
