@@ -222,6 +222,76 @@ test("list extract: not-interested series -> one pending item only", () => {
   assert.equal(wat[0].location, undefined);
 });
 
+test("real modal wording: 'View future events' pager, TBD location", () => {
+  // Exact line text from a live list-modal screenshot (placeholder names).
+  const cards = [
+    {
+      lines: [
+        L("Tue Sep 29th · 5:30 PM"),
+        L("Repeats every Tuesday"),
+        L("30"),
+        L("Weekly Digital Meeting", { heading: true }),
+        L("(End time depends on your subteam)"),
+        L("E5-4128", { icon: true }),
+        L("…"),
+        L("Copy Link"),
+        L("Interested"),
+        L("Events in series"),
+        L("Tue Oct 6th · 5:30 PM"),
+        L("Tue Oct 13th · 5:30 PM"),
+        L("Tue Oct 20th · 5:30 PM"),
+        L("View future events"),
+      ],
+      interested: true,
+      eventRef: null,
+    },
+    {
+      lines: [
+        L("Thu Oct 1st · 7:00 PM"),
+        L("Repeats every Thursday"),
+        L("8"),
+        L("Analog Team Meeting", { heading: true }),
+        L("Location TBD"),
+        L("TBD", { icon: true }),
+        L("…"),
+        L("Copy Link"),
+        L("Interested"),
+      ],
+      interested: false,
+      eventRef: null,
+    },
+  ];
+  const items = parseEventsExtract(
+    { ...listExtract, cards },
+    { now: NOW, nowIso: AT, team: "Robotics Club" }
+  );
+
+  const dig = items.filter((i) => i.title === "Weekly Digital Meeting");
+  // Listed: Sep 29 + Oct 6/13/20 (exact); generated: Oct 27 + Nov 3.
+  assert.equal(dig.length, 6);
+  assert.equal(dig[0].startAt, "2026-09-29T21:30:00.000Z"); // 5:30 PM EDT
+  assert.equal(dig[0].location, "E5-4128");
+  assert.equal(dig[0].details, "(End time depends on your subteam)");
+  assert.ok(dig.every((i) => i.review === "auto"));
+  assert.equal(dig.filter((i) => i.meta.generated).length, 2);
+  // The pager link is UI chrome — it never lands in any field.
+  for (const i of items) {
+    assert.ok(!/view (future|past) events/i.test(i.title || ""));
+    assert.ok(!/view (future|past) events/i.test(i.details || ""));
+    assert.ok(!/view (future|past) events/i.test(i.location || ""));
+  }
+
+  const analog = items.filter((i) => i.title === "Analog Team Meeting");
+  assert.equal(analog.length, 1);
+  assert.equal(analog[0].startAt, "2026-10-01T23:00:00.000Z"); // 7 PM EDT
+  assert.equal(analog[0].review, "pending");
+  // "TBD" under the pin icon is no location; the description's own
+  // "Location TBD" line stays in details untouched.
+  assert.equal(analog[0].location, undefined);
+  assert.match(analog[0].details || "", /Location TBD/);
+  assert.ok(!analog[0].meta.facts?.some((f) => f.label === "Where"));
+});
+
 const DETAIL_CARDS = [
   {
     lines: [
