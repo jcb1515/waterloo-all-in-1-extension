@@ -11,9 +11,12 @@
     background -> here  { type: MSG.RELAY_FETCH, path, init }  runs a GET on
       this page's own origin, which carries the Learn session cookie, and
       returns a contract FetchResult. Only /d2l/api/ paths are allowed.
+      init.binary answers chunked base64 (10 MB cap -> error "too-large");
+      bodies are read only when res.ok.
   See src/sources/learn/live-source.js.
 */
 import { MSG } from "../../core/contract.js";
+import { readBodyInto } from "../../capture/fetch.js";
 
 (() => {
   const isMock = location.hostname === "localhost" || location.hostname === "127.0.0.1";
@@ -36,19 +39,14 @@ import { MSG } from "../../core/contract.js";
           headers: (msg.init && msg.init.headers) || { Accept: "application/json" },
           signal: AbortSignal.timeout(20000),
         });
-        let text = "";
-        try {
-          text = await res.text();
-        } catch {
-          /* no body */
-        }
-        sendResponse({
+        const out = {
           status: res.status,
           url: res.url,
           contentType: res.headers.get("content-type") || "",
-          text,
           loginRedirect: /\/d2l\/login/i.test(res.url || ""),
-        });
+        };
+        if (res.ok) await readBodyInto(res, out, !!(msg.init && msg.init.binary));
+        sendResponse(out);
       } catch (e) {
         sendResponse({ status: 0, error: String(e && e.message ? e.message : e) });
       }

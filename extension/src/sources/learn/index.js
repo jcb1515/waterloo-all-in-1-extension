@@ -337,6 +337,21 @@ const adapter = {
           ctx.log(`learn: ${course.code} toc: ${errReason(e)}`);
         }
 
+        // Group memberships are optional metadata: a failure never touches
+        // complete. One distinct "Group N" number is the student's group;
+        // several mean ambiguous.
+        /** @type {string|undefined} */
+        let group;
+        try {
+          const nums = await src.readGroups(course);
+          readOk.push(`${ou}:groups`);
+          if (nums.length === 1) group = String(nums[0]);
+          else if (nums.length > 1) ctx.log(`learn: ${course.code} groups ambiguous (${nums.join(", ")})`);
+        } catch (e) {
+          if (isSignedOut(e)) throw e;
+          ctx.log(`learn: ${course.code} groups: ${errReason(e)}`);
+        }
+
         const objectById = new Map();
         for (const o of grades.objects) if (o && o.Id != null) objectById.set(String(o.Id), o);
         const catNameById = new Map();
@@ -395,6 +410,7 @@ const adapter = {
           weights,
           grades: courseGrades,
           syllabusUrls: toc.syllabusUrls,
+          group,
         });
       }
     } catch (e) {
