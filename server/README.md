@@ -85,8 +85,9 @@ details block and before `Sources:`/`Open:`; a fact whose label is Weight,
 Section, Location, Where or Room (case-insensitive) is skipped when the
 event's own field already renders that line. Facts are part of the
 event-change hash, so a fact change bumps `SEQUENCE`.
-Limits: 3000 events and 2 MiB per publish; the normalized feed state must also
-fit one D1 row (~1.9 MB serialized) — anything beyond gets 413.
+Limits: 3000 events (configurable via the `MAX_EVENTS` var — see
+[Operator knobs](#operator-knobs)) and 2 MiB per publish; the normalized feed
+state must also fit one D1 row (~1.9 MB serialized) — anything beyond gets 413.
 
 ### Legacy v1
 
@@ -204,6 +205,28 @@ written, 5 GB storage.
   The extension PUTs only on change — a few/day/user → not the bottleneck.
   CPU, not writes, limits PUT size (above).
 - **Storage**: 5 GB ÷ ~1 MB/feed (state + renders) ≈ 5k+ feeds.
+- **POSTs**: on a shared server also bound by `MAX_FEEDS`/`CREATES_PER_IP_PER_DAY`
+  (below). `MAX_FEEDS` does a `COUNT(*)` over feed rows once per POST — reads
+  every feed row, but POSTs are rare (one per user per year), so the cost is
+  negligible at this scale.
+
+## Operator knobs
+
+All optional `vars` in `wrangler.jsonc` (or the dashboard); every value is
+validated and falls back to the default when missing, malformed, or out of
+range — a typo can never break the worker.
+
+| Var | Default | Effect |
+|---|---|---|
+| `MAX_EVENTS` | `3000` | Max events per publish (POST **and** PUT), int 1–3000. **Set ~600 on the free plan** so an oversized publish gets a clean 413 instead of a CPU-limit kill (a 600-event PUT measures ~20 ms Node-side; ~300 is the ~8 ms fit). |
+| `MAX_FEEDS` | unset (unlimited) | When the live feed count is already this high, POST → `503 {error: "This server is full"}`. |
+| `CREATES_PER_IP_PER_DAY` | `10` | Per-IP feed-creates per UTC day. Over → `429` + `Retry-After` (seconds to UTC midnight). |
+| `RATE_SALT` | `"waterloo-all-in-1"` | Salt for the per-IP quota hash. Set as a secret: `npx wrangler secret put RATE_SALT`. Rotating it just resets everyone's daily keys. |
+
+The rate-limit table stores `sha256(ip | UTC day | RATE_SALT)` truncated to
+32 hex chars — raw IPs are never stored — and the daily cron deletes rows
+from previous days. Requests without `CF-Connecting-IP` (local dev) are
+never limited; only POST counts (PUT/GET/DELETE are untouched).
 
 ## Privacy
 
@@ -216,19 +239,88 @@ written, 5 GB storage.
   timestamps and tombstones. No credentials, cookies, or page content beyond
   what the events carry.
 
+### Privacy for a shared server
+
+One deployment can serve many students — but the trust boundary moves to the
+operator:
+
+- **The operator can read every user's published events in D1** — titles,
+  times, locations, `details`/`facts`, plus per-event change history. Feed
+  state and the pre-rendered ICS rows are plain text rows.
+- **Feed URLs are the only access control.** A leaked `feedUrl` (or group
+  alias URL) exposes that calendar to anyone, until the feed is deleted.
+- **Users should only publish to a server run by someone they trust.**
+  The server never sees anything the user didn't publish — Learn,
+  WaterlooWorks, Discord data that wasn't turned into feed items never
+  leaves the extension — but everything published is fully readable by
+  whoever runs the database.
+- IPs are never stored: the create-rate-limit key is a salted one-way hash
+  (`sha256(ip | day | RATE_SALT)`).
+
 ## Deploy
 
+Fresh deploy checklist (from `server/`):
+
 ```sh
+# 1. Log in to Cloudflare
 npx --yes wrangler@4.129.0 login
+
+# 2. Create the D1 database
 npx --yes wrangler@4.129.0 d1 create waterloo-all-in-1-feed
-# paste the returned database_id into wrangler.jsonc
-npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote   # 0001 + 0002 + 0003
+#    -> paste the printed database_id into wrangler.jsonc
+
+# 3. Apply migrations 0001–0004 remotely
+npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote
+
+# 4. Optional: operator knobs (see "Operator knobs")
+#    add  vars = { MAX_EVENTS = 600, MAX_FEEDS = 150, CREATES_PER_IP_PER_DAY = 10 }
+#    to wrangler.jsonc, and set the salt as a secret:
+npx --yes wrangler@4.129.0 secret put RATE_SALT
+
+# 5. Deploy
+npx --yes wrangler@4.129.0 deploy
+
+# 6. Smoke-test
+curl https://waterloo-all-in-1-feed.<account>.workers.dev/health
+# -> {"ok":true,"feeds":0}
+```
+
+### Pointing the extension at it
+
+Two ways (the extension's Calendar settings are W1's):
+
+- Per user: paste the worker URL into **Settings → Calendar → Feed server**.
+- At build time: set `WA1_CALENDAR_SERVICE_URL` in the environment (e.g. a
+  `dev-profile.json`-adjacent env var) so the bundled default already points
+  at your server.
+
+### Upgrading an existing deployment
+
+```sh
+npx --yes wrangler@4.129.0 d1 migrations apply waterloo-all-in-1-feed --remote
 npx --yes wrangler@4.129.0 deploy
 ```
 
-Check `https://waterloo-all-in-1-feed.<account>.workers.dev/health`, then give
-the worker URL to the extension (the calendar client setting; the host goes in
-the manifest's `host_permissions`). No secrets are needed.
+New migrations apply in order; already-applied ones are skipped. Feeds,
+aliases and renders survive deploys — nothing else to migrate.
+
+### Deleting feeds / wiping
+
+- One feed: `DELETE /v1/calendars/<feedId>.ics` with the user's
+  `Authorization: Bearer <updateToken>` — or delete the row directly:
+  `npx wrangler d1 execute waterloo-all-in-1-feed --remote --command
+  "DELETE FROM calendar_feeds WHERE id='<feedId>'"` (aliases and renders
+  are removed by the daily cron's orphan cleanup).
+- Everything: `npx wrangler d1 execute waterloo-all-in-1-feed --remote
+  --command "DELETE FROM calendar_renders; DELETE FROM calendar_feed_aliases;
+  DELETE FROM calendar_feeds; DELETE FROM create_limits;"`
+
+### Watching for trouble
+
+Cloudflare dashboard → Workers → `waterloo-all-in-1-feed` → **Metrics**:
+watch *exceeded CPU* (oversized publishes — lower `MAX_EVENTS`), request
+volume vs. the 100k/day free cap, and D1 rows read/written. Worker errors
+show under **Logs** / `wrangler tail`.
 
 ## Verify locally
 
