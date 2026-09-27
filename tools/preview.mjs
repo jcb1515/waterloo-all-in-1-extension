@@ -86,7 +86,17 @@ const SHOTS_2C = [
   { name: "panel-week-360", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [360, 900] },
 ];
 
+const SHOTS_CP2 = [
+  { name: "panel-sources-discord-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "options-sources-discord-light", url: "/src/options/options.html?preview=1&adv=1&imports=1#sources", size: [1280, 900] },
+  { name: "panel-agenda-cp2-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-updates-cp2-light", url: "/src/panel/panel.html?preview=1&view=updates", size: [400, 900] },
+  { name: "options-calendar-published-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
+  { name: "panel-week-light", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [400, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "cp2" ? SHOTS_CP2 :
   process.env.WA1_SHOT_DIR === "phase2c" ? SHOTS_2C :
   process.env.WA1_SHOT_DIR === "phase2b" ? SHOTS_2B :
   process.env.WA1_SHOT_DIR === "phase2a" ? SHOTS_2A : [
@@ -222,6 +232,8 @@ async function shots() {
           appCards: document.querySelectorAll(".app-card").length,
           courseCards: document.querySelectorAll(".course-card").length,
           marks: document.querySelectorAll("mark").length,
+          discordCtrls: document.querySelectorAll(".discord-controls button").length,
+          numInputs: document.querySelectorAll("input[type=number]").length,
           text: document.body.innerText.slice(0, 120)
         })`,
       });

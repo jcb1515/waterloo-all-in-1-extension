@@ -725,7 +725,7 @@ export function previewState(nowD = new Date(), variants = {}) {
           kind: "pdf",
           size: 61_802,
           addedAt: iso(now - 30 * MIN),
-          text: "ENGL 192 — extracted text (preview fixture)",
+          textError: true, // extraction failed — the row shows "Couldn't read this PDF"
         },
       ]
     : [];
