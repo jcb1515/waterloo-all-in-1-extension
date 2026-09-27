@@ -111,6 +111,7 @@
  *   itemId: string|null, from: "table"|"chart"}[]} [assessments]
  * @property {{name: string|null, rows: {component: string, dateText: string,
  *   location: string, weight: number}[]}[]} [gradingSchemes]
+ * @property {string} [officeHours]  e.g. "Mon/Wed 3:30–4:20 PM · MC 5417"
  */
 
 /**
