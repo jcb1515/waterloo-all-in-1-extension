@@ -8,6 +8,8 @@
   the payload small and honest here.
 */
 
+import { effectiveItem } from "../core/effective.js";
+
 const DAY = 86400000;
 const MAX_EVENTS = 3000;
 const MAX_BYTES = 1.8 * 1024 * 1024; // stay under the server's 2 MiB / 413
@@ -98,17 +100,21 @@ function toEvent(it, us, cal, nowMs) {
  * @param {Record<string, any>} userState
  * @param {any} calSettings            settings.calendar
  * @param {Date} [now]
+ * @param {{acceptPending?: boolean}} [opts]  review.showPending — pending
+ *   items publish as accepted instead of being skipped.
  * @returns {{payload: any, count: number, trimmed: boolean}}
  */
-export function buildFeedPayload(items, userState, calSettings, now = new Date()) {
+export function buildFeedPayload(items, userState, calSettings, now = new Date(), opts = {}) {
   const nowMs = now.getTime();
   const us = userState || {};
   const cal = calSettings || {};
+  const effOpts = { acceptPending: !!opts.acceptPending };
 
   /** @type {{ev: any, anchor: number}[]} */
   const picked = [];
   for (const it of Object.values(items || {})) {
-    const ev = toEvent(it, us[it.id], cal, nowMs);
+    const eff = effectiveItem(it, us[it && it.id], effOpts);
+    const ev = toEvent(eff, us[it && it.id], cal, nowMs);
     if (!ev) continue;
     const a = Math.max(
       ev.dueAt ? Date.parse(ev.dueAt) : -Infinity,
