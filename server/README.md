@@ -151,28 +151,35 @@ primary-key lookup of stored text with an `ETag`; a matching
 `If-None-Match` returns `304` with no body. Feeds created before 0003 lazily
 backfill their render row on first `GET`.
 
-### Measured CPU (Node 22, median of 7 runs — `test/bench.test.js`)
+### Measured CPU (Node 24, median of 7 runs — `test/bench.test.js`)
 
-| Feed size | Payload | JSON.parse | applyPublish | buildCalendar ×6 | Total |
-|---|---|---|---|---|---|
-| 400 events | 151 KiB | 0.7 ms | 29.6 ms | 201.4 ms | ~232 ms |
-| 3000 events | 1.1 MiB | 2.7 ms | 189.7 ms | 1378.0 ms | ~1570 ms |
+Each publish renders every VEVENT once and reuses the block across all six
+feeds (`renderAllFeeds`), so the render phase is O(events), not O(events ×
+feeds). `foldIcsLine`/`stableHash`/`formatIcsDate` are allocation-free fast
+paths (byte-identical output, pinned by equivalence tests) and
+`Intl.DateTimeFormat` instances are cached per timeZone.
 
-**These totals do not fit Cloudflare's free-tier 10 ms CPU limit.** Node is a
-proxy — V8 on the Workers runtime is the same engine, so order of magnitude
-holds. A 3000-event PUT is ~150× the free CPU budget; even a 400-event PUT is
-~20×. Rendering all six feeds dominates (a single 3000-event calendar render
-is ~230 ms). Options, without changing the client protocol:
+| Feed size | Payload | JSON.parse | applyPublish | render all 6 feeds | serializeState | Total |
+|---|---|---|---|---|---|---|
+| 400 events | 151 KiB | 0.7 ms | 6.4 ms | 7.1 ms | 1.3 ms | **~15 ms** |
+| 3000 events | 1.1 MiB | 2.9 ms | 33.4 ms | 32.5 ms | 8.5 ms | **~77 ms** |
+
+**A 3000-event PUT still does not fit the free tier's 10 ms CPU limit** —
+Node is a proxy, but ~8× over holds order-of-magnitude. The largest publish
+that completes the full PUT path (parse + applyPublish + render + serialize)
+in under ~8 ms is **≈300 events** (~7.9 ms); ~350 events already measures
+~10 ms. Realistic student feeds (a few hundred items) sit right at the edge.
+Options, without changing the client protocol:
 
 - **Workers Paid plan** (~$5/month): the "standard" CPU model allows 30 s —
-  trivial headroom at these sizes. This is the realistic choice for >400-event
-  feeds.
-- **Free tier only**: cap stored events low (~100–200; `MAX_EVENTS`/payload
-  size in `worker.js`) and/or lean on the lazy-backfill path — store state at
-  PUT and let each feed's first `GET` render (still ~100–200 ms per render at
-  3000 events, so still over 10 ms; the cap is the part that makes it fit).
-- **Queue/cron rendering**: enqueue a render job at PUT (small CPU), render in
-  a Queue consumer — but Queues are also paid-plan only.
+  headroom for the 3000-event ceiling. The realistic choice for heavy users.
+- **Free tier only**: lower `MAX_EVENTS` (~300) in `worker.js` so oversized
+  publishes get 413 instead of silently exceeding CPU — or rely on the
+  lazy-backfill path to move render cost onto the first GET (a single-feed
+  render of 3000 events is ~15 ms, still over 10 ms, so the cap is what
+  makes it fit).
+- **Queue/cron rendering**: enqueue a render job at PUT — but Queues are
+  paid-plan only too.
 
 ### Free-tier capacity estimate
 

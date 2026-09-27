@@ -3,7 +3,11 @@
 // Prints medians; asserts only generous ceilings so CI is never flaky.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyPublish, buildCalendar } from "../src/worker.js";
+import {
+  applyPublish,
+  renderAllFeeds,
+  serializeState
+} from "../src/worker.js";
 
 const GROUPS = ["classes", "deadlines", "coop", "teams", "other"];
 const RUNS = 7;
@@ -57,6 +61,7 @@ function bench(n) {
   const parseMs = [];
   const publishMs = [];
   const renderMs = [];
+  const serializeMs = [];
   // One warm-up pass so JIT doesn't dominate the median.
   applyPublish(null, JSON.parse(body), new Date());
   for (let i = 0; i < RUNS; i++) {
@@ -69,28 +74,33 @@ function bench(n) {
     publishMs.push(performance.now() - t0);
 
     t0 = performance.now();
-    buildCalendar(state);
-    for (const group of GROUPS) buildCalendar(state, { group });
+    renderAllFeeds(state, GROUPS); // the PUT path: each VEVENT rendered once
     renderMs.push(performance.now() - t0);
+
+    t0 = performance.now();
+    serializeState(state);
+    serializeMs.push(performance.now() - t0);
   }
   return {
     bytes: body.length,
     parse: median(parseMs),
     publish: median(publishMs),
-    render: median(renderMs)
+    render: median(renderMs),
+    serialize: median(serializeMs)
   };
 }
 
 for (const n of [400, 3000]) {
-  test(`bench: ${n}-event feed (parse / applyPublish / render x6)`, () => {
+  test(`bench: ${n}-event feed (parse / applyPublish / render / serialize)`, () => {
     const r = bench(n);
-    const total = r.parse + r.publish + r.render;
+    const total = r.parse + r.publish + r.render + r.serialize;
     // eslint-disable-next-line no-console
     console.log(
       `  [bench] ${n} events, ${(r.bytes / 1024).toFixed(0)} KiB payload:` +
         ` JSON.parse ${r.parse.toFixed(1)} ms,` +
         ` applyPublish ${r.publish.toFixed(1)} ms,` +
-        ` buildCalendar x6 ${r.render.toFixed(1)} ms,` +
+        ` renderAllFeeds(x6) ${r.render.toFixed(1)} ms,` +
+        ` serializeState ${r.serialize.toFixed(1)} ms,` +
         ` total ${total.toFixed(1)} ms`
     );
     // Generous ceiling: real medians are tens of ms; this only guards

@@ -287,9 +287,10 @@ async function storeRenders(env, feedId, state, expiresAtMs) {
     (await env.DB.prepare(SQL.selectFeedAliases).bind(feedId).all()).results || [];
   const expiresIso = new Date(expiresAtMs).toISOString();
   const updatedIso = new Date().toISOString();
-  const rows = [[feedId, buildCalendar(state)]];
+  const rendered = renderAllFeeds(state, aliases.map((a) => a.feed_group));
+  const rows = [[feedId, rendered.get("")]];
   for (const alias of aliases) {
-    rows.push([alias.id, buildCalendar(state, { group: alias.feed_group })]);
+    rows.push([alias.id, rendered.get(alias.feed_group)]);
   }
   const statements = [];
   for (const [publicId, ics] of rows) {
@@ -607,7 +608,7 @@ export function feedGroupOf(event) {
   return Object.hasOwn(TYPE_GROUPS, event?.type) ? TYPE_GROUPS[event.type] : "other";
 }
 
-export function buildCalendar(state, { group } = {}) {
+export function buildCalendar(state, { group } = {}, blocks) {
   const stored = state && typeof state === "object" ? state : {};
   const baseName = clampText(stored.calendarName, 100) || DEFAULT_CALENDAR_NAME;
   const timeZone = validTimeZone(stored.timeZone) || DEFAULT_TIME_ZONE;
@@ -626,12 +627,55 @@ export function buildCalendar(state, { group } = {}) {
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
     "X-PUBLISHED-TTL:PT1H"
   ];
+  const parts = lines.map(foldIcsLine);
   for (const event of Array.isArray(stored.events) ? stored.events : []) {
     if (group && event.feedGroup !== group) continue;
-    pushEvent(lines, event, stored.seqs?.[event.uid], timeZone);
+    parts.push(
+      blocks?.get(event.uid) ??
+        renderEventBlock(event, stored.seqs?.[event.uid], timeZone)
+    );
   }
-  lines.push("END:VCALENDAR", "");
+  parts.push("END:VCALENDAR", "");
+  return parts.join("\r\n");
+}
+
+/** One event's folded VEVENT text — group-independent, so it can be shared
+ * across the main feed and every group feed of the same publish. */
+function renderEventBlock(event, meta, timeZone) {
+  const lines = [];
+  pushEvent(lines, event, meta, timeZone);
   return lines.map(foldIcsLine).join("\r\n");
+}
+
+/** uid -> folded VEVENT text for every event in the state. */
+function eventBlocksOf(state) {
+  const stored = state && typeof state === "object" ? state : {};
+  const timeZone = validTimeZone(stored.timeZone) || DEFAULT_TIME_ZONE;
+  const blocks = new Map();
+  for (const event of Array.isArray(stored.events) ? stored.events : []) {
+    if (!blocks.has(event.uid)) {
+      blocks.set(
+        event.uid,
+        renderEventBlock(event, stored.seqs?.[event.uid], timeZone)
+      );
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Render every public feed of a publish at once: the main feed (key "")
+ * plus one per group id. Each VEVENT is built once and reused — the main
+ * feed is all blocks; each group feed is a subset of the same strings.
+ * @returns {Map<string, string>} feed key ("" or group id) -> ICS text
+ */
+export function renderAllFeeds(state, groupIds) {
+  const blocks = eventBlocksOf(state);
+  const feeds = new Map([["", buildCalendar(state, {}, blocks)]]);
+  for (const group of groupIds) {
+    feeds.set(group, buildCalendar(state, { group }, blocks));
+  }
+  return feeds;
 }
 
 function pushEvent(lines, event, meta, timeZone) {
@@ -747,13 +791,7 @@ function allDayEndDay(endAt, timeZone) {
 function isLocalMidnight(value, timeZone) {
   const ms = Date.parse(value);
   if (Number.isNaN(ms) || ms % 1000 !== 0) return false;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).formatToParts(new Date(ms));
+  const parts = hmsFormatter(timeZone).formatToParts(new Date(ms));
   const get = (type) => Number(parts.find((part) => part.type === type).value);
   return get("hour") % 24 === 0 && get("minute") === 0 && get("second") === 0;
 }
@@ -762,12 +800,7 @@ function isLocalMidnight(value, timeZone) {
 function localDay(value, timeZone) {
   const text = String(value);
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text.replace(/-/g, "");
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date(text));
+  const parts = ymdFormatter(timeZone).formatToParts(new Date(text));
   const get = (type) => parts.find((part) => part.type === type).value;
   return `${get("year")}${get("month")}${get("day")}`;
 }
@@ -811,14 +844,53 @@ function safeHttpsUrl(value) {
   }
 }
 
+const validTzCache = new Map();
+
 function validTimeZone(value) {
   if (typeof value !== "string" || !value) return null;
+  if (validTzCache.has(value)) return validTzCache.get(value);
+  let ok = null;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return value;
+    ok = value;
   } catch {
-    return null;
+    /* invalid zone */
   }
+  validTzCache.set(value, ok);
+  return ok;
+}
+
+// Intl.DateTimeFormat construction is expensive — cache one per timeZone.
+const hmsFmtCache = new Map();
+const ymdFmtCache = new Map();
+
+function hmsFormatter(timeZone) {
+  let fmt = hmsFmtCache.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    hmsFmtCache.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function ymdFormatter(timeZone) {
+  let fmt = ymdFmtCache.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    ymdFmtCache.set(timeZone, fmt);
+  }
+  return fmt;
 }
 
 function sanitizeAlarms(list) {
@@ -867,17 +939,40 @@ export function serializeState(state) {
   return { json, bytes, ok: bytes <= MAX_STATE_BYTES };
 }
 
-function stableHash(text) {
-  let hash = 0xcbf29ce484222325n;
+// Exported for tests that pin the hash to the previous BigInt version.
+export function stableHash(text) {
+  // 64-bit FNV-1a over UTF-8 bytes on 16-bit limbs (little-endian) —
+  // identical output to BigInt arithmetic without a BigInt per byte.
+  // Offset basis 0xcbf29ce484222325, prime 0x100000001b3 (limbs 0x01b3,
+  // 0x0000, 0x0100, 0x0000 — the zero limbs are folded out below).
+  let h0 = 0x2325, h1 = 0x8422, h2 = 0x9ce4, h3 = 0xcbf2;
   for (const byte of encoder.encode(text)) {
-    hash ^= BigInt(byte);
-    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+    h0 ^= byte;
+    const a0 = h0, a1 = h1, a2 = h2, a3 = h3;
+    let carry = a0 * 0x01b3;
+    h0 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a1 * 0x01b3;
+    h1 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a0 * 0x0100 + a2 * 0x01b3;
+    h2 = carry & 0xffff;
+    carry = Math.floor(carry / 0x10000) + a1 * 0x0100 + a3 * 0x01b3;
+    h3 = carry & 0xffff;
   }
-  return hash.toString(16).padStart(16, "0");
+  return (
+    h3.toString(16).padStart(4, "0") +
+    h2.toString(16).padStart(4, "0") +
+    h1.toString(16).padStart(4, "0") +
+    h0.toString(16).padStart(4, "0")
+  );
 }
 
 function formatIcsDate(date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  // "YYYY-MM-DDTHH:mm:ss.sssZ" -> "YYYYMMDDTHHMMSSZ" without regex work.
+  const iso = date.toISOString();
+  return (
+    iso.slice(0, 4) + iso.slice(5, 7) + iso.slice(8, 11) +
+    iso.slice(11, 13) + iso.slice(14, 16) + iso.slice(17, 19) + "Z"
+  );
 }
 
 function escapeIcs(value) {
@@ -888,12 +983,28 @@ function escapeIcs(value) {
     .replace(/,/g, "\\,");
 }
 
-function foldIcsLine(line) {
+const ASCII_LINE_RE = /^[\x00-\x7f]*$/;
+
+// Exported for tests that pin folding to the previous implementation.
+export function foldIcsLine(line) {
+  if (ASCII_LINE_RE.test(line)) {
+    // ASCII octets are chars: fold at 75, then 74 (the continuation space
+    // makes each following line 75 octets again).
+    if (line.length <= 75) return line;
+    let out = line.slice(0, 75);
+    for (let i = 75; i < line.length; i += 74) {
+      out += "\r\n " + line.slice(i, i + 74);
+    }
+    return out;
+  }
+  // Non-ASCII: UTF-8 octet length per code point, no TextEncoder.
   const chunks = [];
   let chunk = "";
   let bytes = 0;
   for (const character of line) {
-    const characterBytes = encoder.encode(character).length;
+    const cp = character.codePointAt(0);
+    const characterBytes =
+      cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
     const limit = chunks.length ? 74 : 75;
     if (chunk && bytes + characterBytes > limit) {
       chunks.push(chunk);

@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { applyPublish, buildCalendar, feedGroupOf, serializeState } from "../src/worker.js";
+import worker, {
+  applyPublish,
+  buildCalendar,
+  feedGroupOf,
+  foldIcsLine,
+  serializeState,
+  stableHash
+} from "../src/worker.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const T1 = new Date("2026-09-01T12:00:00Z");
@@ -838,4 +845,79 @@ test("DELETE clears the calendar's render rows", async () => {
     db
   );
   assert.equal(db.renders.size, 0);
+});
+
+// --- optimized internals: equivalence with the previous implementations -----
+
+// Pre-optimization foldIcsLine: TextEncoder per character.
+const enc = new TextEncoder();
+function foldIcsLineRef(line) {
+  const chunks = [];
+  let chunk = "";
+  let bytes = 0;
+  for (const character of line) {
+    const characterBytes = enc.encode(character).length;
+    const limit = chunks.length ? 74 : 75;
+    if (chunk && bytes + characterBytes > limit) {
+      chunks.push(chunk);
+      chunk = character;
+      bytes = characterBytes;
+    } else {
+      chunk += character;
+      bytes += characterBytes;
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.map((v, i) => (i ? ` ${v}` : v)).join("\r\n");
+}
+
+// Pre-optimization stableHash: BigInt FNV-1a per byte.
+function stableHashRef(text) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of enc.encode(text)) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+test("foldIcsLine matches the per-char-encode implementation", () => {
+  const cases = [
+    "",
+    "short",
+    "a".repeat(75),
+    "a".repeat(76),
+    "x".repeat(300),
+    // 2-byte chars (é), 3-byte CJK, 4-byte emoji
+    "café ".repeat(30),
+    "日本語のテキスト".repeat(10),
+    "🎉".repeat(40),
+    // 4-byte char straddling the 75-octet boundary: 74 ASCII + emoji
+    "a".repeat(74) + "🎉" + "b".repeat(10),
+    // 3-byte char straddling the 75-octet boundary
+    "a".repeat(74) + "中" + "b".repeat(10),
+    // straddling the 74-octet continuation limit
+    "a".repeat(75) + "中" + "b".repeat(72) + "é" + "z".repeat(40),
+    "SUMMARY:Class — E5 3101 (☃)",
+  ];
+  for (const line of cases) assert.equal(foldIcsLine(line), foldIcsLineRef(line));
+});
+
+test("stableHash matches the BigInt FNV-1a implementation", () => {
+  const cases = ["", "a", "learn:1:2@waterloo-all-in-1", "café 日本語 🎉 \x00\xff"];
+  // Deterministic pseudo-random strings, biased toward non-ASCII.
+  let seed = 42;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+  for (let i = 0; i < 200; i++) {
+    let s = "";
+    const len = rand() % 60;
+    for (let j = 0; j < len; j++) {
+      const r = rand();
+      s += String.fromCodePoint(
+        r % 5 === 0 ? 0x10000 + (r % 0x10000) : r % 0x3000
+      );
+    }
+    cases.push(s);
+  }
+  for (const text of cases) assert.equal(stableHash(text), stableHashRef(text));
 });
