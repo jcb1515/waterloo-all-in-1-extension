@@ -126,7 +126,18 @@ const SHOTS_CP3 = [
   { name: "panel-coop-linked-light", url: "/src/panel/panel.html?preview=1&tab=coop", size: [400, 900] },
 ];
 
+const SHOTS_POST3 = [
+  { name: "panel-todo-light", url: "/src/panel/panel.html?preview=1&tab=todo", size: [400, 900] },
+  { name: "panel-todo-dark", url: "/src/panel/panel.html?preview=1&tab=todo", size: [400, 900], dark: true },
+  { name: "panel-tabs-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
+  { name: "options-general-todos-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#todos" },
+  { name: "options-general-tabs-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#panel-tabs" },
+  { name: "options-sources-mailscan-light", url: "/src/options/options.html?preview=1&mailscan=outlook#sources", size: [1280, 900] },
+  { name: "panel-sources-mailscan-light", url: "/src/panel/panel.html?preview=1&mailscan=1&view=sources", size: [400, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "post3" ? SHOTS_POST3 :
   process.env.WA1_SHOT_DIR === "cp3" ? SHOTS_CP3 :
   process.env.WA1_SHOT_DIR === "phase3b" ? SHOTS_3B :
   process.env.WA1_SHOT_DIR === "phase3a" ? SHOTS_3A :
@@ -244,6 +255,12 @@ async function shots() {
       });
       await cdp.send("Page.navigate", { url: `${BASE}${s.url}` });
       await sleep(1500); // module load + preact render + fonts
+      if (s.scroll) {
+        await cdp.send("Runtime.evaluate", {
+          expression: `document.querySelector(${JSON.stringify(s.scroll)})?.scrollIntoView({block:"start"})`,
+        });
+        await sleep(250);
+      }
       const stats = await cdp.send("Runtime.evaluate", {
         returnByValue: true,
         expression: `JSON.stringify({

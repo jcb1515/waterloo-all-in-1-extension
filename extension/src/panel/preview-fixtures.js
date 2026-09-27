@@ -36,15 +36,18 @@ function nextWeekday(now, dow, h, m = 0) {
   return d.toISOString();
 }
 
+import { deriveTodos } from "../core/todos.js";
+
 const iso = (ms) => new Date(ms).toISOString();
 const seen = (source, key, scope, at) => [{ source, key, scope, at }];
 
 /**
  * @param {Date} [nowD]
- * @param {{cal?: string|null, imports?: boolean}} [variants]
+ * @param {{cal?: string|null, imports?: boolean, mailscan?: boolean}} [variants]
  *   cal: "published" | "split" | "error" — calendar feed states for the
  *   options screenshots ("empty"/undefined = never published).
  *   imports: show two imported outline files under Sources.
+ *   mailscan: an in-progress guided Gmail scan on the Email source card.
  */
 export function previewState(nowD = new Date(), variants = {}) {
   const now = nowD.getTime();
@@ -222,6 +225,7 @@ export function previewState(nowD = new Date(), variants = {}) {
     url: "https://mail.google.com/mail/u/0/#inbox/thread-abc123",
     meta: {
       provider: "gmail",
+      onCalendar: "google", // Google already put the invite on the calendar
       facts: [
         { label: "Organizer", value: "Jane Student" },
         { label: "Join", value: "meet.google.com/abc-defg-hij" },
@@ -473,6 +477,91 @@ export function previewState(nowD = new Date(), variants = {}) {
     seenIn: seen("manual", "capstone-demo", "manual", today),
   });
 
+  // ——— To-do fixtures: a timeslot pick, an offer deadline, the rankings
+  // deadline, two reply tasks and two manual tasks. ———
+  add("waterlooworks:slot-blueleaf", {
+    source: "waterlooworks",
+    type: "deadline",
+    category: "interview-timeslot",
+    title: "Pick an interview slot — Blueleaf Robotics",
+    org: "Blueleaf Robotics",
+    dueAt: dayAt(nowD, 1, 23, 59),
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/interviews.htm",
+    meta: { jobId: "405512" },
+    seenIn: seen("waterlooworks", "slot-405512", "interviews", today),
+  });
+  add("waterlooworks:offer-copperleaf", {
+    source: "waterlooworks",
+    type: "offer-deadline",
+    title: "Copperleaf Energy — respond to offer",
+    org: "Copperleaf Energy",
+    dueAt: dayAt(nowD, 2, 23, 59),
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/offers.htm",
+    meta: { jobId: "405577" },
+    seenIn: seen("waterlooworks", "offer-405577", "applications", today),
+  });
+  add("waterlooworks:cycle-rankings", {
+    source: "waterlooworks",
+    type: "cycle-date",
+    category: "rankings-due",
+    title: "Winter 2027 main round: Student rankings due",
+    org: "Co-op",
+    dueAt: dayAt(nowD, 6, 23, 59),
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/coopdates.htm",
+    meta: {
+      cycle: "Winter 2027 main round",
+      facts: [{ label: "Cycle", value: "Winter 2027 main round" }],
+    },
+    seenIn: seen("waterlooworks", "cycle-rankings", "coopdates", today),
+  });
+  add("outlook:mail:k52:reply", {
+    source: "outlook",
+    type: "task",
+    category: "reply",
+    title: "Reply to Prof. Rivera — midterm conflicts with an interview",
+    org: "MATH 117",
+    dueAt: dayAt(nowD, 1, 17, 0),
+    url: "https://outlook.office.com/mail/inbox/id/k52",
+    evidence: {
+      method: "text",
+      snippet: "Please confirm whether Thursday's midterm conflicts.",
+      url: "https://outlook.office.com/mail/inbox/id/k52",
+    },
+    meta: { provider: "outlook", facts: [{ label: "From", value: "J. Rivera" }] },
+    seenIn: seen("outlook", "mail:k52", "email:outlook:k52", today),
+  });
+  add("discord:reply-mentor", {
+    source: "discord",
+    type: "task",
+    category: "reply",
+    title: "Reply to Alex — lab pairing for Friday",
+    org: "ECE 2027",
+    dueAt: dayAt(nowD, 0, 20, 0),
+    url: "https://discord.com/channels/8804/9916/88501",
+    meta: {
+      guildId: "8804",
+      channelId: "9916",
+      facts: [{ label: "Server", value: "ECE 2027" }],
+    },
+    seenIn: seen("discord", "reply-mentor", "channel:labs", today),
+  });
+  add("manual:tax-forms", {
+    source: "manual",
+    type: "task",
+    title: "Upload tax forms to WaterlooWorks",
+    dueAt: dayAt(nowD, 3, 12, 0),
+    evidence: { method: "manual" },
+    seenIn: seen("manual", "tax-forms", "manual", today),
+  });
+  add("manual:email-advisor", {
+    source: "manual",
+    type: "task",
+    title: "Email the academic advisor about course overload",
+    dueAt: dayAt(nowD, 1, 9, 0),
+    evidence: { method: "manual" },
+    seenIn: seen("manual", "email-advisor", "manual", today),
+  });
+
   const userState = {
     "learn:math115-asn4": { done: true, doneAt: iso(now - 30 * HOUR) },
     "learn:ece105-quiz3": {
@@ -487,6 +576,8 @@ export function previewState(nowD = new Date(), variants = {}) {
     "learn:ece190-deliverable1": { estimateMin: 45 },
     "learn:math115-asn5": { snoozedUntil: nextWeekday(nowD, 1, 8, 0) },
     "manual:capstone-demo": { hidden: true },
+    "manual:email-advisor": { done: true, doneAt: iso(now - 2 * HOUR) },
+    "todo:study:outline:math117-midterm": { estimateMin: 240 },
   };
 
   const sourceState = {
@@ -526,6 +617,31 @@ export function previewState(nowD = new Date(), variants = {}) {
       complete: false,
       failures: 0,
       itemCount: 2,
+      state: variants.mailscan
+        ? {
+            scan: {
+              provider: "gmail",
+              startedAt: iso(now - 40 * MIN),
+              days: 60,
+              query: 'newer_than:60d (subject:interview OR subject:deadline OR subject:"calendar event")',
+            },
+            scanQueue: [
+              {
+                provider: "gmail",
+                key: "t9",
+                subject: "Acme Analog — interview confirmation",
+                url: "https://mail.google.com/mail/u/0/#all/thread-t9",
+              },
+              {
+                provider: "gmail",
+                key: "t10",
+                subject: "Copperleaf Energy — your co-op offer",
+                url: "https://mail.google.com/mail/u/0/#all/thread-t10",
+              },
+            ],
+            scanned: { t7: iso(now - 30 * MIN) },
+          }
+        : {},
     },
     discord: {
       lastRunAt: iso(now - 20 * MIN),
@@ -788,6 +904,21 @@ export function previewState(nowD = new Date(), variants = {}) {
       ],
       itemIds: [],
     },
+    "waterlooworks:405577": {
+      id: "waterlooworks:405577",
+      employer: "Copperleaf Energy",
+      jobTitle: "Power Systems Intern",
+      jobId: "405577",
+      cycle: "Winter 2027 main round",
+      status: "offer",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/jobs/405577",
+      history: [
+        { status: "applied", at: iso(now - 10 * DAY) },
+        { status: "interview-scheduled", at: iso(now - 4 * DAY) },
+        { status: "offer", at: iso(now - 6 * HOUR) },
+      ],
+      itemIds: ["waterlooworks:offer-copperleaf"],
+    },
   };
 
   const published = variants.cal === "published" || variants.cal === "split" || variants.cal === "error";
@@ -953,5 +1084,9 @@ export function previewState(nowD = new Date(), variants = {}) {
   ];
   const updatesSeenAt = iso(now - 4 * HOUR);
 
-  return { items, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
+  // Derived to-dos come straight from the real engine so the To-do tab shows
+  // exactly what recompute would store.
+  const todos = deriveTodos({ items, applications, userState, settings, now: nowD });
+
+  return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
 }
