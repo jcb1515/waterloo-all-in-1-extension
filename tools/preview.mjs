@@ -216,6 +216,7 @@ async function shots() {
           updateRows: document.querySelectorAll(".update-row").length,
           leadRows: document.querySelectorAll(".lead-row").length,
           calBlocks: document.querySelectorAll(".cal-block").length,
+          calNarrow: document.querySelectorAll(".cal-block.narrow .cal-block-num").length,
           calCells: document.querySelectorAll(".cal-cell").length,
           prepCards: document.querySelectorAll(".prep-card").length,
           appCards: document.querySelectorAll(".app-card").length,
