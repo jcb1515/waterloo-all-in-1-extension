@@ -181,9 +181,10 @@ export function rowView(item, now) {
  * @param {Date} p.now
  * @param {string} [p.filter]                 "all"|deadlines|classes|exams|meetings|coop
  * @param {string|null} [p.org]               restrict to one org (normalised compare)
+ * @param {string} [p.q]                      free-text match on title/org/location
  * @returns {{summary: any, nextClass: any, groups: any[]}}
  */
-export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null }) {
+export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, q = "" }) {
   const today = startOfDay(now);
   const tomorrow = new Date(today.getTime() + DAY);
   const dayAfter = new Date(today.getTime() + 2 * DAY);
@@ -195,6 +196,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
 
   const showClasses = (settings.agenda && settings.agenda.showClasses) || "today";
   const normOrg = org ? normCourseCode(org) : null;
+  const needle = q.trim().toLowerCase();
 
   const buckets = new Map(); // groupId -> rows
   const push = (id, item) => {
@@ -227,6 +229,11 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     }
 
     if (normOrg && normCourseCode(item.org) !== normOrg) continue;
+    if (
+      needle &&
+      !`${item.title} ${item.org || ""} ${item.location || ""}`.toLowerCase().includes(needle)
+    )
+      continue;
     if (!inFilter(item, filter)) continue;
     if (filter !== "classes" && isClassish(item)) {
       if (showClasses === "none") continue;

@@ -24,6 +24,7 @@ const FILTERS = [
 export function Agenda({ state, actions, now, onGoSources }) {
   const [filter, setFilter] = useState(query0("filter") || "all");
   const [org, setOrg] = useState(null);
+  const [q, setQ] = useState("");
   const [collapsed, setCollapsed] = useState(() => ({}));
 
   const orgs = useMemo(() => {
@@ -44,8 +45,9 @@ export function Agenda({ state, actions, now, onGoSources }) {
         now,
         filter,
         org,
+        q,
       }),
-    [state.items, state.userState, state.settings, filter, org]
+    [state.items, state.userState, state.settings, filter, org, q]
   );
 
   if (!state.ready) {
@@ -108,6 +110,18 @@ export function Agenda({ state, actions, now, onGoSources }) {
       </section>
 
       <div class="filter-bar" role="toolbar" aria-label="Filters">
+        <div class="search-wrap">
+          <SearchIcon size={14} />
+          <input
+            id="agenda-search"
+            class="input search-input"
+            type="search"
+            placeholder="Search titles, courses, rooms…"
+            aria-label="Search agenda"
+            value={q}
+            onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
+          />
+        </div>
         <div class="chip-scroll" role="group" aria-label="Type filter">
           {FILTERS.map(([id, label]) => (
             <button

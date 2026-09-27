@@ -215,3 +215,18 @@ test("nextClass is the next classish item today or tomorrow", () => {
   });
   assert.equal(ag.nextClass.id, "next");
 });
+
+/* -------------------------------- search -------------------------------- */
+
+test("q filters rows on title/org/location, case-insensitive", () => {
+  const items = {
+    a: item("a", { title: "Midterm Review", dueAt: at(0, 14), org: "math 117" }),
+    b: item("b", { title: "Lab report", dueAt: at(0, 15), location: "E5 1234" }),
+    c: item("c", { title: "Essay draft", dueAt: at(0, 16), org: "ENGL 192" }),
+  };
+  const base = { items, userState: {}, settings: {}, now: NOW };
+  assert.deepEqual(ids(group(buildAgenda({ ...base, q: "midterm" }), "today")), ["a"]);
+  assert.deepEqual(ids(group(buildAgenda({ ...base, q: "engl" }), "today")), ["c"]);
+  assert.deepEqual(ids(group(buildAgenda({ ...base, q: "E5 1234" }), "today")), ["b"]);
+  assert.equal(buildAgenda({ ...base, q: "nothing matches" }).groups.length, 0);
+});

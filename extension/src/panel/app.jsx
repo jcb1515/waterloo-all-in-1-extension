@@ -57,6 +57,14 @@ export function App() {
       if (e.key === "r") refresh();
       if (e.key === "1") setTab("agenda");
       if (e.key === "2") setTab("sources");
+      if (e.key === "/") {
+        e.preventDefault();
+        setTab("agenda");
+        requestAnimationFrame(() => {
+          const el = document.getElementById("agenda-search");
+          if (el) el.focus();
+        });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
