@@ -362,7 +362,8 @@ function icsResponse(request, ics, etag) {
     "Content-Disposition": "inline; filename=waterloo-all-in-1.ics",
     "Cache-Control": "private, max-age=900",
     ETag: etag,
-    "X-Content-Type-Options": "nosniff"
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
   };
   const inm = request.headers.get("if-none-match");
   if (inm) {
@@ -372,7 +373,9 @@ function icsResponse(request, ics, etag) {
         status: 304,
         headers: {
           ETag: etag,
-          "Cache-Control": headers["Cache-Control"]
+          "Cache-Control": headers["Cache-Control"],
+          "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer"
         }
       });
     }

@@ -1163,3 +1163,27 @@ test("cron deletes create_limits rows from previous days only", async () => {
   assert.ok(db.createLimits.has("b".repeat(32)));
 });
 
+test("feed responses send nosniff + no-referrer; JSON errors send no-store", async () => {
+  const db = fakeD1();
+  const created = await call(req("POST", "/v1/calendars", payload([ev()])), db);
+  const { feedUrl } = await created.json();
+  const path = new URL(feedUrl).pathname;
+
+  const get = await call(req("GET", path), db);
+  assert.equal(get.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(get.headers.get("referrer-policy"), "no-referrer");
+
+  const etag = get.headers.get("etag");
+  const notModified = await call(
+    new Request(`https://feed.test${path}`, { headers: { "if-none-match": etag } }),
+    db
+  );
+  assert.equal(notModified.status, 304);
+  assert.equal(notModified.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(notModified.headers.get("referrer-policy"), "no-referrer");
+
+  const missing = await call(req("GET", `/v1/calendars/${"q".repeat(24)}.ics`), db);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("cache-control"), "no-store");
+});
+
