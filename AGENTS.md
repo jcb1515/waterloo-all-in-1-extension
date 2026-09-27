@@ -37,7 +37,7 @@ WaterlooWorks, Discord, Outlook, Gmail) and publishes it to one Google Calendar 
 ## Layout
 ```
 extension/
-  manifest.json  _locales/  icons/  fonts/  styles/
+  manifest.json  _locales/  icons/  styles/
   src/background/     service worker entry (baseline: WATnow background)
   src/core/           contract, store, model, dates, reminders (+ merge, uid map, scheduler in Phase 1)
   src/capture/        observer.main.js (page world), recorder.content.js, discovery store, relay, offscreen
