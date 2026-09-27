@@ -210,6 +210,29 @@ test("htmlOutline full mode samples table cells (WaterlooWorks-like)", () => {
   assert.ok(!json.includes("Contoso") && !json.includes("Initech"));
 });
 
+test("htmlOutline aligns cells when a body row opens with a th", () => {
+  // WaterlooWorks' grid puts the job title in a row <th>. Pairing only <td>
+  // samples with header indexes used to shift every column left by one —
+  // employer names landed under the allow-listed "Term" header unredacted.
+  const { document } = parseHTML(`<!doctype html><html><body>
+    <table>
+      <tr><th>Term</th><th>Employer</th><th>Status</th></tr>
+      <tr><th class="job">Software Developer</th><td class="co">Contoso Ltd</td><td>Not Selected</td></tr>
+      <tr><th class="job">Data Analyst</th><td class="co">Initech Corp</td><td>Selected</td></tr>
+    </table>
+  </body></html>`);
+  const out = htmlOutline(document, { textMode: "full" });
+  const t = out.tables[0];
+  assert.deepEqual(t.headers, ["Term", "Employer", "Status"]);
+  // Column 0 is the row <th> under "Term" (allow-listed label), column 1 is
+  // the employer — now under a non-allow-listed header, so it stays a length.
+  assert.deepEqual(t.sample[0][0], { cls: "job", text: "Software Developer" });
+  assert.equal(t.sample[0][1].text, `<text ${"Contoso Ltd".length}>`);
+  assert.equal(t.sample[0][2].text, "Not Selected");
+  const json = JSON.stringify(out);
+  assert.ok(!json.includes("Contoso") && !json.includes("Initech"), "employer names stay redacted");
+});
+
 test("normalizePath replaces path segments holding an email address", () => {
   assert.equal(
     normalizePath("https://mail.x/d2l/m/SMTP:jdoe@uwaterloo.ca"),

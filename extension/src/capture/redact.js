@@ -367,21 +367,28 @@ export function htmlOutline(doc, opts = {}) {
   for (const table of doc.querySelectorAll("table")) {
     if (out.tables.length >= 30) break;
     if (isExcluded(table)) continue;
-    const headers = [...table.querySelectorAll("th")]
+    const dataRows = [...table.querySelectorAll("tr")].filter((tr) => tr.querySelector("td"));
+    // Header cells come from rows with no data cells. A body row may still
+    // open with a row <th> (WaterlooWorks puts the job title in one), so a
+    // bare "every th in the table" list would count body cells as headers.
+    const headers = [...table.querySelectorAll("tr")]
+      .filter((tr) => !tr.querySelector("td"))
+      .flatMap((tr) => [...tr.querySelectorAll("th")])
       .slice(0, 40)
       .map((th) => (isExcluded(th) ? "<excluded>" : redact(th.textContent, 80)));
-    const dataRows = [...table.querySelectorAll("tr")].filter((tr) => tr.querySelector("td"));
     /** @type {TableOutline} */
     const entry = { headers, rows: dataRows.length, sample: [] };
     if (!structural) {
       for (const tr of dataRows.slice(0, 2)) {
         if (isExcluded(tr)) continue;
+        // All cells by column index — a leading row <th> counts, otherwise
+        // every later cell shifts under the previous header.
         entry.sample.push(
-          [...tr.querySelectorAll("td")].map((td, ci) => {
-            const cls = (String(attr(td, "class") || "").split(/\s+/)[0] || "");
-            const raw = collapseText(td.textContent);
+          [...tr.querySelectorAll("th,td")].map((cell, ci) => {
+            const cls = (String(attr(cell, "class") || "").split(/\s+/)[0] || "");
+            const raw = collapseText(cell.textContent);
             let text;
-            if (isExcluded(td)) text = "<excluded>";
+            if (isExcluded(cell)) text = "<excluded>";
             else if (STATUS_HEADER_RE.test(headers[ci] || "") && raw.length <= 30) text = redactText(raw, extraWords);
             else if (raw.length <= 60 && isDateLike(raw)) text = datePattern(raw);
             else text = `<text ${raw.length}>`;
