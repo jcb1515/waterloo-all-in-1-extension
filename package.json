@@ -14,7 +14,8 @@
     "dev": "node tools/build.mjs --watch",
     "test": "node --test \"test/**/*.test.js\" && npm --prefix server test",
     "typecheck": "tsc --noEmit",
-    "package": "node tools/package.mjs"
+    "package": "node tools/package.mjs",
+    "verify": "node tools/verify.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",
