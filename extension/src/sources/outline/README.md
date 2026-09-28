@@ -36,6 +36,31 @@ outline.uwaterloo.ca sits behind UW SSO (Duo) — it is *not* public.
   `{name, text}` entry (pre-extracted PDF text) goes to `parseSyllabusText`
   instead (see below).
 
+## Network
+
+While **any** `outline.uwaterloo.ca` tab is open and not frozen,
+`content.js` runs an in-tab fetch round (`outlineRound`, same shape as
+Portal's): it read-only-loads `chrome.storage.local` (`courses[*].outlineUrl`
+— written by Portal enrollments — plus `wa1Settings.sources.outline.urls`),
+keeps only `https://outline.uwaterloo.ca/viewer/view/…` urls (deduped by
+origin+pathname), and GETs each sequentially with `credentials: "include"`
+and a 15 s timeout. Every page replays as the same `wa1:observed`
+`kind:"dom"` payload the passive snapshotter sends, so `observe.parse`
+expands it identically — this is how outlines the student never opens get
+read (the daily background sync only sees `settings.urls`).
+
+A sign-in page (401/403, a redirect off the outline host, or an
+`LOGIN_WORDS` body) stops the round and sends nothing further; any other
+failure skips that URL. Throttle is a `sessionStorage` stamp
+(`wa1:outline:lastFetch`, `{at, ok}`): at most one round per 6 h per tab,
+5 min retry after a failure, plus a 2 min in-progress marker
+(`wa1:outline:inProgress`) so two loads can't race. Rounds are resumable
+across tab freezes — a Page Lifecycle `freeze` bumps a generation, the
+in-flight URL re-issues once on resume, and its late settle is dropped.
+
+No tokens, no `chrome.storage` writes anywhere — the static test fails on
+any `fetch(` outside `content.js` or any non-`viewer/view/` request.
+
 ## PDF syllabi
 
 Some courses (e.g. ENGL 192) have no outline page — only a PDF syllabus.
