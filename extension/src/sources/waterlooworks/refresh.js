@@ -282,6 +282,9 @@ async function refreshAllowed() {
   return (await refreshGate()) === "ok";
 }
 
+/** @returns {{jobIds: Set<string>, eventIds: Set<string>}} */
+const newChecked = () => ({ jobIds: new Set(), eventIds: new Set() });
+
 /**
  * WW serves a ~150-byte auto-submit stub before the real page, and the
  * frame can also sit on about:blank between navigations. Both are
@@ -455,17 +458,7 @@ function countChecked(d, sets) {
   }
 }
 
-/**
- * The countables in one document — content.js adds the top page's own
- * count to a forced check's round total.
- * @param {any} d
- * @returns {number}
- */
-export function checkCount(d) {
-  const sets = { jobIds: new Set(), eventIds: new Set() };
-  countChecked(d, sets);
-  return sets.jobIds.size + sets.eventIds.size;
-}
+
 
 // --- ready predicates -------------------------------------------------------
 
@@ -694,14 +687,17 @@ const LAST_KEY = "wa1:ww-refresh-last";
  * The iframe is always removed, and a privacy-safe per-step summary
  * (names, durations, failure reasons — never URLs, tokens or page text)
  * is written to sessionStorage["wa1:ww-refresh-last"] on every exit path.
+ * @param {{jobIds: Set<string>, eventIds: Set<string>}} [sets] Shared
+ *   checked-count sets — callers pass one so the top page's rows union
+ *   with the frame reads instead of double-counting.
  * @returns {Promise<{sent: number, steps: any[], checked: number}>}
  */
-export async function runRefreshRound() {
+export async function runRefreshRound(sets = newChecked()) {
   let sent = 0;
   /** @type {{step: string, ok: boolean, ms: number, reason?: string}[]} */
   const steps = [];
   let killed = false;
-  const seen = { jobIds: new Set(), eventIds: new Set() };
+  const seen = sets;
   const send = (frame) => {
     countChecked(docOf(frame), seen);
     if (sendFrame(frame)) sent += 1;
@@ -796,10 +792,13 @@ export async function runRefreshRound() {
  * The in-flight round promise — either a throttled maybeRefresh round or
  * a forced check-now one. Both share it, so a check-now while a scheduled
  * round runs (and vice versa) joins instead of starting a second iframe
- * walk. `null` between rounds.
+ * walk. `null` between rounds. `activeChecked` holds the round's shared
+ * count sets so a joining check-now can union the top page's rows in.
  * @type {Promise<any>|null}
  */
 let activeRound = null;
+/** @type {{jobIds: Set<string>, eventIds: Set<string>}|null} */
+let activeChecked = null;
 
 /**
  * Gate + start a refresh round, if due. Called by content.js after the
@@ -816,6 +815,7 @@ export function maybeRefresh() {
     }
     if (/notLoggedIn\.htm/i.test(href)) return undefined;
     if (document.visibilityState !== "visible") return undefined;
+    const sets = newChecked();
     const round = (async () => {
       try {
         // The kill switch is read before anything else — a disabled refresh
@@ -827,13 +827,15 @@ export function maybeRefresh() {
           return { sent: 0 };
         }
         ss?.setItem?.(THROTTLE_KEY, String(Date.now()));
-        return await runRefreshRound();
+        return await runRefreshRound(sets);
       } finally {
         activeRound = null;
+        activeChecked = null;
       }
     })();
     // Block re-entry across the async settings read too.
     activeRound = round;
+    activeChecked = sets;
     return round.catch(() => ({ sent: 0 }));
   } catch {
     return undefined;
@@ -884,8 +886,15 @@ export function checkNowRound() {
         sent: 0,
       });
     }
-    if (activeRound) return toOutcome(activeRound);
-    const round = runRefreshRound().then(
+    if (activeRound) {
+      // A forced check re-reads the top page too — union its rows into the
+      // in-flight round's sets rather than counting them a second time.
+      if (activeChecked) countChecked(document, activeChecked);
+      return toOutcome(activeRound);
+    }
+    const sets = newChecked();
+    countChecked(document, sets);
+    const round = runRefreshRound(sets).then(
       (res) => {
         try {
           window.sessionStorage?.setItem?.(THROTTLE_KEY, String(Date.now()));
@@ -893,6 +902,7 @@ export function checkNowRound() {
           // the stamp is advisory — storage may be gone
         }
         activeRound = null;
+        activeChecked = null;
         return res;
       },
       (e) => {
@@ -902,10 +912,12 @@ export function checkNowRound() {
           // the stamp is advisory — storage may be gone
         }
         activeRound = null;
+        activeChecked = null;
         throw e;
       }
     );
     activeRound = round;
+    activeChecked = sets;
     return toOutcome(round);
   } catch {
     return Promise.resolve({

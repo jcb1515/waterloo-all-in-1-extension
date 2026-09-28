@@ -89,12 +89,14 @@ const settle = (p) => {
 
 /**
  * The combined fake page: content.js's document/window/chrome plus the
- * hidden-iframe machinery the refresh round needs.
+ * hidden-iframe machinery the refresh round needs. `topGridIds` renders
+ * the top page itself as an applications grid with those Job IDs.
  */
 function installWorld({
   url = WW_URL,
   visible = "hidden",
   readyState = "loading",
+  topGridIds = null,
 } = {}) {
   const frames = [];
   const sent = [];
@@ -102,8 +104,10 @@ function installWorld({
   const listeners = [];
   const observers = [];
   const session = new Map();
+  const docListeners = {};
   const realSetTimeout = globalThis.setTimeout;
   const realClearTimeout = globalThis.clearTimeout;
+  const realCustomEvent = globalThis.CustomEvent;
   const realNow = Date.now;
   let fakeNow = realNow();
   /** @type {any} */
@@ -166,6 +170,18 @@ function installWorld({
     parentElement: null,
     contains: () => false,
   };
+  // Optional top-page applications grid — for the union-counted `checked`.
+  const topRows = (topGridIds || []).map((id) => tr([id, "Applied"]));
+  const topGrid = topGridIds
+    ? {
+        querySelectorAll: (sel) =>
+          sel === "th"
+            ? [th("Job ID"), th("App Status")]
+            : sel === "tbody tr"
+              ? topRows
+              : [],
+      }
+    : null;
   const doc = {
     visibilityState: visible,
     readyState,
@@ -175,11 +191,27 @@ function installWorld({
     // OBSERVE_SEL is the only selector answered with the top element —
     // isLoggedOut's TEXTY query and every parser probe get [].
     querySelectorAll: (sel) =>
-      String(sel).includes("doc-viewer__card-list") ? [topTable] : [],
+      String(sel).includes("doc-viewer__card-list")
+        ? [topTable]
+        : sel === "table" && topGrid
+          ? [topGrid]
+          : [],
     createElement: () => {
       const f = mkFrame();
       frames.push(f);
       return f;
+    },
+    // The injection guard's DOM-event handshake runs through these.
+    addEventListener: (type, fn) =>
+      (docListeners[type] = docListeners[type] || []).push(fn),
+    removeEventListener: (type, fn) => {
+      const l = docListeners[type] || [];
+      const i = l.indexOf(fn);
+      if (i >= 0) l.splice(i, 1);
+    },
+    dispatchEvent: (ev) => {
+      for (const fn of [...(docListeners[ev.type] || [])]) fn(ev);
+      return true;
     },
   };
   const win = {
@@ -189,19 +221,32 @@ function installWorld({
       setItem: (k, v) => session.set(k, String(v)),
     },
     addEventListener() {},
+    removeEventListener() {},
   };
   win.top = win;
   globalThis.window = win;
   globalThis.location = { href: url };
   globalThis.document = doc;
   globalThis.sessionStorage = win.sessionStorage;
+  globalThis.CustomEvent = class {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
   /** @type {any} */
   let storageErr = null;
   globalThis.chrome = {
     runtime: {
       id: "wa1-test",
       sendMessage: (m) => sent.push(m),
-      onMessage: { addListener: (fn) => listeners.push(fn) },
+      onMessage: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener: (fn) => {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
     },
     storage: {
       local: {
@@ -297,6 +342,8 @@ function installWorld({
       delete globalThis.sessionStorage;
       delete globalThis.chrome;
       delete globalThis.MutationObserver;
+      if (realCustomEvent === undefined) delete globalThis.CustomEvent;
+      else globalThis.CustomEvent = realCustomEvent;
       delete /** @type {any} */ (globalThis).__wa1WwContent;
     },
   };
@@ -596,13 +643,16 @@ test("double injection registers one listener and one observer while alive", asy
     await import(`${CONTENT}?t=inj${Date.now()}`);
     assert.equal(w.listeners.length, 1);
     assert.equal(w.observers.length, 1);
-    // A second injection while the first is alive returns immediately.
+    const firstListener = w.listeners[0];
+    // A second injection while the first is alive gets a pong and bails.
     await import(`${CONTENT}?t=inj${Date.now()}b`);
     assert.equal(w.listeners.length, 1, "no second listener");
     assert.equal(w.observers.length, 1, "no second observer");
+    assert.equal(w.listeners[0], firstListener, "the owner kept its seat");
 
-    // Orphan the first instance: its context's runtime.id now throws,
-    // while the re-injection arrives with a fresh, valid chrome binding.
+    // Orphan the first instance: its own context's runtime.id now throws,
+    // so its ping listener stays silent while the re-injection arrives
+    // with a fresh, valid chrome binding — the new copy supersedes it.
     const oldChrome = /** @type {any} */ (globalThis.chrome);
     Object.defineProperty(oldChrome.runtime, "id", {
       configurable: true,
@@ -614,18 +664,29 @@ test("double injection registers one listener and one observer while alive", asy
       runtime: {
         id: "wa1-test-2",
         sendMessage: (m) => w.sent.push(m),
-        onMessage: { addListener: (fn) => w.listeners.push(fn) },
+        onMessage: {
+          addListener: (fn) => w.listeners.push(fn),
+          removeListener: (fn) => {
+            const i = w.listeners.indexOf(fn);
+            if (i >= 0) w.listeners.splice(i, 1);
+          },
+        },
       },
       storage: oldChrome.storage,
     };
     await import(`${CONTENT}?t=inj${Date.now()}c`);
-    assert.equal(w.listeners.length, 2, "orphaned context is replaced");
+    // The orphan removed its listener in teardown, then the new copy
+    // registered — still exactly one, and it is not the old one.
+    assert.equal(w.listeners.length, 1, "orphaned context is replaced");
+    assert.notEqual(w.listeners[0], firstListener);
     assert.equal(w.observers.length, 2, "new observer installed");
     assert.equal(
       w.observers[0].disconnected,
       true,
       "the orphan's observer was disconnected"
     );
+    // And the takeover is functional — the new listener answers.
+    assert.deepEqual(w.checkNow("r-new"), { accepted: true });
   } finally {
     w.restore();
   }
@@ -636,8 +697,7 @@ test("an orphaned instance stops sending instead of throwing", async () => {
   try {
     await import(`${CONTENT}?t=orphan${Date.now()}`);
     assert.equal(w.sent.length, 1, "init snapshot sent");
-    const inst = /** @type {any} */ (globalThis).__wa1WwContent;
-    assert.equal(inst.dead, false);
+    assert.equal(w.listeners.length, 1);
     // The extension context dies: sends throw, the id is gone.
     globalThis.chrome.runtime.id = undefined;
     globalThis.chrome.runtime.sendMessage = () => {
@@ -648,18 +708,44 @@ test("an orphaned instance stops sending instead of throwing", async () => {
     // instance self-stops.
     w.topTable.outerHTML = "<table><tr><td>changed row</td></tr></table>";
     w.observers[0].cb();
-    await w.drain(() => inst.dead);
-    assert.equal(inst.dead, true, "the failed send stopped the orphan");
+    await w.drain(() => w.observers[0].disconnected);
     assert.equal(
       w.observers[0].disconnected,
       true,
       "observer disconnected on self-stop"
     );
-    assert.equal(inst.timers.size, 0, "pending timers cleared");
-    // A check-now delivered to the dead context starts nothing.
-    w.checkNow("r-dead");
+    assert.equal(
+      w.listeners.length,
+      0,
+      "check-now listener removed on self-stop"
+    );
+    // No listener remains — a check-now to the dead context starts nothing.
+    assert.equal(w.checkNow("r-dead"), undefined);
     await w.drain(() => w.doneMsgs().length > 0);
     assert.equal(w.frames.length, 0, "orphan never starts a round");
+  } finally {
+    w.restore();
+  }
+});
+
+test("checked unions the top page with the round — no double count", async () => {
+  // The top page IS applications page 1: its rows overlap the frame's
+  // first grid page. checked must be the union, not the sum.
+  const w = installWorld({
+    visible: "hidden",
+    topGridIds: ["490001", "490009"],
+  });
+  try {
+    await import(`${CONTENT}?t=cn${Date.now()}`);
+    assert.deepEqual(w.checkNow("r-u"), { accepted: true });
+    await w.drain(() => w.frames.length > 0);
+    routeStandardRound(w.frames[0]);
+    await w.drain(() => w.doneMsgs().length > 0);
+    const done = w.doneMsgs().find((m) => m.runId === "r-u");
+    assert.ok(done);
+    // Round: grid jobIds {490001,490002,490003} + events {4705,4706} = 5.
+    // Top grid adds only 490009 (490001 already counted) -> 6, not 5+2.
+    assert.equal(done.checked, 6);
   } finally {
     w.restore();
   }

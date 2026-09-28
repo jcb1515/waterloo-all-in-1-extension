@@ -7,12 +7,12 @@
 // No requests and no navigation of THIS page; parsers.js does the parsing.
 import {
   buildSnapshot,
-  checkCount,
   checkNowRound,
   maybeRefresh,
   refreshGate,
 } from "./refresh.js";
 import { isLoggedOut } from "./parsers.js";
+import { guardInstance } from "./guard.js";
 
 const MY_ACCOUNT_RE =
   /^https:\/\/waterlooworks\.uwaterloo\.ca\/myAccount\//;
@@ -20,9 +20,13 @@ const MY_ACCOUNT_RE =
 (() => {
   // --- double-injection guard -------------------------------------------
   // The background re-injects content scripts into open tabs after an
-  // install/update/startup. Each injection gets its own chrome binding —
-  // capture this context's so liveness checks its OWN context: after an
-  // unload, reading the zombie's runtime.id throws.
+  // install/update/startup — and the new copy can share this world's
+  // chrome object, so runtime.id on the old copy is not a reliable
+  // liveness probe. guardInstance runs the DOM-event ping/pong/supersede
+  // handshake instead: a live owner pongs and this copy bails; otherwise
+  // this copy supersedes and the old one runs teardown() = inst.stop().
+  // Each injection still captures its own chrome binding for the orphan
+  // self-stop on a failed send (a zombie context's runtime.id throws).
   const ext = (() => {
     try {
       return chrome;
@@ -37,14 +41,15 @@ const MY_ACCOUNT_RE =
       return false;
     }
   };
-  const prev = /** @type {any} */ (globalThis).__wa1WwContent;
   /** @type {any} */
   const inst = {
-    alive,
     dead: false,
     observer: null,
     /** @type {Set<any>} */
     timers: new Set(),
+    /** @type {any} */ onMessage: null,
+    /** @type {(() => void)[]} */
+    onLoad: [],
     stop() {
       this.dead = true;
       try {
@@ -60,15 +65,23 @@ const MY_ACCOUNT_RE =
         }
       }
       this.timers.clear();
+      try {
+        ext?.runtime?.onMessage?.removeListener?.(this.onMessage);
+      } catch {
+        /* best-effort cleanup */
+      }
+      this.onMessage = null;
+      for (const fn of this.onLoad) {
+        try {
+          window.removeEventListener?.("load", fn);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+      this.onLoad = [];
     },
   };
-  if (prev && typeof prev.alive === "function" && prev.alive()) return;
-  globalThis.__wa1WwContent = inst;
-  try {
-    prev?.stop?.();
-  } catch {
-    /* best-effort cleanup */
-  }
+  if (!guardInstance("waterlooworks-content", () => inst.stop())) return;
   if (!alive()) {
     // This context is itself already orphaned — nothing here can work.
     inst.stop();
@@ -168,7 +181,7 @@ const MY_ACCOUNT_RE =
       const out = await checkNowRound();
       checkDone(runId, {
         ok: out.ok,
-        checked: (out.checked || 0) + checkCount(document),
+        checked: out.checked || 0,
         ...(out.reason ? { reason: out.reason } : {}),
       });
     } catch {
@@ -220,6 +233,7 @@ const MY_ACCOUNT_RE =
     }
   };
   try {
+    inst.onMessage = onCheckMessage;
     ext?.runtime?.onMessage?.addListener?.(onCheckMessage);
   } catch {
     inst.stop();
@@ -243,6 +257,7 @@ const MY_ACCOUNT_RE =
 
   send();
   window.addEventListener("load", send);
+  inst.onLoad.push(send);
   // A page that finishes rendering before the 3 s completeness mark may never
   // mutate again — resend once shortly after the mark so a complete=1
   // snapshot lands even on a static page (hash dedupe still applies). Once
@@ -256,6 +271,7 @@ const MY_ACCOUNT_RE =
     }, Math.max(0, loadedAt + 3000 - Date.now()) + 100);
   };
   window.addEventListener("load", resendAfterSettled);
+  inst.onLoad.push(resendAfterSettled);
   if (document.readyState === "complete") resendAfterSettled();
   inst.observer = new MutationObserver(schedule);
   inst.observer.observe(document.documentElement, {

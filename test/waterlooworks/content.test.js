@@ -35,22 +35,46 @@ function installPage(readyState = "loading") {
     parentElement: null,
     contains: () => false,
   };
+  const docListeners = {};
   const doc = {
     readyState,
     title: "Applications",
     documentElement: el,
     querySelectorAll: () => [el],
+    // The injection guard's ping/pong/supersede handshake runs on these.
+    addEventListener: (type, fn) =>
+      (docListeners[type] = docListeners[type] || []).push(fn),
+    removeEventListener: (type, fn) => {
+      const l = docListeners[type] || [];
+      const i = l.indexOf(fn);
+      if (i >= 0) l.splice(i, 1);
+    },
+    dispatchEvent: (ev) => {
+      for (const fn of [...(docListeners[ev.type] || [])]) fn(ev);
+      return true;
+    },
   };
   const loadHandlers = [];
   const sent = [];
   const timers = [];
   const realNow = Date.now;
+  const realCustomEvent = globalThis.CustomEvent;
   let fakeNow = realNow();
   globalThis.location = { href: URL };
   globalThis.document = doc;
+  globalThis.CustomEvent = class {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
   globalThis.window = {
     addEventListener: (type, fn) => {
       if (type === "load") loadHandlers.push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      const i = loadHandlers.indexOf(fn);
+      if (i >= 0) loadHandlers.splice(i, 1);
     },
   };
   globalThis.MutationObserver = class {
@@ -63,7 +87,13 @@ function installPage(readyState = "loading") {
     runtime: {
       id: "wa1-test",
       sendMessage: (m) => sent.push(m),
-      onMessage: { addListener: (fn) => listeners.push(fn) },
+      onMessage: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener: (fn) => {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
     },
     storage: { local: { get: async () => ({}) } },
   };
@@ -94,6 +124,8 @@ function installPage(readyState = "loading") {
       delete globalThis.window;
       delete globalThis.MutationObserver;
       delete globalThis.chrome;
+      if (realCustomEvent === undefined) delete globalThis.CustomEvent;
+      else globalThis.CustomEvent = realCustomEvent;
       delete /** @type {any} */ (globalThis).__wa1WwContent;
     },
   };

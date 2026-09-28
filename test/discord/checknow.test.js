@@ -6,7 +6,7 @@
 // Plus the double-injection guard for the background's re-injection.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseHTML } from "linkedom";
+import { CustomEvent, parseHTML } from "linkedom";
 
 const CONTENT = "../../extension/src/sources/discord/content.js";
 const CH_URL = "https://discord.com/channels/111/222";
@@ -42,6 +42,7 @@ function installDiscord({
   const realSetTimeout = globalThis.setTimeout;
   const realClearTimeout = globalThis.clearTimeout;
   const realPerformance = globalThis.performance;
+  const realCustomEvent = globalThis.CustomEvent;
   const parsed = parseHTML(`<html><body>${html}</body></html>`);
   const doc = parsed.document;
   try {
@@ -54,6 +55,9 @@ function installDiscord({
   }
   globalThis.document = doc;
   globalThis.location = { href: url };
+  // The injection guard's ping/pong/supersede handshake dispatches real
+  // CustomEvents through the linkedom document.
+  globalThis.CustomEvent = /** @type {any} */ (CustomEvent);
   // Below the 3 s settle mark: normal ticks read unsettled; a forced
   // check-now read counts as settled via readyState alone.
   globalThis.performance = /** @type {any} */ ({ now: () => 0 });
@@ -80,7 +84,13 @@ function installDiscord({
     runtime: {
       id: "wa1-test",
       sendMessage: (m) => sent.push(m),
-      onMessage: { addListener: (fn) => listeners.push(fn) },
+      onMessage: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener: (fn) => {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
     },
     storage: {
       local: {
@@ -126,6 +136,8 @@ function installDiscord({
       delete globalThis.location;
       delete globalThis.MutationObserver;
       delete globalThis.chrome;
+      if (realCustomEvent === undefined) delete globalThis.CustomEvent;
+      else globalThis.CustomEvent = realCustomEvent;
       delete /** @type {any} */ (globalThis).__wa1DiscordContent;
     },
   };
@@ -263,12 +275,16 @@ test("double injection registers one listener and one observer while alive", asy
     await import(`${CONTENT}?t=dinj${Date.now()}`);
     assert.equal(w.listeners.length, 1);
     assert.equal(w.observers.length, 1);
+    const firstListener = w.listeners[0];
+    // A second injection while the first is alive gets a pong and bails.
     await import(`${CONTENT}?t=dinj${Date.now()}b`);
     assert.equal(w.listeners.length, 1, "no second listener");
     assert.equal(w.observers.length, 1, "no second observer");
+    assert.equal(w.listeners[0], firstListener, "the owner kept its seat");
 
-    // Orphan the first instance: its context's runtime.id now throws,
-    // while the re-injection arrives with a fresh, valid chrome binding.
+    // Orphan the first instance: its own context's runtime.id now throws,
+    // so its ping listener stays silent while the re-injection arrives
+    // with a fresh, valid chrome binding — the new copy supersedes it.
     const oldChrome = /** @type {any} */ (globalThis.chrome);
     Object.defineProperty(oldChrome.runtime, "id", {
       configurable: true,
@@ -280,12 +296,21 @@ test("double injection registers one listener and one observer while alive", asy
       runtime: {
         id: "wa1-test-2",
         sendMessage: (m) => w.sent.push(m),
-        onMessage: { addListener: (fn) => w.listeners.push(fn) },
+        onMessage: {
+          addListener: (fn) => w.listeners.push(fn),
+          removeListener: (fn) => {
+            const i = w.listeners.indexOf(fn);
+            if (i >= 0) w.listeners.splice(i, 1);
+          },
+        },
       },
       storage: oldChrome.storage,
     };
     await import(`${CONTENT}?t=dinj${Date.now()}c`);
-    assert.equal(w.listeners.length, 2, "orphaned context is replaced");
+    // The orphan removed its listener in teardown, then the new copy
+    // registered — still exactly one, and it is not the old one.
+    assert.equal(w.listeners.length, 1, "orphaned context is replaced");
+    assert.notEqual(w.listeners[0], firstListener);
     assert.equal(w.observers.length, 2, "new observer installed");
     assert.equal(w.observers[0].disconnected, true, "orphan observer off");
   } finally {
@@ -297,8 +322,7 @@ test("an orphaned instance self-stops on a failed send", async () => {
   const w = installDiscord();
   try {
     await import(`${CONTENT}?t=dorp${Date.now()}`);
-    const inst = /** @type {any} */ (globalThis).__wa1DiscordContent;
-    assert.equal(inst.dead, false);
+    assert.equal(w.listeners.length, 1);
     // The extension context dies: sends throw, the id is gone.
     globalThis.chrome.runtime.id = undefined;
     globalThis.chrome.runtime.sendMessage = () => {
@@ -314,11 +338,15 @@ test("an orphaned instance self-stops on a failed send", async () => {
       );
     w.observers[0].cb();
     w.runTimers();
-    assert.equal(inst.dead, true, "the failed send stopped the orphan");
     assert.equal(w.observers[0].disconnected, true, "observer off");
-    // A check-now delivered to the dead context reads nothing.
+    assert.equal(
+      w.listeners.length,
+      0,
+      "check-now listener removed on self-stop"
+    );
+    // No listener remains — a check-now to the dead context reads nothing.
     const before = w.sent.length;
-    w.checkNow("r-dead");
+    assert.equal(w.checkNow("r-dead"), undefined);
     await w.flush();
     assert.equal(
       w.sent.length,

@@ -20,6 +20,7 @@ import {
   eventsModalExtract,
 } from "./dom.js";
 import { hashString } from "../../capture/redact.js";
+import { guardInstance } from "../waterlooworks/guard.js";
 
 // Same literal as core/store.js SETTINGS_KEY — the content bundle stays free
 // of core imports.
@@ -41,9 +42,13 @@ const SETTINGS_KEY = "wa1Settings";
 
   // --- double-injection guard -------------------------------------------
   // The background re-injects content scripts into open tabs after an
-  // install/update/startup. Each injection gets its own chrome binding —
-  // capture this context's so liveness checks its OWN context: after an
-  // unload, reading the zombie's runtime.id throws.
+  // install/update/startup — and the new copy can share this world's
+  // chrome object, so runtime.id on the old copy is not a reliable
+  // liveness probe. guardInstance runs the DOM-event ping/pong/supersede
+  // handshake instead: a live owner pongs and this copy bails; otherwise
+  // this copy supersedes and the old one runs teardown() = inst.stop().
+  // Each injection still captures its own chrome binding for the orphan
+  // self-stop on a failed send (a zombie context's runtime.id throws).
   const ext = (() => {
     try {
       return chrome;
@@ -58,14 +63,13 @@ const SETTINGS_KEY = "wa1Settings";
       return false;
     }
   };
-  const prev = /** @type {any} */ (globalThis).__wa1DiscordContent;
   /** @type {any} */
   const inst = {
-    alive,
     dead: false,
     observer: null,
     /** @type {Set<any>} */
     timers: new Set(),
+    /** @type {any} */ onMessage: null,
     stop() {
       this.dead = true;
       try {
@@ -81,15 +85,15 @@ const SETTINGS_KEY = "wa1Settings";
         }
       }
       this.timers.clear();
+      try {
+        ext?.runtime?.onMessage?.removeListener?.(this.onMessage);
+      } catch {
+        /* best-effort cleanup */
+      }
+      this.onMessage = null;
     },
   };
-  if (prev && typeof prev.alive === "function" && prev.alive()) return;
-  globalThis.__wa1DiscordContent = inst;
-  try {
-    prev?.stop?.();
-  } catch {
-    /* best-effort cleanup */
-  }
+  if (!guardInstance("discord-content", () => inst.stop())) return;
   if (!alive()) {
     // This context is itself already orphaned — nothing here can work.
     inst.stop();
@@ -289,6 +293,7 @@ const SETTINGS_KEY = "wa1Settings";
     }
   };
   try {
+    inst.onMessage = onCheckMessage;
     ext?.runtime?.onMessage?.addListener?.(onCheckMessage);
   } catch {
     inst.stop();
