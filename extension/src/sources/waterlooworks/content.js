@@ -96,6 +96,14 @@
 
   send();
   window.addEventListener("load", send);
+  // A page that finishes rendering before the 3 s completeness mark may never
+  // mutate again — resend once shortly after the mark so a complete=1
+  // snapshot lands even on a static page (hash dedupe still applies).
+  const resendAfterSettled = () => {
+    setTimeout(send, Math.max(0, loadedAt + 3000 - Date.now()) + 100);
+  };
+  window.addEventListener("load", resendAfterSettled);
+  if (document.readyState === "complete") resendAfterSettled();
   new MutationObserver(schedule).observe(document.documentElement, {
     childList: true,
     subtree: true,
