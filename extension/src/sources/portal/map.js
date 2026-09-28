@@ -601,20 +601,26 @@ export function mapEvents(rows, { scope, at, examIndex } = {}) {
       : `event:${row.key || hashString(`${title}|${row.startDate}`)}:${startDay}`;
 
     if (isLearn && !isTerm) {
-      const cm = title.match(LEARN_CODE);
+      // Learn's calendar export appends " due" (or leads with "Due:") on rows
+      // whose Learn item title lacks it — strip it so the mirror merges at the
+      // same title. The id hash above already used the raw title.
+      const clean =
+        title
+          .replace(/\s*[-–:]?\s*due\s*$/i, "")
+          .replace(/^\s*due\s*[:-]\s*/i, "")
+          .trim() || title;
+      const cm = clean.match(LEARN_CODE);
       const org = cm ? normCourseCode(`${cm[1]} ${cm[2]}`) : undefined;
-      const cls = classify({ title, kind: /\bquiz\b/i.test(title) ? "quiz" : undefined });
+      const cls = classify({ title: clean, kind: /\bquiz\b/i.test(clean) ? "quiz" : undefined });
       const base = {
         id: `portal:${key}`,
         source: /** @type {const} */ ("portal"),
-        title,
+        title: clean,
         org,
         location: row.location || undefined,
         details: row.description ? String(row.description).slice(0, 500) : undefined,
         status: /** @type {const} */ ("open"),
-        confidence: /** @type {const} */ ("tentative"),
-        review: /** @type {const} */ ("auto"),
-        meta: { feed: "Learn" },
+        meta: { feed: "Learn", ...(clean !== title ? { rawTitle: title } : {}) },
         seenIn: seenIn(key, scope, at),
         evidence: { ...EVIDENCE_CALENDAR },
       };
@@ -626,6 +632,8 @@ export function mapEvents(rows, { scope, at, examIndex } = {}) {
           category: cls.category && cls.type !== "exam" ? cls.category : undefined,
           dueAt: row.allDay ? dayEnd(startDay) : startAt,
           allDay: row.allDay || undefined,
+          confidence: "tentative",
+          review: "auto",
         });
         continue;
       }
@@ -651,11 +659,24 @@ export function mapEvents(rows, { scope, at, examIndex } = {}) {
           startAt,
           endAt,
           allDay: row.allDay || undefined,
+          confidence: "tentative",
+          review: "auto",
           meta: { feed: "Learn", rawTitle: title },
         });
         continue;
       }
-      // Timed non-exam Learn rows keep the generic event shape below.
+      // Timed non-exam Learn rows keep the generic event shape.
+      items.push({
+        ...base,
+        type: "event",
+        category: "campus",
+        startAt,
+        endAt,
+        allDay: row.allDay || undefined,
+        confidence: "exact",
+        review: "pending",
+      });
+      continue;
     }
     /** @type {Item} */
     const item = {

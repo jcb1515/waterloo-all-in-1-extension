@@ -626,6 +626,25 @@ test("DailyEventsV2 Learn feed: a timed non-exam row stays a pending event", asy
   assert.ok(it.id.startsWith("portal:learn:"));
 });
 
+test("DailyEventsV2 Learn feed: a trailing/leading 'due' is stripped to match Learn titles", async () => {
+  const res = await eventsParse([
+    learnRow("Assignment #3 due", "2026-10-04T00:00:00", "2026-10-04T23:59:00", { allDay: true }),
+    learnRow("Due: Lab report", "2026-10-05T17:00:00", "2026-10-05T17:00:00"),
+    learnRow("Due date extension request", "2026-10-06T12:00:00", "2026-10-06T12:00:00"),
+  ]);
+  assert.equal(res.items.length, 3);
+  const a3 = res.items.find((i) => /assignment/i.test(i.title));
+  assert.equal(a3.title, "Assignment #3");
+  assert.equal(a3.meta.rawTitle, "Assignment #3 due");
+  assert.equal(a3.dueAt, "2026-10-05T03:59:00.000Z"); // Oct 4 23:59 EDT
+  const lab = res.items.find((i) => /lab/i.test(i.title));
+  assert.equal(lab.title, "Lab report");
+  assert.equal(lab.meta.rawTitle, "Due: Lab report");
+  const ext = res.items.find((i) => /extension/i.test(i.title));
+  assert.equal(ext.title, "Due date extension request"); // no mid-title strip
+  assert.equal(ext.meta.rawTitle, undefined);
+});
+
 test("merge: a portal Learn-mirror deadline joins the Learn item", async () => {
   const res = await eventsParse([
     learnRow("WHMIS Completion", "2026-09-30T08:30:00", "2026-09-30T08:30:00"),
@@ -678,6 +697,35 @@ test("merge: with examIndex the Learn-mirror exam is never emitted — 1 canonic
   const feed = buildFeedPayload(out.items, {}, {}, NOW, { acceptPending: true });
   assert.equal(feed.count, 1);
   assert.equal(feed.collapsed, 0);
+});
+
+test("merge: a 'due'-suffixed mirror still joins the Learn item", async () => {
+  const res = await eventsParse([
+    learnRow("Assignment #3 due", "2026-10-04T00:00:00", "2026-10-04T23:59:00", { allDay: true }),
+  ]);
+  const mirror = res.items[0];
+  const learnItem = {
+    id: "learn:MATH117:dropbox:a3",
+    source: "learn",
+    type: "deadline",
+    title: "Assignment #3",
+    org: "MATH 117",
+    dueAt: mirror.dueAt, // Oct 4 23:59 Toronto
+    status: "open",
+    confidence: "exact",
+    review: "auto",
+    seenIn: [{ source: "learn", key: "k", scope: "learn:math117", at: NOW.toISOString() }],
+    evidence: { method: "api" },
+  };
+  const out = recompute({
+    raws: {
+      portal: { items: [mirror], updatedAt: NOW.toISOString() },
+      learn: { items: [learnItem], updatedAt: NOW.toISOString() },
+    },
+    now: NOW,
+  });
+  assert.equal(Object.keys(out.items).length, 1);
+  assert.equal(Object.values(out.items)[0].title, "Assignment #3");
 });
 
 test("merge: a Learn-mirror exam starting within the hour is still suppressed", async () => {
