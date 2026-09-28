@@ -173,8 +173,8 @@ export function dedupeMailItems(items) {
       continue;
     }
     const threads = new Set([
-      ...((dup.meta && dup.meta.threads) || []),
-      ...((it.meta && it.meta.threads) || []),
+      .../** @type {any[]} */ ((dup.meta && dup.meta.threads) || []),
+      .../** @type {any[]} */ ((it.meta && it.meta.threads) || []),
       dup.evidence && dup.evidence.url,
       it.evidence && it.evidence.url,
     ].filter(Boolean));
