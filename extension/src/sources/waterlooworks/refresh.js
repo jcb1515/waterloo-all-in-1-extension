@@ -11,7 +11,7 @@
 // element set and scrubs every on* attribute and javascript: href on a CLONE
 // first — no buildForm token can ride into a payload.
 
-import { isLoggedOut } from "./parsers.js";
+import { detectPage, isLoggedOut } from "./parsers.js";
 
 const MAX_BYTES = 1.5 * 1024 * 1024;
 const OBSERVE_SEL = [
@@ -161,7 +161,7 @@ function scrubAttrs(root) {
  * allowed returns false — the walker can only ever activate read-only
  * controls, never apply/withdraw/decline/book actions.
  * @param {any} el
- * @param {"interviews"|"applications"|"pagination"} step
+ * @param {"interviews"|"applications"|"pagination"|"interview-detail"} step
  * @returns {boolean}
  */
 export function allowedClick(el, step) {
@@ -184,6 +184,26 @@ export function allowedClick(el, step) {
     );
     if (!/buildForm\s*\(/.test(onclick)) return false;
     const row = typeof el.closest === "function" ? el.closest("tr") : null;
+    if (step === "interview-detail") {
+      // A grid row's "current tab" dropdown link: buildForm with EXACTLY
+      // {action, interviewId} posting into this tab (empty target). Any
+      // extra key, a _blank/"new tab" target, a different link text, or a
+      // row outside the interviews grid fails.
+      if (
+        !/buildForm\s*\(\s*\{\s*action\s*:\s*'[^']+'\s*,\s*interviewId\s*:\s*'\d+'\s*\}\s*,\s*'[^']*'\s*,\s*''\s*\)/.test(
+          onclick
+        )
+      ) {
+        return false;
+      }
+      if (text(el) !== "current tab") return false;
+      const tbody = row?.closest ? row.closest("tbody") : null;
+      const table = row?.closest ? row.closest("table") : null;
+      if (!tbody || !table) return false;
+      return qsa(table, "th").some((th) =>
+        /interview date|job id/i.test(text(th))
+      );
+    }
     const label = labelText(row?.cells?.[0] ?? row?.querySelector?.("td"));
     if (step === "interviews") {
       const m = onclick.match(
@@ -387,6 +407,8 @@ const readyInterviewView = (d) => {
   return /no data to display/i.test(docText(d));
 };
 
+const readyInterviewDetail = (d) => detectPage(d, {}) === "interview-detail";
+
 const readyAppsLanding = (d) => docText(d).includes("Total Submitted");
 
 const readyAppsGrid = (d) => {
@@ -438,7 +460,80 @@ const viewStepName = (label) =>
     ? "interviews-unscheduled"
     : "interviews-booked";
 
-async function interviewViews(frame, send, runStep) {
+/** Detail visits allowed per round, across all interview views. */
+const MAX_DETAILS = 10;
+
+/** tbody rows of the interviews grid (Interview Date / Job ID headers). */
+const interviewGridRows = (d) => {
+  const table = qsa(d, "table").find((t) =>
+    qsa(t, "th").some((th) => /interview date|job id/i.test(text(th)))
+  );
+  return table ? qsa(table, "tbody tr") : [];
+};
+
+const interviewIdOf = (a) => {
+  const m = String(a?.getAttribute?.("onclick") || "").match(
+    /interviewId\s*:\s*'(\d+)'/
+  );
+  return m ? m[1] : null;
+};
+
+/**
+ * Visit each grid row's interview-detail page — the "current tab" link is
+ * the only read-only way to the timeslot deadlines and booking details —
+ * capped by `budget` across the whole round. After every detail the view
+ * is re-entered (landing → its View row) so the next row's grid is back.
+ */
+async function interviewDetails(frame, send, runStep, viewLabel, budget) {
+  for (let i = 0; ; i++) {
+    const d = docOf(frame);
+    if (!d) return;
+    const rows = interviewGridRows(d);
+    if (i >= rows.length || budget.used >= MAX_DETAILS) return;
+    const link = qsa(rows[i], "a").find((a) =>
+      allowedClick(a, "interview-detail")
+    );
+    if (!link) continue; // a row without a detail link — still on the view
+    budget.used += 1;
+    await runStep("interview-detail", async () => {
+      const r = await clickStep(
+        link,
+        "interview-detail",
+        frame,
+        readyInterviewDetail
+      );
+      if (r !== "ok") return r;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      send(frame);
+      return "ok";
+    });
+    if (i + 1 >= rows.length) return; // no next row — leave via the caller
+    // Re-enter this view (landing → its View row) before the next row.
+    const back = await runStep("interviews-landing", async () => {
+      const nav = await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding);
+      if (nav !== "ok") return nav;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      return "ok";
+    });
+    if (back !== "ok") return;
+    const reenter = await runStep(viewStepName(viewLabel), async () => {
+      const d2 = docOf(frame);
+      const vr =
+        d2 &&
+        interviewRows(d2, new Set()).find((r) => rowLabel(r) === viewLabel);
+      const a =
+        vr && qsa(vr, "a").find((x) => allowedClick(x, "interviews"));
+      if (!a) return "not-ready";
+      const r = await clickStep(a, "interviews", frame, readyInterviewView);
+      if (r !== "ok") return r;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      return "ok"; // already sent once — don't re-send the same view
+    });
+    if (reenter !== "ok") return;
+  }
+}
+
+async function interviewViews(frame, send, runStep, budget) {
   const done = new Set();
   for (;;) {
     const d = docOf(frame);
@@ -457,6 +552,8 @@ async function interviewViews(frame, send, runStep) {
       return "ok";
     });
     if (view !== "ok") return;
+    // Each grid row's detail page (timeslot deadlines / booking details).
+    await interviewDetails(frame, send, runStep, label, budget);
     // Back to the landing before the next view.
     const back = await runStep("interviews-landing", async () => {
       const nav = await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding);
@@ -556,6 +653,7 @@ export async function runRefreshRound() {
     }
   };
   const frame = makeFrame(document);
+  const budget = { used: 0 };
   try {
     try {
       document.body?.appendChild?.(frame);
@@ -581,7 +679,7 @@ export async function runRefreshRound() {
       if (signedOut(frame)) throw SIGNED_OUT;
       return "ok";
     });
-    if (landing === "ok") await interviewViews(frame, send, runStep);
+    if (landing === "ok") await interviewViews(frame, send, runStep, budget);
     // 3. Applications landing → Total view → paginate.
     const apps = await runStep("apps-landing", async () => {
       const nav = await navigate(frame, APPLICATIONS_URL, readyAppsLanding);

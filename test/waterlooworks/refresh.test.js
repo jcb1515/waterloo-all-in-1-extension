@@ -129,6 +129,66 @@ test("allowedClick: numeric pagination links 2-10 only", async () => {
   assert.equal(allowedClick(btn, "pagination"), false);
 });
 
+// --- interview-detail allowlist (live shape from the booked grid) ----------
+
+const detailGrid = (onclick, linkText = "current tab") =>
+  docOf(`<table>
+    <thead><tr class="tablesorter-headerRow" role="row">
+      <th>Term</th><th>Schedule Status</th><th>Interview Date / Time</th>
+      <th>Type</th><th>Location</th><th>Method</th><th>Job ID</th>
+      <th>Job Title</th><th>Organization</th><th>Division</th>
+    </tr></thead>
+    <tbody><tr>
+      <td>2027 - Winter</td><td>Open</td><td>Confirmed</td>
+      <td>Oct 02, 2026 04:00 PM</td>
+      <td><div class="btn-group">
+        <a href="javascript:void(0)" class="btn dropdown-toggle">view</a>
+        <ul class="dropdown-menu"><li>
+          <a href="javascript:void(0)" onclick="${onclick}">${linkText}</a>
+        </li></ul>
+      </div></td>
+      <td>Individual</td><td>Main Campus</td><td>In-Person</td>
+      <td>488135</td><td>Job Title</td><td>Org</td><td>Div</td>
+    </tr></tbody>
+  </table>`);
+
+const detailOc = `orbisApp.buildForm({action:'${TOKEN}', interviewId:'159938'}, '/myAccount/co-op/full/interviews.htm', '').submit();`;
+
+test("allowedClick accepts only the interviews-grid 'current tab' detail link", async () => {
+  const { allowedClick } = await import(MOD);
+  const a = detailGrid(detailOc).querySelector("ul.dropdown-menu a");
+  assert.equal(allowedClick(a, "interview-detail"), true);
+  // `_blank` (the "new tab" variant) is never ours to click.
+  const blank = detailGrid(
+    `orbisApp.buildForm({action:'${TOKEN}', interviewId:'159938'}, '/myAccount/co-op/full/interviews.htm', '_blank').submit();`,
+    "new tab"
+  ).querySelector("ul.dropdown-menu a");
+  assert.equal(allowedClick(blank, "interview-detail"), false);
+  // Any extra object key fails — only {action, interviewId} is allowed.
+  const extra = detailGrid(
+    `orbisApp.buildForm({action:'${TOKEN}', interviewId:'159938', status:'x'}, '/x', '').submit();`
+  ).querySelector("ul.dropdown-menu a");
+  assert.equal(allowedClick(extra, "interview-detail"), false);
+  // Wrong link text.
+  const wrongText = detailGrid(detailOc, "open").querySelector(
+    "ul.dropdown-menu a"
+  );
+  assert.equal(allowedClick(wrongText, "interview-detail"), false);
+  // A non-grid table (no Interview Date/Job ID header).
+  const nonGrid = docOf(`<table><thead><tr><th>Name</th></tr></thead>
+    <tbody><tr><td><a href="javascript:void(0)" onclick="${detailOc}">current tab</a></td></tr></tbody></table>`)
+    .querySelector("a");
+  assert.equal(allowedClick(nonGrid, "interview-detail"), false);
+  // Outside any table.
+  const loose = docOf(
+    `<div><a href="javascript:void(0)" onclick="${detailOc}">current tab</a></div>`
+  ).querySelector("a");
+  assert.equal(allowedClick(loose, "interview-detail"), false);
+  // The detail step must not unlock the other allowlist entries either.
+  assert.equal(allowedClick(a, "interviews"), false);
+  assert.equal(allowedClick(a, "applications"), false);
+});
+
 // ---------------------------------------------------------------------------
 // round orchestration — fake DOM/timers
 
@@ -673,6 +733,143 @@ test("a form click does not satisfy readiness on the pre-click document", async 
     );
     assert.equal(
       res.steps.find((s) => s.step === "interviews-booked").ok,
+      true
+    );
+  } finally {
+    world.restore();
+  }
+});
+
+test("the round visits an unscheduled row's detail page and sends it", async () => {
+  // The Unscheduled view's grid row carries a "current tab" detail link;
+  // the round clicks it, waits for the detail load, and sends the page —
+  // which observe.parse turns into the interview-timeslot deadline.
+  const { readFileSync } = await import("node:fs");
+  const detailDoc = parseHTML(
+    readFileSync(
+      new URL(
+        "../fixtures/waterlooworks/interview-detail-unbooked.html",
+        import.meta.url
+      ),
+      "utf8"
+    )
+  ).document;
+
+  const world = installWorld();
+  try {
+    const { runRefreshRound } = await import(MOD);
+    let frame;
+
+    // The interviews grid (one row) with a live-shaped "current tab" link.
+    const th = (t) => ({ textContent: t });
+    const detailLink = {
+      tagName: "A",
+      textContent: "current tab",
+      getAttribute: (n) =>
+        n === "onclick"
+          ? `orbisApp.buildForm({action:'${TOKEN}', interviewId:'159938'}, '/x', '').submit();`
+          : null,
+      closest: (sel) => (sel === "tr" ? gridTr : null),
+      click: () => {
+        world.timers.push({
+          due: Date.now() + 30,
+          fn: () => {
+            frame.contentDocument = detailDoc;
+            frame.fire("load");
+          },
+        });
+      },
+    };
+    const gridTable = {
+      querySelectorAll: (sel) =>
+        sel === "th"
+          ? [th("Interview Date / Time"), th("Job ID")]
+          : sel === "tbody tr"
+            ? [gridTr]
+            : [],
+    };
+    const gridTr = {
+      cells: [{ textContent: "2027 - Winter" }],
+      closest: (sel) => (sel === "tbody" ? {} : sel === "table" ? gridTable : null),
+      querySelectorAll: (sel) => (sel === "a" ? [detailLink] : []),
+    };
+    const viewDoc = mkDoc({
+      title: "Interviews",
+      text: "grid",
+      selectors: {
+        table: [gridTable],
+        th: [th("Interview Date / Time"), th("Job ID")],
+      },
+    });
+
+    // The landing's Unscheduled row: count 1, View anchor.
+    const unschedAnchor = {
+      tagName: "A",
+      textContent: "View",
+      getAttribute: (n) =>
+        n === "onclick"
+          ? `orbisAppSr.buildForm({'action':'${TOKEN}','numOfDays':'0','selectedFilter':'unscheduled'}, '/x', '').submit();`
+          : null,
+      closest: () => unschedRow,
+      click: () => {
+        world.timers.push({
+          due: Date.now() + 30,
+          fn: () => {
+            frame.contentDocument = viewDoc;
+            frame.fire("load");
+          },
+        });
+      },
+    };
+    const unschedCells = [
+      { textContent: "Unscheduled Interviews" },
+      { textContent: "1" },
+    ];
+    const unschedRow = {
+      cells: unschedCells,
+      querySelectorAll: (sel) => (sel === "a" ? [unschedAnchor] : []),
+      querySelector: () => unschedCells[0],
+    };
+    const landingDoc = mkDoc({
+      title: "Interviews",
+      text: "Unscheduled Interviews",
+      selectors: {
+        tr: [
+          // The live landing always lists Booked too (count 0 → skipped).
+          {
+            cells: [{ textContent: "Booked Interviews" }, { textContent: "0" }],
+            querySelectorAll: () => [],
+          },
+          unschedRow,
+        ],
+      },
+    });
+
+    const d = settle(runRefreshRound());
+    frame = world.frames[0];
+    frame.routes = {
+      "/myAccount/dashboard.htm": mkDoc({
+        title: "WaterlooWorks Dashboard",
+        selectors: { table: [{}] },
+      }),
+      "/myAccount/co-op/full/interviews.htm": landingDoc,
+      "/myAccount/co-op/full/applications.htm": mkDoc({
+        title: "Applications",
+      }),
+    };
+    await world.drain(d.done);
+    const res = await d.q;
+
+    // One interview-detail snapshot was sent — the fixture's page kind.
+    const detailSend = world.sent.find((m) =>
+      m.payload.body.includes("INTERVIEW DETAILS")
+    );
+    assert.ok(detailSend, "a detail-page snapshot was sent");
+    assert.ok(!detailSend.payload.body.includes(TOKEN));
+    const steps = res.steps.map((s) => s.step);
+    assert.ok(steps.includes("interview-detail"));
+    assert.equal(
+      res.steps.find((s) => s.step === "interview-detail").ok,
       true
     );
   } finally {
