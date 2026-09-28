@@ -23,25 +23,40 @@ statuses, event ids or calendar ids.
   events: [{title, startAt, endAt?, allDay, calendarKind}] }
 ```
 
-- **view** comes from `/calendar/u/<n>/r/<view>/<y>/<m>/<d>`:
-  `day`→day, `week`/`customweek`→week, `month`→month, `agenda`→schedule,
-  anything else→other. A missing date means "today" (`now`, Toronto).
-- **range** is the visible window: day `[d, d+1)`; week `[Sunday on/before d, +7)`;
-  month `[Sunday on/before the 1st, +42 days)` (6 rows); schedule/other `null`.
-- **events** come from `[data-eventid]` chips (`aria-label`, else the first
-  descendant whose text starts with a time range or "All day", else the
-  element text) and an open `[role="dialog"]` detail popup (heading + a
+- **view** is DOM-first: a top-level `[data-viewkey]` in caps (`"WEEK"`,
+  `"DAY"`, `"MONTH"`, `"AGENDA"`, `"CUSTOM_DAYS"`) — the view-switcher
+  menuitems carry the same attribute in lowercase and are ignored. The URL
+  path `/calendar/u/<n>/r/<view>/<y>/<m>/<d>` is the fallback
+  (`day`→day, `week`/`customweek`→week, `month`→month, `agenda`→schedule).
+- **range** is the visible window, DOM-first: `[data-date]` day stamps
+  inside the `[data-is-column-view-context]` grid (min..max, half-open
+  Toronto midnights — the sidebar month picker's stamps are *outside*
+  that container and never count), then the `[role="columnheader"]`
+  "Sun27"-style day numbers resolved against the anchor, then the title
+  ("… Week of September 27, 2026"), then the URL. Fall-back computation:
+  day `[d, d+1)`; week `[Sunday on/before d, +7)`; month `[Sunday
+  on/before the 1st, +42 days)`; schedule/other `null` (never deletes).
+- **events** come from `[data-eventid]` chips (`aria-label`, else the
+  visually-hidden leaf whose text starts with a month-date, a time range
+  or "All day" — a year in the text is preferred — else the element text)
+  and an open `[role="dialog"]` detail popup (heading + a
   `"Tuesday, September 29 ⋅ 1:00 – 1:30pm"` when-line, `⋅`/`·`/`•` normalised,
   parsed with textdates now-relative).
 - **Chip labels** (`parseChipLabel`, exported) are comma-separated segments:
-  `"1pm to 1:30pm, <title>, …, September 29, 2026"` or `"All day, <title>, …"`.
+  `"1pm to 1:30pm, <title>, …, September 29, 2026"`, `"All day, <title>, …"`,
+  plus the long-span heads `"September 8, 2026 at 8am to December 23, 2026
+  at 11:59pm, <title>, …"` (midnight-to-midnight reads as all-day) and the
+  single-point `"September 27, 2026 at 12:59am, <title>, …"`.
   The title is the first segment after the prefix — **a title containing a
   comma is truncated at that comma (accepted)**. Middle segments (owner,
-  response, location) are discarded. No date segment → the URL date. An
+  response, location) are discarded. No date segment → the anchor date. An
   all-day range end is the exclusive midnight after the last day; a timed end
-  earlier than the start rolls to the next day.
+  earlier than the start rolls to the next day. A `Calendar: <name>` middle
+  segment names the chip's calendar: it marks the event `subscribed` unless
+  the decoded event id already says `own`.
 - **Dedupe** is lowercase title + startAt; on a tie the better calendarKind
-  wins (own > subscribed > unknown), so an open popup merges with its chip.
+  wins (own > subscribed > unknown), so an open popup merges with its chip
+  and a multi-day event's one-chip-per-day cells collapse to one event.
 
 ## calendarKind (data-eventid)
 
@@ -98,9 +113,12 @@ list (`{id, label, how, page}`).
 
 ## VERIFY (unconfirmed against live pages)
 
-- `[data-eventid]` chips, their aria-label wording, and the popup's
-  `role="dialog"` + `⋅`-separated when-line are structural guesses — tune
-  `selectors.js` on a real render.
-- The base64 `"<eventId> <calendarId>"` decode and the `@m`/`@import`/
-  `group.v` classification need confirming against real ids.
+- Confirmed on a real Week render: `[data-viewkey]` on `<body>`, the
+  `[data-is-column-view-context]` container, `[role="columnheader"]` day
+  columns, the hidden description leaf in each chip, the long-span and
+  single-point label heads, and `Calendar: <name>` segments.
+- Still unconfirmed: day/month/schedule view DOM markers (the fixture
+  shapes are extrapolations), the `role="dialog"` popup when-line on the
+  real page, and the `@m`/`@import`/`group.v` id classification against
+  a wider set of real ids.
 - The account-button selector is shared with Gmail and assumed identical.
