@@ -817,12 +817,11 @@ test("privacy: my account address never leaves the page", async () => {
 
 test("email sources contain no forbidden APIs", () => {
   const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "email");
+  const FILES = ["content.js", "atom.js", "dom.js", "index.js", "rules.js", "selectors.js", "extract.js"];
   const FORBIDDEN = [
-    /\bfetch\s*\(/,
     /XMLHttpRequest/,
     /\bWebSocket\b/,
     /localStorage/,
-    /sessionStorage/,
     /document\.cookie/,
     /webpackChunk/,
     /\.click\s*\(/,
@@ -831,10 +830,43 @@ test("email sources contain no forbidden APIs", () => {
     /location\.replace\s*\(/,
     /history\.pushState/,
   ];
-  for (const file of ["content.js", "dom.js", "index.js", "rules.js", "selectors.js", "extract.js"]) {
+  for (const file of FILES) {
     const src = fs.readFileSync(path.join(SRC, file), "utf8");
     for (const re of FORBIDDEN) {
       assert.equal(re.test(src), false, `${file} contains ${re}`);
     }
+  }
+
+  // Network allowlist: the one request this source may ever make is
+  // GET /mail/u/<n>/feed/atom, issued by atom.js' injected fetchImpl and
+  // bound to window.fetch in content.js. Nothing else may fetch, and the
+  // sessionStorage throttle stamp is confined to those two files.
+  for (const file of FILES) {
+    const src = fs.readFileSync(path.join(SRC, file), "utf8");
+    const fetches = src.match(/\bfetch\s*\(/g) || [];
+    if (file === "content.js") {
+      assert.equal(fetches.length, 1, "content.js binds fetch once, for the atom env");
+    } else {
+      assert.equal(fetches.length, 0, `${file} must not fetch`);
+    }
+    const sessions = src.match(/sessionStorage/g) || [];
+    if (file !== "content.js" && file !== "atom.js") {
+      assert.equal(sessions.length, 0, `${file} must not touch sessionStorage`);
+    }
+    // The only request URL the reader builds anywhere is the Atom feed;
+    // /mail/u/…#… urls are Gmail page links for items, never requests.
+    for (const m of src.matchAll(/\/mail\/u\/[^'"`\s]+/g)) {
+      assert.ok(
+        m[0].includes("#") || m[0].endsWith("/feed/atom"),
+        `${file} builds a non-atom mail url: ${m[0]}`,
+      );
+    }
+  }
+  const atom = fs.readFileSync(path.join(SRC, "atom.js"), "utf8");
+  assert.ok(atom.includes("/feed/atom"), "atom.js carries the feed path");
+  // Absolute urls it builds are Gmail thread links for items — never a
+  // request target off mail.google.com.
+  for (const m of atom.matchAll(/https?:\/\/[^'"`\s]+/g)) {
+    assert.ok(m[0].startsWith("https://mail.google.com/mail/u/"), m[0]);
   }
 });
