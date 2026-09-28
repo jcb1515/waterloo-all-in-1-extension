@@ -228,7 +228,7 @@ export function auditStore(snapshot = {}, now = new Date()) {
   const unknownRaws = [];
   for (const [key, raw] of Object.entries(raws)) {
     const src = key.slice(4);
-    if (!SOURCE_SET.has(src)) {
+    if (!SOURCE_SET.has(/** @type {any} */ (src))) {
       unknownRaws.push(key);
       continue;
     }
