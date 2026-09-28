@@ -250,10 +250,14 @@ const adapter = {
       // feed can never delete its item. Backfill batches scope as
       // `email:<provider>:backfill`; EVERY listed message in a sent batch
       // also re-reads its own `email:<provider>:<key>` scope, so a re-read
-      // under current rules drops items/tasks it no longer produces. (A
-      // payload only ever contains fully processed rows — an aborted page
-      // is never sent — and needsBody is deterministic per row+settings,
-      // so a still-gated row got its body this pass too.)
+      // under current rules drops items/tasks it no longer produces. Those
+      // per-message scopes go in `replaceScopes`, NOT `readOk`: readOk
+      // entries land in scopeOkAt/scopeReadAt, which are capped at 50 per
+      // source, and a 50-message batch would evict `email:<provider>:list`
+      // and `email:<provider>:backfill` — the scopes the checklist rows
+      // track. (A payload only ever contains fully processed rows — an
+      // aborted page is never sent — and needsBody is deterministic per
+      // row+settings, so a still-gated row got its body this pass too.)
       const keys = new Set(msgs.map((m) => String(m.key)));
       const scope =
         data.view === "atom"
@@ -263,12 +267,14 @@ const adapter = {
             : allowed && data.view === "message" && keys.size === 1
               ? `email:${provider}:${[...keys][0]}`
               : `email:${provider}:list`;
-      const readOk = isBackfill
-        ? [
-            scope,
-            ...new Set(msgs.map((m) => `email:${provider}:${String(m.key)}`)),
-          ]
-        : [scope];
+      const readOk = [scope];
+      /** Extra scopes this read replaces. Pending W1: applyResult's "scope"
+       * mode doesn't read `replaceScopes` yet, so until it does a backfill
+       * re-read is additive (items a message no longer produces stay, like
+       * the list/Atom reads); once wired, per-message scopes replace. */
+      const replaceScopes = isBackfill
+        ? [...new Set(msgs.map((m) => `email:${provider}:${String(m.key)}`))]
+        : undefined;
 
       // Backfill bookkeeping: threadMap (lastMessageId -> threadId, newest
       // 2000) feeds the Atom id mapping; the `final` batch's marker becomes
@@ -336,6 +342,7 @@ const adapter = {
         complete: true,
         readOk,
         scope,
+        ...(replaceScopes ? { replaceScopes } : {}),
         // No session on a successful read: the scheduler only refreshes
         // lastOkAt/itemCount/complete when `session` is absent.
         state,

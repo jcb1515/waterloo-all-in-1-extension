@@ -600,11 +600,14 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
     ctx({}),
   );
   assert.equal(res.scope, "email:gmail:backfill");
-  assert.ok(res.readOk.includes("email:gmail:backfill"));
+  // readOk stays the single batch scope — per-message scopes live in
+  // replaceScopes so they can't flood the 50-entry scopeOkAt/scopeReadAt
+  // caps and evict the checklist's list/backfill scopes.
+  assert.deepEqual(res.readOk, ["email:gmail:backfill"]);
   // Every listed row re-reads its own message scope — a re-read under the
-  // current rules drops whatever the row no longer produces.
-  assert.ok(res.readOk.includes("email:gmail:thr1"));
-  assert.ok(res.readOk.includes("email:gmail:thr2"));
+  // current rules drops whatever the row no longer produces (once W1's
+  // applyResult consumes replaceScopes; until then additive like lists).
+  assert.deepEqual(res.replaceScopes.sort(), ["email:gmail:thr1", "email:gmail:thr2"]);
   assert.equal(res.state.threadMap.m1last, "thr1");
   assert.equal(res.state.backfill.gmail.v, 2);
   assert.equal(res.state.backfill.gmail.lookbackDays, 30);
@@ -612,6 +615,33 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
   assert.equal(res.state.backfill.gmail.newestAt, "2026-09-29T18:00:00.000Z");
   assert.ok(res.items.length >= 1);
   assert.equal(res.items[0].source, "gmail");
+});
+
+test("adapter: a 50-message batch still readOks a single scope", async () => {
+  const msgs = Array.from({ length: 50 }, (_, i) => ({
+    key: `m${i}`,
+    url: `https://outlook.office.com/mail/inbox/id/m${i}`,
+    from: "Sender",
+    fromEmail: "sender@example.com",
+    subject: `Note ${i}`,
+    receivedAt: "2026-09-29T18:00:00.000Z",
+    links: [],
+  }));
+  const res = await adapter.observe.parse(
+    payload("outlook", {
+      v: 1,
+      provider: "outlook",
+      folder: "inbox",
+      view: "backfill",
+      messages: msgs,
+      backfill: { runId: "o1", full: true, lookbackDays: 30, since: null, batch: 0, final: true, checked: 50 },
+    }),
+    ctx({}),
+  );
+  assert.equal(res.scope, "email:outlook:backfill");
+  assert.deepEqual(res.readOk, ["email:outlook:backfill"]);
+  assert.equal(res.replaceScopes.length, 50);
+  assert.ok(res.replaceScopes.includes("email:outlook:m49"));
 });
 
 test("adapter: Atom ids map through threadMap so one message keeps one id", async () => {
