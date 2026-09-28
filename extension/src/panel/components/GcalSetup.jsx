@@ -40,6 +40,10 @@ export function GcalRead({ src, st, save, sync, now }) {
         {ics ? ` · ${ics.events || 0} events` : ""}
         {st && st.lastOkAt ? ` · last read ${fmtAgo(st.lastOkAt, now || new Date())}` : ""}
       </p>
+      <p class="help">
+        Existing duplicates disappear from Google Calendar after it next
+        refreshes your subscription (up to about a day).
+      </p>
       <div class="source-actions">
         <button type="button" class="btn btn-sm" onClick={sync}>
           Check again now
