@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.3.0 — 2026-09-28
+
+### To-dos from everywhere
+
+- **One To-do list for every source**: replies, interview bookings, offer
+  responses, rankings, forms, documents, fees and "apply" deadlines now
+  come from WaterlooWorks, Gmail, Outlook and Discord, grouped Overdue /
+  Today / This week / Later / No date. Every row shows its full date, its
+  sources, **Done**, **Snooze** and **Open** (straight to the email or
+  WaterlooWorks page).
+- **No double to-dos**: the same ask from different places (say, an
+  interview-booking email and the WaterlooWorks time-slot page) becomes one
+  to-do, with WaterlooWorks' version preferred. Booking the interview on
+  WaterlooWorks ticks the to-do off by itself.
+- **Rankings stay at one to-do per work term**, even now that WaterlooWorks
+  reports it too, and the calendar shows the co-op "rankings close" date
+  only once.
+- To-dos without a real due date sit under **No date** and never go to your
+  calendar.
+
+### Easier to use
+
+- **Visible Add buttons**: "+ Add to-do" in To-do, "+ Add" in Upcoming, and
+  a "+" on every Calendar day that fills in the date for you.
+- **New More menu**: a full-width list of Courses, Co-op, Teams and
+  Projects with a short description and a count for each ("1 interview",
+  "5 this week"). It works with the arrow keys and Esc.
+- The tab strip fits the side panel at every width without cutting off
+  "Upcoming" or "More".
+- **Get set up ticks right away**: a row shows "Opened" as soon as you click
+  Open and "Read" once the page is read, even if the site had nothing new.
+  Source tiles use the same rule, so a tile no longer says "stale" right
+  after you've opened the site. If an opened source still hasn't been read
+  after 30 minutes, its tile says so.
+- **Overdue shows only real work**: past co-op dates, events and term dates
+  no longer appear as "late". Upcoming shows items up to two weeks overdue;
+  the To-do tab keeps the rest.
+- **Clashes are real clashes**: all-day items (like a co-op interview
+  period) no longer "clash" with every class that week.
+
+### Sources and reading
+
+- **Mail is read automatically** from an open Gmail or Outlook tab. The
+  first read covers the last 30 days (7–90, your choice), then only newer
+  mail every 30 minutes. Reading never changes what shows as unread. The
+  guided mail scan is gone.
+- **Google Calendar duplicate check** reads your own calendars' export
+  every 6 hours, and when you open the panel if the last check is over 30
+  minutes old.
+- **WaterlooWorks dashboard events** (info sessions, workshops) are picked
+  up. Ones you're registered for go on your calendar; the rest wait in
+  Review.
+- **My Jobs folders**: saved jobs you still qualify for and haven't applied
+  to get an "Apply" to-do due at the posting deadline.
+- Course outline dates that landed in the wrong year (for example a
+  symposium showing as "308 days late") now use the term's year.
+
+### Privacy
+
+- PRIVACY.md now covers the automatic mail read (including how Outlook's
+  own sign-in token is used inside the Outlook tab and never stored), the
+  Google Calendar export, WaterlooWorks events and My Jobs folders.
+
 ## 1.2.0 — 2026-09-28
 
 ### New panel
