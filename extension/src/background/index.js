@@ -285,9 +285,10 @@ async function runAudit() {
 
 /** wa1:probe — a content script's page probe. Latest result per page only. */
 async function recordProbeResult(msg) {
-  return enqueue(() =>
-    mutateKey("probes", (cur) => recordProbe(cur || {}, msg))
-  );
+  // mutateKey already serialises on the store queue — wrapping it in another
+  // enqueue() self-deadlocks (outer task waits on the inner one, which waits
+  // on the outer's queue slot).
+  return mutateKey("probes", (cur) => recordProbe(cur || {}, msg));
 }
 
 /**
