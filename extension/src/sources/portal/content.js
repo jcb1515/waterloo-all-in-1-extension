@@ -13,15 +13,19 @@
 //     trigger could rotate the token and sign the user out of their tab);
 //   - never throw into the page.
 //
-// Rounds resume where they stopped: Edge freezes hidden tabs and a fetch
-// issued just before the freeze can hang for minutes, so progress lives in
-// module memory (`pending`), endpoints only ever run once, and the round
-// continues on visibilitychange / the Page Lifecycle `resume` event. A
-// round counts as complete only after all four endpoints were attempted —
-// only then is `lastFetch` stamped (30 min gap, 5 min when anything
-// failed). A short-lived sessionStorage in-progress marker (2 min) keeps a
-// second load from racing a live round, and `wa1:portal:lastRound` keeps a
-// redacted per-endpoint summary for debugging.
+// Rounds advance whenever the page is not frozen — a hidden tab that is
+// merely backgrounded still runs. Edge freezes hidden tabs and a fetch
+// issued just before the freeze can hang until the tab resumes, so progress
+// lives in module memory (`pending`), endpoints only ever run once, and
+// every fetch carries a `generation` number: the Page Lifecycle `freeze`
+// event bumps it, a `resume` re-issues the endpoint that was in flight, and
+// the stale promise's late settle is ignored by the generation check — so
+// `running` can never stick. `visibilitychange` is only a hint (visible ⇒
+// not frozen). A round counts as complete only after all four endpoints
+// were attempted — only then is `lastFetch` stamped (30 min gap, 5 min when
+// anything failed). A short-lived sessionStorage in-progress marker (2 min)
+// keeps a second load from racing a live round, and `wa1:portal:lastRound`
+// keeps a redacted per-endpoint summary for debugging.
 //
 // Every response — including non-2xx — replays to the background as the
 // exact wa1:observed "net" payload the passive recorder would have
@@ -70,12 +74,29 @@ export function portalFetchUrls(now) {
 
 /** @type {{next: number, results: any[], token: string, now: Date}|null} */
 let pending = null;
-let running = false;
+/** The runRound currently executing: a token so a stale holder can't free
+ *  a newer holder's lock when it finally returns. */
+let running = 0;
+let tokenSeq = 0;
+// Bumped on every Page Lifecycle `freeze`: a fetch issued under an older
+// generation that settles late is stale and its result is dropped.
+let generation = 0;
+/** The endpoint index + generation of the fetch in flight, if any. */
+/** @type {{index: number, gen: number}|null} */
+let inFlight = null;
 
 /** Test hook — drop any in-flight round state. */
 export function __resetPortalRound() {
   pending = null;
-  running = false;
+  running = 0;
+  tokenSeq = 0;
+  generation = 0;
+  inFlight = null;
+}
+
+/** The page froze: every in-flight fetch is now stale. */
+export function portalFreeze() {
+  generation++;
 }
 
 const pathOf = (url) => {
@@ -86,11 +107,11 @@ const pathOf = (url) => {
   }
 };
 
-const visible = (env) => (typeof env.isVisible === "function" ? env.isVisible() : true);
+const frozen = (env) => (typeof env.isFrozen === "function" ? !!env.isFrozen() : false);
 
 /**
- * One fetch-round attempt: start or continue the round — only while the tab
- * is visible — and replay each response as the passive `wa1:observed` net
+ * One fetch-round attempt: start or continue the round — while the page is
+ * not frozen — and replay each response as the passive `wa1:observed` net
  * payload. `env` is injected so tests can drive fakes; the live wiring
  * below binds the real page APIs. Returns counts — never the token, never
  * throws.
@@ -104,13 +125,23 @@ const visible = (env) => (typeof env.isVisible === "function" ? env.isVisible() 
  *   setInProgress?: (ms: number) => void,
  *   getRoundSummary?: () => any,
  *   setRoundSummary?: (summary: any) => void,
- *   isVisible?: () => boolean,
+ *   isFrozen?: () => boolean,
  *   now?: Date,
  * }} env
  */
 export async function portalRound(env) {
   const now = env.now || new Date();
-  if (!visible(env)) return { skipped: "hidden", sent: 0 };
+  if (frozen(env)) return { skipped: "frozen", sent: 0 };
+
+  // Resume after a freeze: the endpoint in flight at freeze-time went stale
+  // with the generation bump — re-issue it here. Its late settle is ignored
+  // by runRound's generation check, and the stale holder's finally only
+  // clears its own lock token.
+  if (inFlight && inFlight.gen !== generation) {
+    if (pending) pending.next = inFlight.index;
+    inFlight = null;
+    running = 0;
+  }
 
   if (!pending) {
     const last = Number(env.getLast()) || 0;
@@ -136,7 +167,7 @@ export async function portalRound(env) {
     }
     pending = { next: 0, results: [], token, now };
     if (env.setInProgress) env.setInProgress(now.getTime());
-  } else if (!pending.token) {
+  } else {
     // The token may have been refreshed while the tab was frozen.
     const token = env.getToken();
     if (!token) return { skipped: "no-token", sent: 0 };
@@ -144,11 +175,12 @@ export async function portalRound(env) {
   }
 
   if (running) return { skipped: "in-flight", sent: 0 };
-  running = true;
+  const token = ++tokenSeq;
+  running = token;
   try {
     return await runRound(env, /** @type {NonNullable<typeof pending>} */ (pending));
   } finally {
-    running = false;
+    if (running === token) running = 0;
   }
 }
 
@@ -160,12 +192,15 @@ async function runRound(env, round) {
   const urls = portalFetchUrls(round.now);
   let sent = 0;
   while (round.next < urls.length) {
-    // Edge freezes hidden tabs: stop advancing so a resume picks the round
-    // up here instead of issuing a fetch that can hang for minutes.
-    if (!visible(env)) return { paused: true, sent };
-    const url = urls[round.next];
-    const first = round.next === 0;
+    // A frozen page's task queue doesn't run: stop advancing so a resume
+    // picks the round up here instead of issuing a fetch that hangs.
+    if (frozen(env)) return { paused: true, sent };
+    const index = round.next;
+    const url = urls[index];
+    const first = index === 0;
+    const gen = generation;
     round.next++;
+    inFlight = { index, gen };
     const t0 = Date.now();
     /** @type {any} */
     let res;
@@ -180,6 +215,12 @@ async function runRound(env, round) {
     } catch (e) {
       const name = e && /** @type {any} */ (e).name;
       error = name === "TimeoutError" || name === "AbortError" ? "timeout" : "network";
+    }
+    if (inFlight && inFlight.gen === gen) inFlight = null;
+    if (gen !== generation) {
+      // A freeze bumped the generation while this fetch was in flight. The
+      // result is stale — whoever resumed already re-issued the endpoint.
+      return { stale: true, sent };
     }
     const ms = Date.now() - t0;
     const status = res ? Number(res.status) || 0 : 0;
@@ -313,25 +354,32 @@ async function replay(env, url, res) {
           /* storage can be disabled */
         }
       },
-      isVisible: () => {
-        try {
-          return typeof document === "undefined" || document.visibilityState === "visible";
-        } catch {
-          return true;
-        }
-      },
+      isFrozen: () => frozenNow,
     };
+    let frozenNow = false;
     const tick = () => {
       portalRound(env).catch(() => {});
     };
     tick(); // this load
     setInterval(tick, ROUND_INTERVAL_MS); // hourly while the tab stays open
     try {
-      // Frozen-tab resume: continue the round where it stopped.
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") tick();
+      // Page Lifecycle: a freeze makes every in-flight fetch stale (the
+      // generation bump); resume/visibility-change clear the flag and
+      // continue the round where it stopped.
+      document.addEventListener("freeze", () => {
+        frozenNow = true;
+        portalFreeze();
       });
-      document.addEventListener("resume", tick);
+      document.addEventListener("resume", () => {
+        frozenNow = false;
+        tick();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          frozenNow = false;
+          tick();
+        }
+      });
     } catch {
       /* older runtimes lack the Page Lifecycle events */
     }

@@ -28,6 +28,21 @@ refreshes or extends your Portal session. The replies are turned into
 calendar items on your computer, and only those items (course, date, time,
 room, seat) are stored. If you're signed out, nothing is fetched.
 
+**WaterlooWorks refresh.** While a WaterlooWorks page is open and visible,
+the extension re-reads your WaterlooWorks dashboard, your booked and
+unscheduled interviews, and every page of your applications, at most once
+every 30 minutes per tab. It does this by opening those same pages in a
+hidden frame inside your WaterlooWorks tab. WaterlooWorks' own page code
+makes every request; the extension never sends requests itself, never reads
+or stores your session, and never fills in or submits anything. The only
+controls it may activate are read-only "View" links and page numbers on a
+fixed allowlist; it can never apply, withdraw, decline, book or RSVP. Click
+handlers and session tokens are stripped from what it reads before anything
+is stored, and everything stays on your computer. Like any page you open,
+this keeps your WaterlooWorks session alive. It stops as soon as
+WaterlooWorks signs you out. You can turn it off under Sources →
+WaterlooWorks → Setup → "Refresh WaterlooWorks automatically".
+
 ## What it stores
 
 The extension stores data in `chrome.storage.local`, which stays on your

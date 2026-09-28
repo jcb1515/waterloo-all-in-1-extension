@@ -279,7 +279,9 @@ test("observe: message scope keys items; list scope matches none", async () => {
   // The same message in a list produces the same seenIn scope.
   assert.equal(listRes.items[0].seenIn[0].scope, "email:gmail:k1");
   assert.equal(msgRes.items[0].seenIn[0].scope, "email:gmail:k1");
-  assert.equal(msgRes.session, "signed-in");
+  // No session on success — the scheduler's observe branch stamps
+  // lastOkAt/itemCount only when `session` is absent.
+  assert.ok(!("session" in msgRes));
 });
 
 test("observe: junk body is an incomplete no-scope result", async () => {

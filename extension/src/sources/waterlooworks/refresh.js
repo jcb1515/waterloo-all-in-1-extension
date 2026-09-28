@@ -26,6 +26,9 @@ const OBSERVE_SEL = [
 
 const THROTTLE_KEY = "wa1:ww-refresh-at";
 const THROTTLE_MS = 30 * 60 * 1000;
+// Same literal as core/store.js SETTINGS_KEY — the content bundle stays free
+// of core imports.
+const SETTINGS_KEY = "wa1Settings";
 const POLL_MS = 300;
 const STEP_TIMEOUT_MS = 15000;
 const MAX_PAGE = 10;
@@ -57,6 +60,13 @@ const docText = (doc) =>
   String(
     doc?.body?.textContent ?? doc?.documentElement?.textContent ?? ""
   ).replace(/\s+/g, " ");
+
+/**
+ * A landing-row label with the live spelling normalised: WW writes the
+ * applications summary row as "Total Submitted:" with a trailing colon.
+ * @param {any} el
+ */
+const labelText = (el) => text(el).replace(/\s*:\s*$/, "");
 
 const docOf = (frame) => {
   try {
@@ -174,7 +184,7 @@ export function allowedClick(el, step) {
     );
     if (!/buildForm\s*\(/.test(onclick)) return false;
     const row = typeof el.closest === "function" ? el.closest("tr") : null;
-    const label = text(row?.cells?.[0] ?? row?.querySelector?.("td"));
+    const label = labelText(row?.cells?.[0] ?? row?.querySelector?.("td"));
     if (step === "interviews") {
       const m = onclick.match(
         /selectedFilter['"]?\s*:\s*['"]([A-Za-z]+)['"]/
@@ -211,6 +221,28 @@ function clickAllowed(el, step) {
 
 // ---------------------------------------------------------------------------
 // round orchestration
+
+/**
+ * The kill switch: `settings.sources.waterlooworks.autoRefresh` — absent
+ * means on, only `false` turns it off; the source's own `enabled` flag
+ * stops it too. Content scripts may read storage but never write it. A
+ * storage read error fails closed: no refresh.
+ * @returns {Promise<boolean>}
+ */
+async function refreshAllowed() {
+  try {
+    const got = /** @type {any} */ (
+      await chrome.storage.local.get(SETTINGS_KEY)
+    );
+    const src = got?.[SETTINGS_KEY]?.sources?.waterlooworks;
+    return !(
+      src &&
+      (src.enabled === false || src.autoRefresh === false)
+    );
+  } catch {
+    return false;
+  }
+}
 
 const signedOut = (frame) => {
   try {
@@ -303,11 +335,10 @@ const readyDashboard = (d) =>
 
 const rows = (d) => qsa(d, "tr");
 const firstCell = (row) => row?.cells?.[0] ?? row?.querySelector?.("td");
+const rowLabel = (row) => labelText(firstCell(row));
 
 const readyInterviewsLanding = (d) =>
-  rows(d).some(
-    (r) => text(firstCell(r)) === INTERVIEW_LABELS.booked
-  );
+  rows(d).some((r) => rowLabel(r) === INTERVIEW_LABELS.booked);
 
 const readyInterviewView = (d) => {
   for (const th of qsa(d, "th")) {
@@ -349,7 +380,7 @@ const makeFrame = (doc) => {
 /** The Booked/Unscheduled landing rows with a nonzero count, in order. */
 function interviewRows(d, done) {
   return rows(d).filter((r) => {
-    const label = text(firstCell(r));
+    const label = rowLabel(r);
     if (
       (label !== INTERVIEW_LABELS.booked &&
         label !== INTERVIEW_LABELS.unscheduled) ||
@@ -365,11 +396,12 @@ function interviewRows(d, done) {
 async function interviewViews(frame, send) {
   const done = new Set();
   for (;;) {
+    if (!(await refreshAllowed())) return;
     const d = docOf(frame);
     if (!d) return;
     const row = interviewRows(d, done)[0];
     if (!row) return;
-    done.add(text(firstCell(row)));
+    done.add(rowLabel(row));
     const anchor = qsa(row, "a").find((a) => allowedClick(a, "interviews"));
     if (!anchor) continue;
     if (!(await clickStep(anchor, "interviews", frame, readyInterviewView))) {
@@ -388,7 +420,7 @@ async function interviewViews(frame, send) {
 async function applicationsPages(frame, send) {
   const d = docOf(frame);
   if (!d) return;
-  const row = rows(d).find((r) => text(firstCell(r)) === "Total Submitted");
+  const row = rows(d).find((r) => rowLabel(r) === "Total Submitted");
   const anchor = row
     ? qsa(row, "a").find((a) => allowedClick(a, "applications"))
     : null;
@@ -398,6 +430,7 @@ async function applicationsPages(frame, send) {
   send(frame);
   let prevFirst = firstRowText(docOf(frame));
   for (let n = 2; n <= MAX_PAGE; n++) {
+    if (!(await refreshAllowed())) return;
     const doc = docOf(frame);
     if (!doc) return;
     const link = qsa(doc, ".pagination__link").find(
@@ -434,6 +467,7 @@ export async function runRefreshRound() {
       // still works — an unattached iframe can navigate
     }
     // 1. Dashboard — skipped when the open page already is it.
+    if (!(await refreshAllowed())) return { sent };
     if (!/\/myAccount\/dashboard\.htm/i.test(String(location.href))) {
       if (await navigate(frame, DASHBOARD_URL, readyDashboard)) {
         if (signedOut(frame)) return { sent };
@@ -441,12 +475,14 @@ export async function runRefreshRound() {
       }
     }
     // 2. Interviews landing, then each nonzero Booked/Unscheduled view.
+    if (!(await refreshAllowed())) return { sent };
     if (await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding)) {
       if (signedOut(frame)) return { sent };
       await interviewViews(frame, send);
       if (signedOut(frame)) return { sent };
     }
     // 3. Applications landing → Total view → paginate.
+    if (!(await refreshAllowed())) return { sent };
     if (await navigate(frame, APPLICATIONS_URL, readyAppsLanding)) {
       if (signedOut(frame)) return { sent };
       await applicationsPages(frame, send);
@@ -482,18 +518,24 @@ export function maybeRefresh() {
     }
     if (/notLoggedIn\.htm/i.test(href)) return undefined;
     if (document.visibilityState !== "visible") return undefined;
-    const ss = window.sessionStorage;
-    const last = Number(ss?.getItem?.(THROTTLE_KEY) || 0);
-    if (Number.isFinite(last) && Date.now() - last < THROTTLE_MS) {
-      return undefined;
-    }
-    ss?.setItem?.(THROTTLE_KEY, String(Date.now()));
+    // Block re-entry across the async settings read too.
     running = true;
-    return runRefreshRound()
-      .catch(() => ({ sent: 0 }))
-      .finally(() => {
+    return (async () => {
+      try {
+        // The kill switch is read before anything else — a disabled refresh
+        // never even stamps the throttle timestamp.
+        if (!(await refreshAllowed())) return { sent: 0 };
+        const ss = window.sessionStorage;
+        const last = Number(ss?.getItem?.(THROTTLE_KEY) || 0);
+        if (Number.isFinite(last) && Date.now() - last < THROTTLE_MS) {
+          return { sent: 0 };
+        }
+        ss?.setItem?.(THROTTLE_KEY, String(Date.now()));
+        return await runRefreshRound();
+      } finally {
         running = false;
-      });
+      }
+    })().catch(() => ({ sent: 0 }));
   } catch {
     return undefined;
   }
