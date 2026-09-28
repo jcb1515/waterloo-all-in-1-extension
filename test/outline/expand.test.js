@@ -292,6 +292,75 @@ test("prose: begin statements with no due wording emit nothing", () => {
   assert.equal(items.length, 0);
 });
 
+const foldBase = (schemes, assessments) => ({
+  code: "TEST 104",
+  term: 1269,
+  title: "Synthetic",
+  schedule: [],
+  noScheme: false,
+  schemes,
+  tables: [],
+  text: { plan: "", assessments, team: "" },
+});
+const foldOpts = {
+  now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+};
+
+test("fold: a same-day prose hit folds into the assess item", () => {
+  const d = foldBase(
+    [{ name: null, rows: [{ component: "Team Contract", dateText: "October 2", location: "", weight: 5 }] }],
+    "Team Contract due October 2 at 11:59pm.",
+  );
+  const { items } = buildOutline(d, foldOpts);
+  const hits = items.filter((i) => /team contract/i.test(i.title));
+  assert.equal(hits.length, 1);
+  const it = hits[0];
+  assert.equal(it.id, "outline:TEST104:assess:team-contract");
+  assert.equal(it.dueAt, "2026-10-03T03:59:00.000Z"); // Oct 2 23:59 EDT
+  assert.ok(it.details && it.details.includes("Team Contract due October 2 at 11:59pm."));
+  assert.equal(it.evidence && it.evidence.snippet, "Team Contract due October 2 at 11:59pm.");
+  assert.equal(items.filter((i) => i.id.includes(":text:")).length, 0);
+});
+
+test("fold: 'Individual term reflection due' prose folds into its assess item", () => {
+  const d = foldBase(
+    [{ name: null, rows: [{ component: "Individual Term Reflection", dateText: "December 8", location: "", weight: 10 }] }],
+    "Individual term reflection due December 8.",
+  );
+  const { items } = buildOutline(d, foldOpts);
+  const hits = items.filter((i) => /term reflection/i.test(i.title));
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].id, "outline:TEST104:assess:individual-term-reflection");
+  assert.equal(hits[0].dueAt, "2026-12-09T04:59:00.000Z"); // Dec 8 23:59 EST
+  assert.ok(hits[0].details && hits[0].details.includes("Individual term reflection due December 8."));
+});
+
+test("fold: the same title on a different day still emits a text item", () => {
+  const d = foldBase(
+    [{ name: null, rows: [{ component: "Team Contract", dateText: "October 2", location: "", weight: 5 }] }],
+    "Team Contract due November 5 at 11:59pm.",
+  );
+  const { items } = buildOutline(d, foldOpts);
+  const hits = items.filter((i) => /team contract/i.test(i.title));
+  assert.equal(hits.length, 2);
+  assert.ok(hits.some((i) => i.id === "outline:TEST104:assess:team-contract"));
+  const text = hits.find((i) => i.id.includes(":text:"));
+  assert.ok(text);
+  assert.equal(text.dueAt, "2026-11-06T04:59:00.000Z"); // Nov 5 23:59 EST
+});
+
+test("fold: a different title on the same day still emits a text item", () => {
+  const d = foldBase(
+    [{ name: null, rows: [{ component: "Team Contract", dateText: "October 2", location: "", weight: 5 }] }],
+    "Project proposal due October 2.",
+  );
+  const { items } = buildOutline(d, foldOpts);
+  assert.equal(items.length, 2);
+  const text = items.find((i) => i.id.includes(":text:"));
+  assert.ok(text);
+  assert.equal(text.title, "Project proposal");
+});
+
 test("prose: run-together split + Registrar final window + midterm kept", () => {
   const synthetic = {
     code: "TEST 103",
