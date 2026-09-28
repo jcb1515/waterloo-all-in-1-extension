@@ -731,20 +731,42 @@ export default {
         }
       }
       if (parsed["jobs-folder"]) {
-        // Observe-only: a folder view is a Vue filter the refresh round
-        // never applies, so this only fires when the student opens one of
-        // their own My Jobs folders.
-        state.lastGood["jobs-folder"] = {
-          items: applyItems(
-            arr(obj(parsed["jobs-folder"]).rows),
-            arr(state.applications),
-            now,
-            { folder: arr(obj(parsed["jobs-folder"]).folders).join(", ") }
-          ).slice(0, LAST_GOOD_CAP),
-          at: payload.at,
-        };
-        readOk.push("jobs-folder");
-        delete state.needsUpdate["jobs-folder"];
+        // Mid-transition frame guard: WW renders the "Folders:" pill ~90 ms
+        // before the card list re-renders, so a folder snapshot in that
+        // window still carries the unfiltered search results. A non-empty
+        // card set identical to the last unfiltered read is the transient
+        // frame — leave the bucket and the page scope alone (the settled
+        // snapshot that follows re-reads correctly). An empty folder read
+        // can never collide and is always accepted.
+        const folderParsed = obj(parsed["jobs-folder"]);
+        const cardIds = arr(obj(parsed.jobCards).jobIds);
+        const searchIds = arr(state.jobSearchIds);
+        const transient =
+          cardIds.length > 0 &&
+          cardIds.length === searchIds.length &&
+          cardIds.every((id, i) => id === searchIds[i]);
+        if (!transient) {
+          // Observe-only: a folder view is a Vue filter the refresh round
+          // never applies, so this only fires when the student opens one of
+          // their own My Jobs folders.
+          state.lastGood["jobs-folder"] = {
+            items: applyItems(
+              arr(folderParsed.rows),
+              arr(state.applications),
+              now,
+              { folder: arr(folderParsed.folders).join(", ") }
+            ).slice(0, LAST_GOOD_CAP),
+            at: payload.at,
+          };
+          readOk.push("jobs-folder");
+          delete state.needsUpdate["jobs-folder"];
+        }
+      }
+      if (parsed.jobCards && !parsed["jobs-folder"]) {
+        // The unfiltered search id set. Never learned from the transient
+        // folder frame itself — that frame's ids ARE this set already, and
+        // a settled folder read is filtered data, not a search result.
+        state.jobSearchIds = arr(obj(parsed.jobCards).jobIds).slice(0, 200);
       }
 
       // Fail-soft: a URL that should have yielded a section but didn't means

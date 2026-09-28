@@ -1264,6 +1264,13 @@ export function parseAll(doc, opts = {}) {
   if (isPosting(doc)) out.posting = parsePosting(doc);
   if (isRankings(doc)) out.rankings = parseRankings(doc);
   if (isJobsFolder(doc)) out["jobs-folder"] = parseJobsFolder(doc);
+  // The search card-id set, pill or not: a folder pill that renders before
+  // the filtered list still shows these ids, so the adapter compares the
+  // folder frame against the last unfiltered set (sorted for equality).
+  const jobCardIds = parseJobCards(doc)
+    .map((row) => row.jobId)
+    .sort();
+  if (jobCardIds.length) out.jobCards = { jobIds: jobCardIds };
   const landing = landingKind(doc);
   if (landing) out.landing = { kind: landing };
   const dashboard = parseDashboard(doc, { notices: page === "dashboard" });
