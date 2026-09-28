@@ -374,7 +374,15 @@ export function App() {
             }}
           />
         ) : overlay === "sources" ? (
-          <Sources state={state} actions={actions} now={now} />
+          <Sources
+            state={state}
+            actions={actions}
+            now={now}
+            onGoCourses={() => {
+              setOverlay(null);
+              setTab("courses");
+            }}
+          />
         ) : overlay === "checkreaders" ? (
           <CheckReaders state={state} actions={actions} now={now} />
         ) : tab === "agenda" ? (
