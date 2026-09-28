@@ -33,6 +33,8 @@ import {
  * @property {boolean} [unread]      the row/thread is unread (list feeds)
  * @property {boolean} [bodyFetched] backfill: this thread's body was read
  * @property {string} [messageId]    outlook backfill: the REST item Id
+ * @property {boolean} [toMe]        my address appears in To/Cc (backfill)
+ * @property {number} [recipients]   To+Cc recipient count (backfill)
  * @property {Msg[]} [parts]         gmail backfill: per-message print parts
  * @property {{whenText: string, title?: string, where?: string, organizer?: string}} [invite]
  *   the invite card the client renders above the message (first Msg only)

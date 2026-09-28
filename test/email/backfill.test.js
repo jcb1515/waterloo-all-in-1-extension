@@ -60,7 +60,7 @@ test("lookback clamps to 7..90, defaults 30", () => {
   assert.equal(clampLookback("45"), 45);
 });
 
-test("decideRun: first run full, then 30-min incrementals, 6h fulls", () => {
+test("decideRun: first run full, then 30-min incrementals; no periodic fulls", () => {
   const s = {};
   assert.equal(decideRun(null, s, NOW_MS).kind, "full");
   const prev = {
@@ -77,11 +77,26 @@ test("decideRun: first run full, then 30-min incrementals, 6h fulls", () => {
   );
   assert.equal(due.kind, "incremental");
   assert.equal(due.since, "2026-09-30T12:00:00.000Z");
-  // A lookback change is the only thing allowed to force a full inside 6h.
-  assert.equal(decideRun(prev, { lookbackDays: 60 }, NOW_MS).kind, "full");
-  // Past 6h the next tick is a full again.
-  const old = { ...prev, lastFullAt: new Date(NOW_MS - 7 * 3600e3).toISOString() };
-  assert.equal(decideRun(old, s, NOW_MS).kind, "full");
+  // A lookback INCREASE wants a full — but inside 6h it defers to the next
+  // incremental tick once the 6h mark passes.
+  assert.equal(decideRun(prev, { lookbackDays: 60 }, NOW_MS).kind, "skip");
+  const nearEdge = {
+    ...prev,
+    lastFullAt: new Date(NOW_MS - 5 * 3600e3 - 58 * 60e3).toISOString(),
+    lastRunAt: new Date(NOW_MS - 3 * 3600e3).toISOString(),
+  };
+  const deferred = decideRun(nearEdge, { lookbackDays: 60 }, NOW_MS);
+  assert.equal(deferred.kind, "incremental");
+  const pastEdge = {
+    ...prev,
+    lastFullAt: new Date(NOW_MS - 7 * 3600e3).toISOString(),
+    lastRunAt: new Date(NOW_MS - 40 * 60e3).toISOString(),
+  };
+  assert.equal(decideRun(pastEdge, { lookbackDays: 60 }, NOW_MS).kind, "full");
+  // A lookback DECREASE just filters — never refetches.
+  assert.equal(decideRun(pastEdge, { lookbackDays: 7 }, NOW_MS).kind, "incremental");
+  // Past 6h with an unchanged lookback there is NO periodic full.
+  assert.equal(decideRun(pastEdge, s, NOW_MS).kind, "incremental");
   // "Check again now" forces an incremental, never a 2nd full inside 6h.
   assert.equal(decideRun(prev, s, NOW_MS, { force: true }).kind, "incremental");
 });
@@ -299,6 +314,15 @@ const outlookEnv = ({ values, pages, bodies, prev = null, settings = {} } = {}) 
           text: async () => JSON.stringify({ Body: { ContentType: "text", Content: body }, IsRead: false }),
         };
       }
+      // The once-per-round account probe — answered without touching the
+      // page queue.
+      if (/^\/api\/v2\.0\/me\?\$select=EmailAddress/.test(url)) {
+        return {
+          status: 200,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({ EmailAddress: "me@uwaterloo.ca" }),
+        };
+      }
       const page = pageQueue.length > 1 ? pageQueue.shift() : pageQueue[0];
       return {
         status: 200,
@@ -371,13 +395,31 @@ test("outlook nextLink strips to the same-origin /api path only", () => {
 
 test("outlook REST message -> Msg with ConversationId key and WebLink", () => {
   const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
-  const m = outlookMsg(rest.value[0], false);
+  const m = outlookMsg(rest.value[0], false, "me@uwaterloo.ca");
   assert.equal(m.key, "conv-out-1");
   assert.equal(m.messageId, "AAMkFakeItemIdOneAAA=");
   assert.equal(m.fromEmail, "recruiting@acme.example.com");
   assert.equal(m.receivedAt, "2026-09-30T13:12:00.000Z");
   assert.equal(m.unread, true);
+  // Recipients collapse to a count + toMe flag — never the addresses.
+  assert.equal(m.recipients, 1);
+  assert.equal(m.toMe, true);
+  assert.ok(!JSON.stringify(m).includes("me@uwaterloo.ca"));
   assert.match(m.url || "", /ItemID=/);
+});
+
+test("outlookMsg: a big To list is recipients>10 with no toMe", () => {
+  const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
+  const many = {
+    ...rest.value[0],
+    ToRecipients: Array.from({ length: 12 }, (_, i) => ({
+      EmailAddress: { Address: `person${i}@uwaterloo.ca` },
+    })),
+    CcRecipients: [],
+  };
+  const m = outlookMsg(many, false, "me@uwaterloo.ca");
+  assert.equal(m.recipients, 12);
+  assert.equal(m.toMe, false);
 });
 
 test("outlook round: token -> pages -> gated bodies -> payloads", async (t) => {
@@ -388,9 +430,14 @@ test("outlook round: token -> pages -> gated bodies -> payloads", async (t) => {
   // Every request is GET, same-origin /api/v2.0/me, Bearer in headers only.
   for (const f of fetches) {
     assert.equal(f.init.method, "GET");
-    assert.match(f.url, /^\/api\/v2\.0\/me\//);
+    assert.match(f.url, /^\/api\/v2\.0\/me(?:\/|\?)/);
     assert.equal(f.init.headers.Authorization, `Bearer ${TOKEN}`);
   }
+  // The account probe ran once, before the first list page.
+  assert.equal(
+    fetches.filter((f) => /\$select=EmailAddress/.test(f.url)).length,
+    1,
+  );
   // nextLink followed to its stripped path.
   assert.ok(fetches.some((f) => /\$skip=50/.test(f.url)));
   const bodies = payloadsOf(messages).filter((b) => b.messages.length);
@@ -444,10 +491,15 @@ test("outlook: provider off in settings skips entirely", async (t) => {
 
 test("needsBody: gated candidates only, bulk without a reason never", () => {
   const row = (over) => ({ key: "k", fromEmail: "", from: "", subject: "", preview: "", ...over });
-  // co-op / learn / uwaterloo / ATS / allow-listed
+  // co-op / learn / ATS / allow-listed gate on their own; a BARE
+  // uwaterloo.ca sender no longer does — it needs a strong cue.
   assert.equal(needsBody(row({ fromEmail: "coop@uwaterloo.ca", from: "CECA" }), { settings: {} }), true);
   assert.equal(needsBody(row({ fromEmail: "noreply@learn.uwaterloo.ca" }), { settings: {} }), true);
-  assert.equal(needsBody(row({ fromEmail: "jsmith@uwaterloo.ca" }), { settings: {} }), true);
+  assert.equal(needsBody(row({ fromEmail: "jsmith@uwaterloo.ca" }), { settings: {} }), false);
+  assert.equal(
+    needsBody(row({ fromEmail: "jsmith@uwaterloo.ca", subject: "Midterm room change" }), { settings: {} }),
+    true,
+  );
   assert.equal(needsBody(row({ fromEmail: "jobs@greenhouse.io" }), { settings: {} }), true);
   assert.equal(
     needsBody(row({ fromEmail: "person@random.example.org" }), { settings: { allowSenders: ["random.example.org"] } }),

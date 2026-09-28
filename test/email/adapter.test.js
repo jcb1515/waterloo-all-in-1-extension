@@ -556,8 +556,21 @@ test("bulk senders produce nothing unless they pass the gate or exception", () =
   );
   assert.deepEqual(noreply, []);
 
-  // ...but a gated bulk sender (Learn's noreply) still produces items.
-  const [learn] = items(
+  // ...but a gated bulk sender (WaterlooWorks' noreply) still produces
+  // items through the bulk exception.
+  const [ww] = items(
+    msg({
+      from: "WorkHub",
+      fromEmail: "no-reply@waterlooworks.uwaterloo.ca",
+      subject: "Interview schedule posted",
+      body: "Your interview is on October 9 at 6 PM in the main hall.",
+    }),
+  );
+  assert.equal(ww.type, "interview");
+
+  // Learn/D2L notification mail produces nothing — the Learn source is
+  // authoritative for it.
+  const learn = items(
     msg({
       from: "LEARN",
       fromEmail: "noreply@learn.uwaterloo.ca",
@@ -565,8 +578,7 @@ test("bulk senders produce nothing unless they pass the gate or exception", () =
       body: "Quiz 3 is due October 9 at 11:59 PM.",
     }),
   );
-  assert.equal(learn.type, "deadline");
-  assert.equal(learn.dueAt, "2026-10-10T03:59:00.000Z");
+  assert.deepEqual(learn, []);
 });
 
 test("a sender matching a WaterlooWorks application is an employer", () => {
@@ -583,7 +595,9 @@ test("a sender matching a WaterlooWorks application is an employer", () => {
       ],
     },
   );
-  assert.equal(i.type, "interview");
+  // A matched application employer gates the sender — but without an
+  // interview word in the sentence the dated call is a meeting.
+  assert.equal(i.type, "meeting");
   assert.equal(i.startAt, "2026-10-08T18:00:00.000Z");
   assert.equal(i.org, "Acme Corp");
   assert.equal(i.meta.employer, "Acme Corp");
@@ -827,15 +841,19 @@ test("allowSenders gates a bulk or personal-domain sender", async () => {
     from: "Club News",
     fromEmail: "no-reply@club.example.org",
     subject: "September social",
-    body: "Please reply to save your spot for the social on October 9 at 6 PM.\nUnsubscribe.",
+    body: "RSVP for our info session on October 9 at 6 PM.\nUnsubscribe.",
   });
+  // Allow-listing rescues the gate: the bulk exception's dated event noun
+  // produces an item — but a no-reply bulk sender never gets a reply task.
   const gated = await adapter.observe.parse(
     payload("gmail", wrap("gmail", [news], "message", "inbox")),
     ctx({ allowSenders: ["club.example.org"] }),
   );
-  const reply = gated.items.find((i) => i.category === "reply");
-  assert.ok(reply, "allow-listed bulk sender gets a reply task");
-  assert.equal(reply.review, "auto");
+  assert.ok(gated.items.some((i) => i.type !== "task"));
+  assert.ok(
+    gated.items.every((i) => i.type !== "task"),
+    "bulk no-reply sender never gets a reply task",
+  );
 
   const same = await adapter.observe.parse(
     payload("gmail", wrap("gmail", [news], "message", "inbox")),
@@ -843,20 +861,29 @@ test("allowSenders gates a bulk or personal-domain sender", async () => {
   );
   assert.ok(same.items.every((i) => i.type !== "task"));
 
-  // A subdomain of the allow entry matches too.
+  // An allow-listed personal-domain person does get a reply task.
+  const person = msg({
+    key: "al3",
+    from: "Sam Lee",
+    fromEmail: "sam.lee@freemail.example.org",
+    subject: "Catching up",
+    body: "Could you confirm you're still coming on October 9?",
+  });
   const sub = await adapter.observe.parse(
     payload(
       "gmail",
       wrap(
         "gmail",
-        [{ ...news, key: "al2", fromEmail: "no-reply@lists.club.example.org" }],
+        [{ ...news, key: "al2", fromEmail: "no-reply@lists.club.example.org" }, person],
         "message",
         "inbox",
       ),
     ),
-    ctx({ allowSenders: ["club.example.org"] }),
+    ctx({ allowSenders: ["club.example.org", "freemail.example.org"] }),
   );
-  assert.ok(sub.items.some((i) => i.type === "task"));
+  const reply = sub.items.find((i) => i.category === "reply");
+  assert.ok(reply, "allow-listed personal sender gets a reply task");
+  assert.equal(reply.review, "auto");
 
   // Block still wins over allow.
   const veto = await adapter.observe.parse(
@@ -1113,7 +1140,7 @@ test("pay: a Waterloo fee notice, deadlines and receipts", async () => {
   assert.ok(res2.items.every((i) => !i.meta || i.meta.action !== "pay"));
 });
 
-test("submit-rankings and apply: co-op asks become to-dos", async () => {
+test("submit-rankings and apply: WaterlooWorks owns them — email stays silent", async () => {
   const m = msg({
     key: "rk1",
     from: "CECA",
@@ -1125,10 +1152,12 @@ test("submit-rankings and apply: co-op asks become to-dos", async () => {
     payload("gmail", wrap("gmail", [m], "message", "inbox")),
     ctx({}),
   );
-  const t = res.items.find((i) => i.meta && i.meta.action === "submit-rankings");
-  assert.ok(t);
-  assert.equal(t.type, "deadline");
-  assert.equal(t.dueAt, "2026-10-13T03:59:00.000Z");
+  assert.ok(
+    res.items.every(
+      (i) => !i.meta || !["submit-rankings", "apply"].includes(i.meta.action),
+    ),
+    "a rankings ask produces no email to-do",
+  );
 
   const ap = msg({
     key: "a1",
@@ -1141,11 +1170,12 @@ test("submit-rankings and apply: co-op asks become to-dos", async () => {
     payload("gmail", wrap("gmail", [ap], "message", "inbox")),
     ctx({}, { applications: [{ employer: "Acme Corp" }] }),
   );
-  const t2 = res2.items.find((i) => i.meta && i.meta.action === "apply");
-  assert.ok(t2);
-  assert.equal(t2.type, "deadline");
-  assert.equal(t2.dueAt, "2026-10-21T03:59:00.000Z");
-  assert.equal(t2.meta.employer, "Acme Corp");
+  assert.ok(
+    res2.items.every(
+      (i) => !i.meta || !["submit-rankings", "apply"].includes(i.meta.action),
+    ),
+    "an apply ask produces no email to-do",
+  );
 });
 
 test("to-do cap: at most two tasks per message", async () => {
@@ -1222,6 +1252,89 @@ test("to-do negatives stay silent", async () => {
       body: "Your payment of $100 is due. Please pay your balance by October 15.",
     }),
   ];
+  // A rhetorical newsletter question is not an ask (broadcast, list mail).
+  cases.push(
+    msg({
+      key: "n7",
+      from: "Wellness",
+      fromEmail: "wellness@uwaterloo.ca",
+      subject: "Thrive this term",
+      body: "Are you struggling to keep on top of your deadlines? We can help.",
+      toMe: false,
+      recipients: 2400,
+    }),
+    // List-boilerplate interrogative — bulk footer marks it regardless.
+    msg({
+      key: "n8",
+      from: "Newsroom",
+      fromEmail: "news@campus.example.org",
+      subject: "Weekly update",
+      body: "Want to change how you receive these emails?",
+      toMe: false,
+      recipients: 12,
+    }),
+    // A [Tag] subject is list mail on its own.
+    msg({
+      key: "n9",
+      from: "Dept Minutes",
+      fromEmail: "minutes@dept.example.org",
+      subject: "[CS-DSA] Minutes updated daily",
+      body: "Please reply with corrections to the minutes.",
+    }),
+    // "book a meeting through your dashboard" in a broadcast advisor note.
+    msg({
+      key: "n10",
+      from: "Advisor",
+      fromEmail: "advisor@uwaterloo.ca",
+      subject: "Advising hours",
+      body: "You can book a meeting through your portal dashboard.",
+      toMe: false,
+      recipients: 800,
+    }),
+    // Money the other way — credits and refunds are never a pay to-do.
+    msg({
+      key: "n11",
+      from: "Student Fees",
+      fromEmail: "fees@uwaterloo.ca",
+      subject: "Award applied",
+      body: "A bursary was applied to your student account balance.",
+    }),
+    msg({
+      key: "n12",
+      from: "Student Fees",
+      fromEmail: "fees@uwaterloo.ca",
+      subject: "Tuition refund",
+      body: "You will receive a 100% tuition refund for the dropped course.",
+    }),
+    // A course announcement's polite closer is not a reply ask — and the
+    // message is broadcast to the class anyway.
+    msg({
+      key: "n13",
+      from: "Prof",
+      fromEmail: "prof@uwaterloo.ca",
+      subject: "MATH135 week 4",
+      body: "Assignment 2 is posted. Let me know if you have any questions.",
+      toMe: false,
+      recipients: 300,
+    }),
+    // A three-week-old ask is stale.
+    msg({
+      key: "n14",
+      from: "Sam Lee",
+      fromEmail: "sam.lee@freemail.example.org",
+      subject: "Catching up",
+      body: "Could you confirm you're still interested?",
+      receivedAt: "2026-09-08T15:00:00.000Z",
+    }),
+    // A stated due in the past is not a to-do.
+    msg({
+      key: "n15",
+      from: "Sam Lee",
+      fromEmail: "sam.lee@freemail.example.org",
+      subject: "Quick check",
+      body: "Please reply by September 28.",
+    }),
+  );
   for (const m of cases) {
     const res = await adapter.observe.parse(
       payload("gmail", wrap("gmail", [m], "message", "inbox")),
@@ -1232,6 +1345,101 @@ test("to-do negatives stay silent", async () => {
       `${m.key}: expected no derived to-dos, got ${JSON.stringify(res.items.map((i) => [i.type, i.meta && i.meta.action]))}`,
     );
   }
+});
+
+test("to-do positives: person, broadcast co-op, finance, instructor, offer", async () => {
+  // A person writing TO me with an explicit ask — no gate needed.
+  const person = msg({
+    key: "pp1",
+    from: "Sam Lee",
+    fromEmail: "sam.lee@freemail.example.org",
+    subject: "Catching up",
+    body: "Could you confirm by Friday that you can still make it?",
+    toMe: true,
+    recipients: 2,
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [person], "message", "inbox")),
+    ctx({}),
+  );
+  const reply = res.items.find((i) => i.meta && i.meta.action === "reply");
+  assert.ok(reply, "toMe + explicit ask -> reply task");
+  assert.equal(reply.review, "pending");
+
+  // CECA list mail IS broadcast — the co-op exception still mints it.
+  const coop = msg({
+    key: "pp2",
+    from: "Co-op Office",
+    fromEmail: "coop@uwaterloo.ca",
+    subject: "Interview — Firmware Co-op (Co-op message)",
+    body: "Next step: Select your interview time slot in WorkHub.",
+    toMe: false,
+    recipients: 40,
+  });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [coop], "message", "inbox")),
+    ctx({}),
+  );
+  const slot = res2.items.find((i) => i.meta && i.meta.action === "book-interview");
+  assert.ok(slot, "broadcast co-op slot wording -> book-interview");
+  assert.equal(slot.review, "auto");
+
+  // Waterloo finance list mail is legitimately broadcast — pay still mints.
+  const fee = msg({
+    key: "pp3",
+    from: "Student Fees",
+    fromEmail: "fees@uwaterloo.ca",
+    subject: "Fall fee statement",
+    body: "Your tuition is due by October 30.",
+    toMe: false,
+    recipients: 40000,
+  });
+  const res3 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [fee], "message", "inbox")),
+    ctx({}),
+  );
+  const pay = res3.items.find((i) => i.meta && i.meta.action === "pay");
+  assert.ok(pay, "broadcast Waterloo fee notice -> pay");
+  assert.equal(pay.dueAt, "2026-10-31T03:59:00.000Z");
+
+  // An instructor's document ask, addressed to me.
+  const prof = msg({
+    key: "pp4",
+    from: "Prof",
+    fromEmail: "prof@uwaterloo.ca",
+    subject: "MATH135 lab waiver",
+    body: "Please submit the signed waiver by October 5.",
+    toMe: true,
+    recipients: 1,
+  });
+  const res4 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [prof], "message", "inbox")),
+    ctx({}, { courses: [{ code: "MATH135", instructors: [{ email: "prof@uwaterloo.ca" }] }] }),
+  );
+  const doc = res4.items.find((i) => i.meta && i.meta.action === "submit-document");
+  assert.ok(doc, "instructor document ask -> submit-document");
+  assert.equal(doc.type, "deadline");
+  assert.equal(doc.review, "auto");
+
+  // An employer offer with an accept-by date (existing test covers the
+  // details) — here just confirming it still lands under the new gates.
+  const offer = msg({
+    key: "pp5",
+    from: "Acme Corp",
+    fromEmail: "jobs@acme.example.com",
+    subject: "Offer of employment",
+    body: "We are pleased to offer you the Firmware Co-op role. Accept the offer by October 9.",
+    toMe: true,
+    recipients: 1,
+  });
+  const res5 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [offer], "message", "inbox")),
+    ctx({}, { applications: [{ employer: "Acme Corp" }] }),
+  );
+  assert.ok(
+    res5.items.some((i) => i.meta && i.meta.action === "respond-offer"),
+    "employer offer -> respond-offer",
+  );
 });
 
 test("email sources contain no forbidden APIs", () => {

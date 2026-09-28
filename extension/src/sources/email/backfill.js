@@ -82,6 +82,11 @@ export function makeRate() {
 
 /**
  * What this tick should do, from the adapter-recorded state.
+ *   full        — the first run ever, or a lookbackDays INCREASE once the
+ *                 hard 6 h gap since the last full has passed (an increase
+ *                 inside 6 h is deferred to the mark; there is NO periodic
+ *                 re-full — a decrease only filters, never refetches);
+ *   incremental — the 30-min tick / "check again now" cursor read.
  * @param {any} prev    state.backfill[provider] ({lastRunAt,lastFullAt,lookbackDays,newestAt})
  * @param {any} settings  the sources.outlook slice
  * @param {number} nowMs
@@ -94,11 +99,12 @@ export function decideRun(prev, settings, nowMs, { force = false } = {}) {
   const p = prev && typeof prev === "object" ? prev : {};
   const lastFullAt = Date.parse(p.lastFullAt || "") || 0;
   const lastRunAt = Date.parse(p.lastRunAt || "") || 0;
-  const lookbackChanged =
-    p.lookbackDays != null && Number(p.lookbackDays) !== lookbackDays;
-  // A full is due on first run, on a lookback change (the only thing allowed
-  // inside 6 h), or once the last full is 6 h old.
-  if (!lastFullAt || lookbackChanged || nowMs - lastFullAt >= BF_FULL_GAP_MS) {
+  if (!lastFullAt) return { kind: "full", lookbackDays, since: null };
+  const prevDays = Number(p.lookbackDays) || 0;
+  const increased = prevDays > 0 && lookbackDays > prevDays;
+  if (increased && nowMs - lastFullAt >= BF_FULL_GAP_MS) {
+    // Two fulls are NEVER closer than 6 h — an increase inside the gap just
+    // waits for the mark; normal incremental ticking continues meanwhile.
     return { kind: "full", lookbackDays, since: null };
   }
   if (force || !lastRunAt || nowMs - lastRunAt >= BF_TICK_MS) {
@@ -186,10 +192,17 @@ export async function backfillRound(env, impl) {
     stats.requests++;
     stats.peakRate = Math.max(stats.peakRate, rate.size);
   };
-  /** Rate-limited GET-with-timeout; returns the raw response. */
+  /** Rate-limited GET-with-timeout; returns the raw response. Hard guard:
+   * GET only, same-origin relative paths only — anything else throws. */
   const request = async (/** @type {string} */ url, /** @type {any} */ init = {}) => {
+    const method = String((init && init.method) || "GET").toUpperCase();
+    if (method !== "GET") throw new Error("backfill: non-GET request refused");
+    const u = String(url || "");
+    if (!u.startsWith("/") || u.startsWith("//")) {
+      throw new Error("backfill: off-origin request refused");
+    }
     await slot();
-    const res = await env.fetchImpl(url, {
+    const res = await env.fetchImpl(u, {
       ...init,
       signal: AbortSignal.timeout(BF_TIMEOUT_MS),
     });
@@ -201,6 +214,9 @@ export async function backfillRound(env, impl) {
   let sent = 0;
   let batch = 0;
   let failed = false;
+  /** The newest receivedAt across every row the run listed — the cursor the
+   * next incremental continues from. */
+  let newestMs = 0;
   /** @type {Record<string, any>} */
   let threadMap = {};
   /** @type {{folder: string, messages: any[]}[]} */
@@ -262,6 +278,8 @@ export async function backfillRound(env, impl) {
         const sentPass = SENT_FOLDERS.has(String(folder).toLowerCase());
         for (const m of msgs) {
           checked.add(String(m.key));
+          const rt = Date.parse(String(m.receivedAt || "")) || 0;
+          if (rt > newestMs) newestMs = rt;
           // Bodies only for gated candidates — bulk senders without a gated
           // reason never cost a request, and the sent pass reads nothing
           // (its rows only close reply tasks).
@@ -330,8 +348,12 @@ export async function backfillRound(env, impl) {
     }
   }
   // The final payload lands even when the run found nothing — it is what lets
-  // the adapter advance lastRunAt/lastFullAt.
-  sendPayload(cache.length ? cache[0].folder : "inbox", [], true);
+  // the adapter advance lastRunAt/lastFullAt. newestAt carries the cursor the
+  // next incremental resumes from; runStartedAt seeds a first empty run.
+  sendPayload(cache.length ? cache[0].folder : "inbox", [], true, {
+    newestAt: newestMs ? new Date(newestMs).toISOString() : null,
+    runStartedAt: new Date(t0).toISOString(),
+  });
   return done({ sent });
 }
 

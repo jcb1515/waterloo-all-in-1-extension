@@ -284,12 +284,26 @@ const adapter = {
       /** @type {any} */
       let backfillState = prev.backfill;
       const bf = isBackfill ? data.backfill : null;
-      if (bf && bf.final) {
+      // A replay (in-memory cache after a filter change) never touches
+      // state.backfill — it would fake a fresh lookbackDays and retrigger
+      // a full.
+      if (bf && bf.final && !bf.replay) {
         const pb = ((prev.backfill || {})[provider] || {});
-        const newest = msgs
+        // The cursor: the run's own newest receivedAt wins, else the prior
+        // one stays; a first run that saw no mail at all seeds from the
+        // run's START time (an empty 30 days is still "read").
+        const markerNewest = Date.parse(bf.newestAt || "") || 0;
+        const msgsNewest = msgs
           .map((m) => Date.parse(m.receivedAt || "") || 0)
           .reduce((a, b) => Math.max(a, b), 0);
         const prevNewest = Date.parse(pb.newestAt || "") || 0;
+        const runStart = Date.parse(bf.runStartedAt || "") || 0;
+        const resolved =
+          Math.max(markerNewest, msgsNewest, prevNewest) ||
+          prevNewest ||
+          runStart ||
+          Date.parse(at) ||
+          0;
         backfillState = {
           ...(prev.backfill || {}),
           [provider]: {
@@ -297,9 +311,7 @@ const adapter = {
             lastFullAt: bf.full ? at : pb.lastFullAt || at,
             lookbackDays: bf.lookbackDays,
             checked: bf.checked,
-            newestAt: newest
-              ? new Date(Math.max(newest, prevNewest)).toISOString()
-              : pb.newestAt || at,
+            newestAt: new Date(resolved).toISOString(),
           },
         };
       }
