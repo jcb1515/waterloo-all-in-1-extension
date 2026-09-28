@@ -143,12 +143,26 @@ export function withDevProfile(defaults, profile) {
 
 /* --------------------------- write queue --------------------------- */
 
+const STORE_LOCK = "wa1:store";
 let queue = Promise.resolve();
 /**
- * Serialises every storage write.
+ * Serialises every storage write. Where the Web Locks API exists it
+ * serialises ACROSS contexts — service worker, panel, options and the
+ * offscreen document share one origin, so a panel/options write can no
+ * longer lost-update against an in-flight service-worker mutateKey. Without
+ * it (Node tests) the in-memory chain still serialises this context.
+ * NOTE: nesting enqueue() inside an enqueued fn still self-deadlocks — the
+ * inner task (or lock request) waits on the outer's slot. The static
+ * no-nested-enqueue test guards it.
  * @param {() => Promise<any>} fn
  */
 export function enqueue(fn) {
+  const locks = globalThis.navigator && globalThis.navigator.locks;
+  if (locks && typeof locks.request === "function") {
+    return /** @type {Promise<any>} */ (
+      locks.request(STORE_LOCK, () => fn())
+    );
+  }
   const run = queue.then(fn);
   queue = run.catch(() => {});
   return run;
