@@ -7,10 +7,13 @@
 /**
  * Adapters that re-sync after an extension update: real sync impls on a
  * repeating interval (observe-only and interval-less adapters gain nothing).
- * @param {{sync?: Function, intervalMinutes?: number}[] | null | undefined} adapters
+ * @param {({id: string, sync?: Function, intervalMinutes?: number} | null)[] | null | undefined} adapters
+ * @returns {{id: string, sync?: Function, intervalMinutes?: number}[]}
  */
 export function adaptersToSyncOnUpdate(adapters) {
-  return (adapters || []).filter(
-    (a) => a && typeof a.sync === "function" && a.intervalMinutes > 0
+  return /** @type {{id: string, sync?: Function, intervalMinutes?: number}[]} */ (
+    (adapters || []).filter(
+      (a) => a && typeof a.sync === "function" && Number(a.intervalMinutes) > 0
+    )
   );
 }
