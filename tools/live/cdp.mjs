@@ -882,11 +882,15 @@ async function cmdProbe(sub) {
   for (const it of items.slice(0, 5)) console.log(`  ${fmtRow(it)}`);
 }
 
-async function cmdStorage(key, sourceId, extId) {
+async function cmdStorage(key, sourceId, extId, raw = false) {
   const all = await storageGet(key || null, extId);
   const snap = key ? { [key]: all && all[key] } : all || {};
   if (key && snap[key] === undefined) {
     console.log(`storage key "${key}" is not set.`);
+    return;
+  }
+  if (raw) {
+    console.log(JSON.stringify(key ? snap[key] : snap, null, 2));
     return;
   }
 
@@ -913,6 +917,10 @@ async function cmdStorage(key, sourceId, extId) {
     const counts = countByType(items);
     console.log(`items${sourceId ? ` [${sourceId}]` : ""}: ${items.length} ${JSON.stringify(counts)}`);
     for (const it of items.slice(0, 5)) console.log(`  ${fmtRow(it)}`);
+  }
+  // Any other named key gets a raw dump — checkRuns, readStats, logs…
+  if (key && key !== "sourceState" && key !== "items") {
+    console.log(JSON.stringify(snap[key], null, 2));
   }
 }
 
@@ -1121,7 +1129,7 @@ async function cmdScreenshot(extPath, opts = {}) {
  * OWN extension pages (a page wakes the MV3 worker; sendMessage from the
  * service worker itself never loops back to it). If no extension page is
  * live, the panel is opened in a tool-owned tab and closed afterwards.
- * Then polls checkRuns[source] until the run terminates or 100 s pass.
+ * Then polls checkRuns[source] until the run terminates or ~330 s pass.
  * @param {string} source @param {string|null} extId
  */
 async function cmdCheckNow(source, extId) {
@@ -1180,7 +1188,9 @@ async function cmdCheckNow(source, extId) {
       return;
     }
     console.log(`${src}\taccepted\trunId=${res.runId}`);
-    const deadline = Date.now() + 100000;
+    // checknow's run deadline is 5 min (an Outlook check reads ~100
+    // messages in-page at 20 req/min) — poll a little past it.
+    const deadline = Date.now() + 330000;
     for (;;) {
       const got = await cdp
         .eval('chrome.storage.local.get("checkRuns")', { awaitPromise: true })
@@ -1195,7 +1205,7 @@ async function cmdCheckNow(source, extId) {
         return;
       }
       if (Date.now() >= deadline) {
-        console.log(`${src}\tno result within 100s (checkRuns may still say running)`);
+        console.log(`${src}\tno result within 330s (checkRuns may still say running)`);
         return;
       }
       await sleep(1000);
@@ -1302,6 +1312,7 @@ close/scroll only reach tool-opened tabs; discord.com is always refused.`);
         rest[0] && !rest[0].startsWith("--") ? rest[0] : null,
         argValue(rest, "--source"),
         argValue(rest, "--ext"),
+        rest.includes("--raw"),
       );
     case "watch":
       return cmdWatch(
