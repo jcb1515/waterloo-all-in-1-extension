@@ -7,8 +7,9 @@
 */
 
 import { extractDates, weekdayOf, zonedIso, zonedParts } from "../../lib/textdates/index.js";
-import { CARD, GMAIL, OUTLOOK } from "./selectors.js";
+import { ACCOUNT, CARD, GMAIL, OUTLOOK, QUOTE_SEL } from "./selectors.js";
 import {
+  BOOK_LINK,
   CARD_CUE_RE,
   CARD_ORG_RE,
   CARD_STOP_RE,
@@ -28,6 +29,7 @@ import {
  * @property {string} [receivedAt]   ISO, Toronto-parsed
  * @property {string} [body]         message view only, <=20000 chars
  * @property {string[]} links        meeting/co-op links found in the body
+ * @property {boolean} [fromMe]      sender is the signed-in account
  * @property {{whenText: string, title?: string, where?: string, organizer?: string}} [invite]
  *   the invite card the client renders above the message (first Msg only)
  */
@@ -40,15 +42,20 @@ const textOf = (el) => String((el && el.textContent) || "").replace(/\s+/g, " ")
 /**
  * Element text with line structure preserved: <br> and block boundaries
  * become "\n", inline whitespace collapses to one space. (Same walk as
- * sources/discord/dom.js's textWithBreaks.)
- * @param {any} el
+ * sources/discord/dom.js's textWithBreaks.) `skip` subtrees (a selector —
+ * the quoted-history containers) are dropped entirely.
+ * @param {any} el @param {string} [skip]
  */
-export function textWithBreaks(el) {
+export function textWithBreaks(el, skip) {
   let out = "";
   const walk = (node) => {
     for (const child of (node && node.childNodes) || []) {
       if (child.nodeType === 3 /* TEXT_NODE */) {
         out += child.nodeValue || "";
+      } else if (
+        skip && child.nodeType === 1 && child.matches && child.matches(skip)
+      ) {
+        continue; // quoted history — not new content
       } else if (String(child.nodeName || "").toUpperCase() === "BR") {
         out += "\n";
       } else {
@@ -90,7 +97,7 @@ function linksOf(el) {
         /* keep the wrapped url */
       }
     }
-    if (MEET_LINK.test(href) && !out.includes(href)) out.push(href);
+    if ((MEET_LINK.test(href) || BOOK_LINK.test(href)) && !out.includes(href)) out.push(href);
   }
   return out;
 }
@@ -241,6 +248,29 @@ export function extractFor(doc, href, { now } = {}) {
   }
 }
 
+/**
+ * The signed-in account's address, from the account button. Compared against
+ * sender addresses to flag fromMe — itself it is NEVER serialised into the
+ * extract (fromMe messages get `fromEmail: ""`).
+ * @param {any} doc
+ */
+export function accountEmail(doc) {
+  try {
+    const g = doc.querySelector(ACCOUNT.gmail);
+    const gl = g ? String(g.getAttribute("aria-label") || "") : "";
+    const gm = /\(([^()\s]+@[^()\s]+)\)\s*$/.exec(gl);
+    if (gm) return gm[1].toLowerCase();
+    for (const el of doc.querySelectorAll(ACCOUNT.outlook)) {
+      const t = String(el.getAttribute("aria-label") || el.textContent || "");
+      const m = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(t);
+      if (m) return m[0].toLowerCase();
+    }
+  } catch {
+    /* no account button */
+  }
+  return "";
+}
+
 /* ------------------------------ Gmail ------------------------------ */
 
 function gmailExtract(doc, href, now) {
@@ -267,6 +297,12 @@ function gmailExtract(doc, href, now) {
   }
   const view = /** @type {"message"|"list"} */ (msgId ? "message" : "list");
   const urlFor = (key) => `https://mail.google.com/mail/u/${n}/#${folder || "inbox"}/${key}`;
+  const acct = accountEmail(doc);
+  // The user's own mail: name "me" or the account address. fromEmail is
+  // blanked so the account address never leaves the page.
+  /** @param {string} name @param {string} email */
+  const mine = (name, email) =>
+    name.trim().toLowerCase() === "me" || (!!acct && email.toLowerCase() === acct);
 
   /** @type {Msg[]} */
   const messages = [];
@@ -279,15 +315,19 @@ function gmailExtract(doc, href, now) {
       const dateEl = m.querySelector(GMAIL.msgDate);
       const bodyEl = m.querySelector(GMAIL.msgBody);
       const receivedText = dateEl ? dateEl.getAttribute("title") || textOf(dateEl) : "";
+      const from = (senderEl && (senderEl.getAttribute("name") || textOf(senderEl))) || "";
+      const fromEmail = (senderEl && senderEl.getAttribute("email")) || "";
+      const self = mine(from, fromEmail);
       messages.push({
         key: String(key || ""),
         url: urlFor(key),
-        from: (senderEl && (senderEl.getAttribute("name") || textOf(senderEl))) || "",
-        fromEmail: (senderEl && senderEl.getAttribute("email")) || "",
+        from,
+        fromEmail: self ? "" : fromEmail,
+        fromMe: self || undefined,
         subject,
         receivedText: receivedText || undefined,
         receivedAt: parseReceived(receivedText, now),
-        body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
+        body: bodyEl ? textWithBreaks(bodyEl, QUOTE_SEL).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
     }
@@ -313,11 +353,15 @@ function gmailExtract(doc, href, now) {
       const senderEl = tr.querySelector(GMAIL.sender);
       const dateEl = tr.querySelector(GMAIL.date);
       const receivedText = dateEl ? dateEl.getAttribute("title") || textOf(dateEl) : "";
+      const from = (senderEl && (senderEl.getAttribute("name") || textOf(senderEl))) || "";
+      const fromEmail = (senderEl && senderEl.getAttribute("email")) || "";
+      const self = mine(from, fromEmail);
       messages.push({
         key: String(key),
         url: urlFor(key),
-        from: (senderEl && (senderEl.getAttribute("name") || textOf(senderEl))) || "",
-        fromEmail: (senderEl && senderEl.getAttribute("email")) || "",
+        from,
+        fromEmail: self ? "" : fromEmail,
+        fromMe: self || undefined,
         subject: textOf(tr.querySelector(GMAIL.subject)),
         preview: textOf(tr.querySelector(GMAIL.preview))
           .replace(/^\s*[-–—]+\s*/, "")
@@ -355,6 +399,9 @@ function outlookExtract(doc, href, now) {
   const zero = u.hostname === "outlook.live.com" ? "0/" : "";
   const urlFor = (key) =>
     `https://${u.hostname}/mail/${zero}${folder || "inbox"}/id/${encodeURIComponent(key)}`;
+  const acct = accountEmail(doc);
+  /** @param {string} email */
+  const mine = (email) => !!acct && String(email).toLowerCase() === acct;
 
   /** @type {Msg[]} */
   const messages = [];
@@ -367,15 +414,18 @@ function outlookExtract(doc, href, now) {
       const sel = doc.querySelector(OUTLOOK.selected);
       const key = (sel && sel.getAttribute("data-convid")) || msgId || "";
       const receivedText = dateEl ? textOf(dateEl) : "";
+      const fromEmail = (senderEl && senderEl.getAttribute("title")) || "";
+      const self = mine(fromEmail);
       messages.push({
         key: String(key),
         url: urlFor(key),
         from: textOf(senderEl),
-        fromEmail: (senderEl && senderEl.getAttribute("title")) || "",
+        fromEmail: self ? "" : fromEmail,
+        fromMe: self || undefined,
         subject: textOf(main.querySelector(OUTLOOK.heading)),
         receivedText: receivedText || undefined,
         receivedAt: parseReceived(receivedText, now),
-        body: bodyEl ? textWithBreaks(bodyEl).slice(0, BODY_CAP) : undefined,
+        body: bodyEl ? textWithBreaks(bodyEl, QUOTE_SEL).slice(0, BODY_CAP) : undefined,
         links: linksOf(bodyEl),
       });
       const card = inviteCard(doc, false);
@@ -394,6 +444,7 @@ function outlookExtract(doc, href, now) {
       const senderEl = row.querySelector(OUTLOOK.sender);
       const from = textOf(senderEl);
       const fromEmail = (senderEl && senderEl.getAttribute("title")) || "";
+      const self = mine(fromEmail);
       const lines = textWithBreaks(row)
         .split("\n")
         .map((l) => l.trim())
@@ -407,7 +458,8 @@ function outlookExtract(doc, href, now) {
         key: String(key),
         url: urlFor(key),
         from,
-        fromEmail,
+        fromEmail: self ? "" : fromEmail,
+        fromMe: self || undefined,
         subject,
         preview: rest2.join(" ").slice(0, PREVIEW_CAP) || undefined,
         receivedText: time || undefined,

@@ -8,7 +8,10 @@
 import { classify, factsOf, sentenceOf } from "../learn/classify.js";
 import { slug } from "../outline/expand.js";
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
+import { hashString } from "../../capture/redact.js";
 import {
+  BOOK_LINK,
+  BOOK_RE,
   cleanSubject,
   DEADLINE_TYPES,
   EASTERN_TZ,
@@ -21,6 +24,8 @@ import {
   mailType,
   MEET_LINK,
   normCardWhen,
+  QUOTE_CUT_RE,
+  REPLY_RE,
   senderGate,
   WHEN_LINE,
   WHERE_LINE,
@@ -234,4 +239,336 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     items.push(item);
   }
   return items;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Reply-needed and book-a-call tasks                                  *
+ * ------------------------------------------------------------------ */
+
+/** Folders that hold the user's own outgoing mail. */
+export const SENT_FOLDERS = new Set(["sent", "sentitems", "sent items"]);
+
+const REPLIES_CAP = 300;
+const BOOKINGS_CAP = 200;
+
+/** Default task due: two days after `iso`, at 17:00 Toronto. */
+const taskDue = (iso) => {
+  const p = zonedParts(new Date(iso));
+  const d = new Date(Date.UTC(p.y, p.m - 1, p.d + 2));
+  return zonedIso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 17, 0);
+};
+
+/** Body minus quoted history: the first "On … wrote:" etc. line ends it. */
+const unquoted = (t) => {
+  const s = String(t || "");
+  const m = QUOTE_CUT_RE.exec(s);
+  return (m ? s.slice(0, m.index) : s).trim();
+};
+
+const sentencesOf = (t) =>
+  (String(t).match(/[^.!?\n]+[.!?]*/g) || []).map((s) => s.trim()).filter(Boolean);
+
+/**
+ * The ask in a message: the first sentence that begs a reply, plus an
+ * explicit "by <date>" deadline inside it if present.
+ * @param {Msg} m
+ * @param {{now: Date, termCode?: number, td: any}} o
+ * @returns {{sentence: string, dueAt?: string}|null}
+ */
+function askOf(m, { now, termCode, td }) {
+  const ref = m.receivedAt ? new Date(m.receivedAt) : now;
+  const text = unquoted(`${m.subject || ""}\n${m.body || m.preview || ""}`);
+  for (const s of sentencesOf(text)) {
+    if (!REPLY_RE.test(s) && !(s.endsWith("?") && /\byou(r)?\b/i.test(s))) continue;
+    /** @type {string|undefined} */
+    let dueAt;
+    for (const h of td(s, { now: ref, termCode })) {
+      if (/\bby\s*$/i.test(s.slice(0, h.index))) {
+        dueAt = h.allDay ? dueEndOfDay(h.startAt) : h.startAt;
+        break;
+      }
+    }
+    return { sentence: s, dueAt };
+  }
+  return null;
+}
+
+/** A booking link or "book a time"-style wording -> a book-a-call trigger. */
+function bookingOf(m) {
+  const link = (m.links || []).find((l) => BOOK_LINK.test(l));
+  const text = unquoted(`${m.subject || ""}\n${m.body || m.preview || ""}`);
+  const sentence = sentencesOf(text).find((s) => BOOK_RE.test(s));
+  if (!link && !sentence) return null;
+  return { link, sentence };
+}
+
+/**
+ * Reply-needed and book-a-call tasks for one observe pass, and the state
+ * that tracks them. `prod` pairs each Msg with the items it produced this
+ * pass (so a message that yielded an invite can't spawn tasks). Task
+ * creation runs only on `frame.allowed` views; completion — a later from-me
+ * message, a sent-folder row, an all-mine thread, or an invite from the
+ * requester — runs on every pass.
+ * @param {{m: Msg, items: Item[]}[]} prod
+ * @param {{view: string, folder: string|null, allowed: boolean}} frame
+ * @param {any} prev   previous adapter state ({replies, bookings})
+ * @param {{provider: string, now: Date, termCode?: number, textDates?: any,
+ *   courses?: any[], settings?: Record<string, any>, applications?: any,
+ *   at: string}} opts
+ * @returns {{items: Item[], replies: Record<string, any>, bookings: Record<string, any>}}
+ */
+export function taskItems(prod, frame, prev, opts) {
+  const { provider, now, termCode, courses = [], settings = {}, applications, at } = opts;
+  const td = opts.textDates || extractDates;
+  const replies = { ...((prev && prev.replies) || {}) };
+  const bookings = { ...((prev && prev.bookings) || {}) };
+  /** @type {Item[]} */
+  const items = [];
+
+  // Invites produced this pass mark a thread (or a sender) as scheduled.
+  const inviteKey = new Set();
+  const inviteSender = new Set();
+  const rows = prod.map((p) => {
+    const invited = p.items.some((i) => String(i.id).startsWith(`${provider}:invite:`));
+    if (invited) {
+      inviteKey.add(String(p.m.key));
+      if (p.m.fromEmail) inviteSender.add(hashString(String(p.m.fromEmail).toLowerCase()));
+    }
+    return {
+      m: p.m,
+      invited,
+      gate: senderGate(p.m, { courses, settings, applications }),
+      bulk: isBulk(p.m),
+    };
+  });
+  /** My own mail, invite-producing mail and ungated bulk can't make tasks. */
+  const canTask = (r) => !r.m.fromMe && !r.invited && (r.gate.ok || !r.bulk);
+  const rev = (r) => (r.gate.ok ? "auto" : "pending");
+  const seenEntry = (id, key) => [
+    {
+      source: provider,
+      key: id.replace(new RegExp(`^${provider}:`), ""),
+      scope: `email:${provider}:${key}`,
+      at,
+    },
+  ];
+  /** @param {string} key @param {any} rec */
+  const replyDoneItem = (key, rec) => /** @type {Item} */ ({
+    id: rec.id,
+    source: /** @type {Item["source"]} */ (provider),
+    type: "task",
+    category: "reply",
+    title: rec.title,
+    dueAt: rec.dueAt,
+    url: rec.url,
+    status: "done",
+    review: rec.review,
+    confidence: "tentative",
+    meta: { reply: { threadKey: key, askedAt: rec.askedAt }, provider, messageUrl: rec.url },
+    seenIn: seenEntry(rec.id, key),
+  });
+  /** @param {string} key @param {any} rec */
+  const bookDoneItem = (key, rec) => /** @type {Item} */ ({
+    id: rec.id,
+    source: /** @type {Item["source"]} */ (provider),
+    type: "task",
+    category: "book-call",
+    title: rec.title,
+    dueAt: rec.dueAt,
+    url: rec.url,
+    status: "done",
+    review: rec.review,
+    confidence: "tentative",
+    meta: { provider, messageKey: key, messageUrl: rec.url },
+    seenIn: seenEntry(rec.id, key),
+  });
+  /** @param {Msg} m */
+  const replyTitle = (m) =>
+    `Reply to ${m.from || "the sender"}: ${cleanSubject(m.subject)}`.slice(0, 100);
+
+  /* ---- message views: the ask, then whether an answer came after ---- */
+  if (frame.view === "message") {
+    /** @type {Map<string, {m: Msg, invited: boolean, gate: any, bulk: boolean}[]>} */
+    const groups = new Map();
+    for (const r of rows) {
+      const k = String(r.m.key);
+      const g = groups.get(k) || [];
+      g.push(r);
+      groups.set(k, g);
+    }
+    for (const [key, rs] of groups) {
+      // The latest eligible triggering message is the ask.
+      /** @type {number} */
+      let askI = -1;
+      /** @type {any} */
+      let askRow;
+      /** @type {{sentence: string, dueAt?: string}|null} */
+      let ask = null;
+      for (let i = 0; i < rs.length; i++) {
+        const r = rs[i];
+        if (!canTask(r)) continue;
+        const a = askOf(r.m, { now, termCode, td });
+        if (a) {
+          askI = i;
+          askRow = r;
+          ask = a;
+        }
+      }
+      if (ask && askRow) {
+        const askedAt = askRow.m.receivedAt || at;
+        const dueAt = ask.dueAt || taskDue(askedAt);
+        // A from-me message after the ask (by receivedAt when both have one,
+        // else by DOM order) completes the reply.
+        /** @type {string|undefined} */
+        let doneAt;
+        for (let j = askI + 1; j < rs.length; j++) {
+          const rj = rs[j];
+          if (!rj.m.fromMe) continue;
+          if (
+            rj.m.receivedAt && askRow.m.receivedAt &&
+            !(Date.parse(rj.m.receivedAt) > Date.parse(askRow.m.receivedAt))
+          ) continue;
+          doneAt = rj.m.receivedAt || at;
+          break;
+        }
+        const prevRec = replies[key];
+        if (doneAt && (frame.allowed || prevRec)) {
+          replies[key] = prevRec
+            ? { ...prevRec, status: "done", doneAt }
+            : {
+                id: `${provider}:reply:${key}`,
+                title: replyTitle(askRow.m),
+                dueAt,
+                askedAt,
+                review: rev(askRow),
+                url: askRow.m.url,
+                status: "done",
+                doneAt,
+              };
+          items.push(replyDoneItem(key, replies[key]));
+        } else if (
+          prevRec && prevRec.status === "done" && prevRec.doneAt &&
+          !(Date.parse(askedAt) > Date.parse(prevRec.doneAt))
+        ) {
+          // Already answered — an unseen from-me message must not reopen it.
+          items.push(replyDoneItem(key, prevRec));
+        } else if (frame.allowed) {
+          const rec = {
+            id: `${provider}:reply:${key}`,
+            title: replyTitle(askRow.m),
+            dueAt,
+            askedAt,
+            review: rev(askRow),
+            url: askRow.m.url,
+            status: "open",
+          };
+          replies[key] = rec;
+          items.push(/** @type {Item} */ ({
+            id: rec.id,
+            source: /** @type {Item["source"]} */ (provider),
+            type: "task",
+            category: "reply",
+            title: rec.title,
+            dueAt,
+            url: askRow.m.url,
+            status: "open",
+            review: rec.review,
+            confidence: "tentative",
+            meta: {
+              reply: { threadKey: key, askedAt, fromName: askRow.m.from },
+              provider,
+              messageUrl: askRow.m.url,
+            },
+            evidence: { method: "text", snippet: ask.sentence.slice(0, 300), url: askRow.m.url },
+            seenIn: seenEntry(rec.id, key),
+          }));
+        }
+      } else if (rs.length && rs.every((r) => r.m.fromMe)) {
+        // A thread view that is only my own messages completes a known reply.
+        const prevRec = replies[key];
+        if (prevRec && prevRec.status === "open") {
+          replies[key] = { ...prevRec, status: "done", doneAt: at };
+          items.push(replyDoneItem(key, replies[key]));
+        }
+      }
+    }
+  }
+
+  /* ---- a sent-folder row closes its reply (and nothing else) ---- */
+  if (
+    frame.view === "list" &&
+    SENT_FOLDERS.has(String(frame.folder || "").toLowerCase())
+  ) {
+    for (const r of rows) {
+      const key = String(r.m.key);
+      const prevRec = replies[key];
+      if (prevRec && prevRec.status === "open") {
+        replies[key] = { ...prevRec, status: "done", doneAt: at };
+        items.push(replyDoneItem(key, replies[key]));
+      }
+    }
+  }
+
+  /* ---- book-a-call: wording or a booking link on an eligible message ---- */
+  if (frame.allowed) {
+    for (const r of rows) {
+      if (!canTask(r)) continue;
+      const trig = bookingOf(r.m);
+      if (!trig) continue;
+      const key = String(r.m.key);
+      const existing = bookings[key];
+      if (existing && existing.status === "done") continue; // never reopen
+      const dueAt = taskDue(r.m.receivedAt || at);
+      const rec = {
+        id: `${provider}:book:${key}`,
+        title: `Book a call with ${r.m.from || "the sender"}`,
+        dueAt,
+        url: trig.link || r.m.url,
+        senderHash: hashString(String(r.m.fromEmail || "").toLowerCase()),
+        review: rev(r),
+        status: "open",
+      };
+      bookings[key] = rec;
+      items.push(/** @type {Item} */ ({
+        id: rec.id,
+        source: /** @type {Item["source"]} */ (provider),
+        type: "task",
+        category: "book-call",
+        title: rec.title,
+        url: rec.url,
+        dueAt,
+        status: "open",
+        review: rec.review,
+        confidence: "tentative",
+        meta: { provider, messageKey: key, messageUrl: r.m.url, fromName: r.m.from },
+        ...(trig.sentence
+          ? { evidence: { method: "text", snippet: trig.sentence.slice(0, 300), url: r.m.url } }
+          : {}),
+        seenIn: seenEntry(rec.id, key),
+      }));
+    }
+  }
+
+  /* ---- an arriving invite answers the book-a-call task ---- */
+  for (const [key, b] of Object.entries(bookings)) {
+    if (b.status !== "open") continue;
+    if (inviteKey.has(key) || (b.senderHash && inviteSender.has(b.senderHash))) {
+      bookings[key] = { ...b, status: "done" };
+      items.push(bookDoneItem(key, bookings[key]));
+    }
+  }
+
+  // Caps: newest by askedAt (replies) / dueAt (bookings).
+  const rks = Object.keys(replies);
+  if (rks.length > REPLIES_CAP) {
+    rks.sort((a, b) => String(replies[b].askedAt || "").localeCompare(String(replies[a].askedAt || "")));
+    for (const k of rks.slice(REPLIES_CAP)) delete replies[k];
+  }
+  const bks = Object.keys(bookings);
+  if (bks.length > BOOKINGS_CAP) {
+    bks.sort((a, b) => String(bookings[b].dueAt || "").localeCompare(String(bookings[a].dueAt || "")));
+    for (const k of bks.slice(BOOKINGS_CAP)) delete bookings[k];
+  }
+
+  return { items, replies, bookings };
 }

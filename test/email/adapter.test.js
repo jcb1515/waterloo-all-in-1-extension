@@ -578,6 +578,175 @@ test("a list row's label date anchors relative dates in the preview", () => {
   assert.equal(i.startAt, "2026-09-26T19:00:00.000Z"); // tomorrow = Sep 26, not now
 });
 
+test("reply task: a professor's question becomes one task, done after I answer", async () => {
+  const courses = [
+    { code: "ECE 105", term: 1269, instructors: [{ name: "Jane Smith", email: "jsmith@uwaterloo.ca" }] },
+  ];
+  // (a) the ask alone
+  const askDoc = parseHTML(html("gmail-thread-ask")).document;
+  const ask = extractFor(askDoc, "https://mail.google.com/mail/u/0/#inbox/thr-ask");
+  const res1 = await adapter.observe.parse(payload("gmail", ask), ctx({}, { courses }));
+  const replies1 = res1.items.filter((i) => i.category === "reply");
+  assert.equal(replies1.length, 1);
+  assert.equal(res1.items.length, 1);
+  const t = replies1[0];
+  assert.equal(t.id, "gmail:reply:thr-ask");
+  assert.equal(t.type, "task");
+  assert.equal(t.title, "Reply to Jane Smith: Lab sections");
+  assert.equal(t.dueAt, "2026-10-03T21:00:00.000Z"); // askedAt + 2d @ 17:00 ET
+  assert.equal(t.review, "auto");
+  assert.equal(t.status, "open");
+  assert.equal(t.meta.reply.threadKey, "thr-ask");
+  assert.ok(res1.state.replies["thr-ask"]);
+
+  // (b) my reply appears in the thread -> the same id comes back done
+  const repDoc = parseHTML(html("gmail-thread-reply")).document;
+  const rep = extractFor(repDoc, "https://mail.google.com/mail/u/0/#inbox/thr-ask");
+  const res2 = await adapter.observe.parse(
+    payload("gmail", rep),
+    ctx({}, { courses, state: res1.state }),
+  );
+  const done = res2.items.find((i) => i.id === "gmail:reply:thr-ask");
+  assert.equal(done.status, "done");
+  assert.equal(res2.state.replies["thr-ask"].status, "done");
+
+  // ...and a sent-folder list row for the same key closes it too.
+  const sent = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [msg({ key: "thr-ask" })], "list", "sent")),
+    ctx({}, { courses, state: res1.state }),
+  );
+  const sentDone = sent.items.find((i) => i.id === "gmail:reply:thr-ask");
+  assert.equal(sentDone.status, "done");
+  assert.equal(sent.items.filter((i) => i.category !== "reply").length, 0);
+});
+
+test("reply task: an explicit 'reply by <date>' sets the due", async () => {
+  const m = msg({
+    from: "Alex Kim",
+    fromEmail: "alex@robotics.example.org",
+    subject: "Robotics",
+    body: "Quick one — please reply by October 5.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const t = res.items.find((i) => i.category === "reply");
+  assert.equal(t.dueAt, "2026-10-06T03:59:00.000Z"); // Oct 5, 23:59 ET
+});
+
+test("book-a-call task: calendly wording, completed by the invite", async () => {
+  const m = msg({
+    key: "book1",
+    from: "Morgan Park",
+    fromEmail: "morgan@park.example.com",
+    subject: "Intro call",
+    body: "Feel free to book a time here: https://calendly.com/example/30min",
+    links: ["https://calendly.com/example/30min"],
+  });
+  const res1 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const book = res1.items.find((i) => i.category === "book-call");
+  assert.equal(book.id, "gmail:book:book1");
+  assert.equal(book.type, "task");
+  assert.equal(book.url, "https://calendly.com/example/30min");
+  assert.equal(book.review, "pending");
+  assert.equal(res1.state.bookings.book1.status, "open");
+  // The state carries only a hash of the sender — never the address.
+  assert.ok(!JSON.stringify(res1.state).includes("morgan@"));
+
+  // A Google Calendar invite from the same sender on another thread closes it.
+  const inv = msg({
+    key: "book2",
+    from: "Morgan Park",
+    fromEmail: "morgan@park.example.com",
+    subject: GCAL,
+    links: ["https://meet.google.com/abc-defg-hij"],
+  });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [inv], "message", "inbox")),
+    ctx({}, { state: res1.state }),
+  );
+  const doneItem = res2.items.find((i) => i.id === "gmail:book:book1");
+  assert.equal(doneItem.status, "done");
+  assert.equal(res2.state.bookings.book1.status, "done");
+});
+
+test("reply task: a recruiter at a personal domain still asks", async () => {
+  const m = msg({
+    from: "Sam Lee",
+    fromEmail: "sam.recruits@gmail.com",
+    subject: "Following up",
+    body: "Hi, I'm a recruiter at Acme. Are you available for a phone screen on Thursday, October 8 at 2:00 PM?",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const reply = res.items.find((i) => i.category === "reply");
+  assert.equal(reply.id, "gmail:reply:k1");
+  assert.equal(reply.review, "pending");
+  assert.equal(reply.title, "Reply to Sam Lee: Following up");
+});
+
+test("bulk senders make no reply or book tasks", async () => {
+  const news = msg({
+    key: "nb1",
+    from: "Club News",
+    fromEmail: "news@club.example.org",
+    subject: "September newsletter",
+    body: "Can you make our info session on October 9 at 6 PM?\nUnsubscribe from these emails.",
+  });
+  const r1 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [news], "message", "inbox")),
+    ctx({}),
+  );
+  assert.equal(r1.items.length, 0);
+
+  const nr = msg({
+    key: "nb2",
+    from: "Shop",
+    fromEmail: "no-reply@shop.example.com",
+    subject: "Your receipt",
+    body: "Can you confirm your pickup on October 9 at 6 PM?",
+    links: ["https://calendly.com/example/30min"],
+  });
+  const r2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [nr], "message", "inbox")),
+    ctx({}),
+  );
+  assert.equal(r2.items.length, 0);
+});
+
+test("quoted history cannot create a reply task", async () => {
+  const m = msg({
+    from: "Alex Kim",
+    fromEmail: "alex@robotics.example.org",
+    subject: "Robotics",
+    body:
+      "Sounds good.\nOn Tue, Sep 29, 2026 at 2:00 PM Alex Kim wrote:\n> Can you make Thursday at 2?",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  assert.equal(res.items.length, 0);
+});
+
+test("privacy: my account address never leaves the page", async () => {
+  const { document } = parseHTML(html("gmail-thread-reply"));
+  const out = extractFor(document, "https://mail.google.com/mail/u/0/#inbox/thr-ask");
+  assert.ok(!JSON.stringify(out).includes("jane.student@example.com"));
+  const mine = out.messages.find((m) => m.fromMe);
+  assert.equal(mine.fromEmail, "");
+
+  const res = await adapter.observe.parse(payload("gmail", out), ctx({}));
+  assert.ok(!JSON.stringify(res).includes("jane.student@example.com"));
+  assert.ok(!JSON.stringify(res.state).includes("jane.student@example.com"));
+});
+
 test("email sources contain no forbidden APIs", () => {
   const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "email");
   const FORBIDDEN = [

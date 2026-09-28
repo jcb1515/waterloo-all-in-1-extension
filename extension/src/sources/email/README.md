@@ -15,15 +15,22 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
   the extract has messages, deduped by body, capped at 2 MB, `.catch`-ed.
 - `dom.js` — `extractFor(doc, href, {now})` → `{v, provider, folder, view,
   messages}`, one per host. `Msg = {key, url, from, fromEmail, subject,
-  preview?, receivedText?, receivedAt?, body?, links}`. Bodies exist only in
-  message view (≤20,000 chars, `<br>`/block boundaries → `\n`), previews ≤200
-  chars, `links` = Teams/Zoom/Meet/WaterlooWorks hrefs with Google `url?q=`
-  wrappers unwrapped. `receivedAt` = ISO Toronto from `parseListLabel`
-  (short mail labels: `"3:14 PM"` → today, `"Fri [4:34 PM]"` → the most
-  recent such weekday, `"Sep 25"` → this year else last, `"9/25/26"` → M/D/Y
-  with YY = 20YY) against the extract's `now`, falling back to the textdates
-  parse for full labels — so "tomorrow at 3pm" in a week-old row resolves
-  against its received date, not the machine clock.
+  preview?, receivedText?, receivedAt?, body?, links, fromMe?}`. Bodies exist
+  only in message view (≤20,000 chars, `<br>`/block boundaries → `\n`),
+  previews ≤200 chars, `links` = Teams/Zoom/Meet/WaterlooWorks + booking
+  hrefs with Google `url?q=` wrappers unwrapped. `receivedAt` = ISO Toronto
+  from `parseListLabel` (short mail labels: `"3:14 PM"` → today, `"Fri
+  [4:34 PM]"` → the most recent such weekday, `"Sep 25"` → this year else
+  last, `"9/25/26"` → M/D/Y with YY = 20YY) against the extract's `now`,
+  falling back to the textdates parse for full labels — so "tomorrow at
+  3pm" in a week-old row resolves against its received date, not the
+  machine clock. It also reads the signed-in **account address**
+  (`accountEmail` — Gmail's `a[aria-label^="Google Account:"]` label's
+  parenthesised email, Outlook's me-control) to flag `Msg.fromMe` and blank
+  `fromEmail` on the user's own messages (Gmail's `"me"` sender text counts
+  too); the address is compared in memory only, never serialised.
+  Quoted-history containers (`.gmail_quote`, `blockquote`,
+  `[id^="divRplyFwdMsg"]`) are excluded from body text.
 - `rules.js` + `extract.js` — `itemsFromMessage(msg, …)` (pure):
   - **Invites → exact items.** Checked in order: the rendered **invite card**
     (`msg.invite`, when the client drew the RSVP card whose date Gmail/Outlook
@@ -86,6 +93,39 @@ from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
     `exam` items take the outline/Portal titles ("Midterm"/"Final exam" when
     `classify` finds one in the sentence or subject) plus
     `details = "Email: " + cleanedSubject`, so they merge with the real exam.
+  - **Reply-needed tasks.** `taskItems` scans each message view's
+    non-from-me, non-invite-producing, `gate.ok || !isBulk` messages for an
+    ask — `REPLY_RE` phrasing (`please reply|respond|confirm`, `let me
+    know`, `get back to me`, `are you available|free`, `what times work`,
+    `when are|would you be free|available`, `rsvp`) or a sentence ending in
+    `?` that mentions `you` — with the body first cut at quoted-history
+    lines (`On … wrote:`, `From: …`, `--- Original Message ---`). The
+    latest ask wins → `<provider>:reply:<threadKey>`, type `task`,
+    category `reply`, title `"Reply to <name>: <cleaned subject>"`,
+    `dueAt` = an explicit `by <date>` in the ask sentence (all-day → 23:59
+    ET) else `askedAt + 2 days` at 17:00 Toronto, `review` auto when gated
+    else pending. State: `state.replies[key] = {id, title, dueAt, askedAt,
+    review, url, status, doneAt?}` (cap 300, newest by askedAt). **Done**
+    when a from-me message follows the ask (later `receivedAt`, or later
+    DOM order when times are missing), a sent-folder list row (`sent`,
+    `sentitems`, `sent items` — which never produce other items) carries a
+    known open key, or a message view of only from-me messages revisits a
+    known key. A done reply reopens only on a newer ask (`askedAt >
+    doneAt`).
+  - **Book-a-call tasks.** An eligible message with a booking link
+    (`calendly.com/`, `calendar.app.google/`,
+    `calendar.google.com/calendar/appointments`,
+    `outlook.office.com/bookwithme`, `outlook.office365.com/owa/calendar/…/bookings`,
+    `/bookings/`) or wording (`BOOK_RE`: `schedule a call|time|meeting|
+    chat`, `book a time|call|slot|meeting`, `pick a time`, `find a time`)
+    yields `<provider>:book:<threadKey>`, `type task`,
+    `category "book-call"`, `url` = the booking link, same default due and
+    review rule. A message that produced an invite item emits none. State:
+    `state.bookings[key] = {id, title, dueAt, url, senderHash, review,
+    status}` — `senderHash` is `hashString(fromEmail)` so the address is
+    never stored (cap 200). **Done** when an invite item arrives from the
+    same threadKey, or from a message whose sender hash matches — the
+    invite answers the ask.
 
 ## Settings
 
@@ -185,6 +225,15 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   preferences` footer set, `PERSONAL_DOMAINS`, the case-sensitive `\bOA\b`,
   the `titleSimilarity >= 0.6` employer threshold, and `parseListLabel`'s
   label formats + "this year else last" year pick.
+- Account/privacy: `ACCOUNT.gmail` (the `aria-label^="Google Account:"`
+  anchor's parenthesised email), `ACCOUNT.outlook` (`#mectrl_…secondary`,
+  `[data-testid=…]`, `header button[aria-label*="@"]`), Gmail's literal
+  `"me"` sender text, `QUOTE_SEL` (`.gmail_quote`, `blockquote`,
+  `[id^="divRplyFwdMsg"]`) and the `QUOTE_CUT_RE` line patterns.
+- Reply/book triggers: `REPLY_RE`, the "?"-sentence-with-`you` rule,
+  `BOOK_RE` wording, `BOOK_LINK` hosts (incl. the generic `/bookings/`
+  path), `SENT_FOLDERS`, the +2-days-at-17:00-ET default due, and the
+  300/200 reply/booking caps.
 - Outlook message views may contain more than one `[data-convid]` doc (e.g.
   a thread pane); the single-key rule in `index.js` then falls back to the
   list scope rather than over-removing.

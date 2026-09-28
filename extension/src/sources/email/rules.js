@@ -25,6 +25,21 @@ export const EASTERN_TZ = /^(E[SD]?T|Eastern|America\/Toronto|GMT-0?[45])/i;
 export const MEET_LINK =
   /teams\.microsoft\.com\/l\/meetup-join|zoom\.us\/j\/|meet\.google\.com\/|waterlooworks\.uwaterloo\.ca/i;
 
+/** Booking links — kept on the Msg but never treated as invite evidence. */
+export const BOOK_LINK =
+  /calendly\.com\/|calendar\.app\.google\/|calendar\.google\.com\/calendar\/appointments|outlook\.office\.com\/bookwithme|outlook\.office365\.com\/owa\/calendar\/[^\s"'<>]*bookings|\/bookings\//i;
+
+/** Wording that turns a booking link (or alone) into a book-a-call task. */
+export const BOOK_RE =
+  /schedule a (call|time|meeting|chat)|book a (time|call|slot|meeting)|pick a time|find a time/i;
+
+/** Phrases that mean a reply is owed, plus "?"-sentences addressed to "you". */
+export const REPLY_RE =
+  /\b(please (reply|respond|confirm|let me know)|let me know|get back to me|are you (available|free)|what times? works?|when (are|would) you (be )?(free|available)|rsvp)\b/i;
+
+/** The first matching line ends the new part of a message body (quotes). */
+export const QUOTE_CUT_RE = /^(On .+ wrote:|From: .+|-{2,}\s*Original Message\s*-{2,})\s*$/m;
+
 /* ---- invite cards (the RSVP card the client renders above a message) ---- */
 
 /**

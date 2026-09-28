@@ -33,3 +33,17 @@ export const OUTLOOK = {
 export const CARD = {
   main: '[role="main"]',
 };
+
+// The signed-in account button — read only to recognise the user's own
+// messages (fromMe); the address is compared in memory and never emitted.
+export const ACCOUNT = {
+  // Gmail: aria-label "Google Account: <name> (<email>)".
+  gmail: 'a[aria-label^="Google Account:"]',
+  // OWA: the me-control carries the address as text or in its aria-label.
+  outlook:
+    '#mectrl_currentAccount_secondary, [data-testid="mectrl_currentAccount_secondary"], header button[aria-label*="@"]',
+};
+
+// Quoted-history containers stripped out of body text so old asks don't
+// look new.
+export const QUOTE_SEL = ".gmail_quote, blockquote, [id^='divRplyFwdMsg']";
