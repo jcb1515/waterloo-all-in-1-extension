@@ -4,7 +4,12 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { CHECK_SOURCES } from "../../extension/src/sources/probes.js";
+import { ADAPTERS } from "../../extension/src/core/registry.js";
 import {
   pageTargets,
   pickPage,
@@ -16,7 +21,18 @@ import {
   serviceWorkerTargets,
   swExtId,
   pickServiceWorker,
+  buildAllowlist,
+  resolveTarget,
+  canTouch,
 } from "../../tools/live/cdp.mjs";
+
+const TOOLS_LIVE = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "tools",
+  "live",
+);
 
 const TARGETS = [
   {
@@ -141,4 +157,116 @@ test("pickServiceWorker narrows by --ext/WA1_EXT_ID, errors on a miss", () => {
   // unknown id: an error, never a guess
   assert.match(String(pickServiceWorker(sws, "nosuchid").error), /nosuchid/);
   assert.deepEqual(pickServiceWorker(undefined, "x").error !== undefined, true);
+});
+
+/* ------------------------- open/close/scroll rules ------------------------ */
+
+function walk(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const p = path.join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else out.push(p);
+  }
+  return out;
+}
+
+test("tools/live never references input events or page navigation", () => {
+  const files = walk(TOOLS_LIVE);
+  assert.ok(files.length >= 2, "expected cdp.mjs and README.md under tools/live");
+  for (const f of files) {
+    const text = readFileSync(f, "utf8");
+    assert.ok(!text.includes("Input."), `${f} must not dispatch DevTools input events`);
+    assert.ok(!text.includes("Page.navigate"), `${f} must not navigate pages`);
+  }
+  const cdp = readFileSync(path.join(TOOLS_LIVE, "cdp.mjs"), "utf8");
+  assert.ok(cdp.includes("Target.createTarget"), "open must create its own target");
+});
+
+const ALLOW = buildAllowlist(CHECK_SOURCES, ADAPTERS);
+const resolve = (arg) => resolveTarget(arg, ALLOW);
+
+test("buildAllowlist: every checklist row url plus each adapter home", () => {
+  assert.ok(
+    ALLOW.some(
+      (e) => e.source === "portal" && e.rowId === "portal-open" &&
+        e.url === "https://portal.uwaterloo.ca/",
+    ),
+  );
+  for (const a of ADAPTERS) {
+    assert.ok(
+      ALLOW.some((e) => e.source === a.id && e.rowId === "home" && e.url === `${a.origins[0]}/`),
+      `${a.id} home`,
+    );
+  }
+});
+
+test("resolveTarget: source:rowId and source:home", () => {
+  assert.deepEqual(resolve("portal:portal-open"), {
+    ok: true,
+    url: "https://portal.uwaterloo.ca/",
+    source: "portal",
+    rowId: "portal-open",
+  });
+  assert.equal(
+    resolve("waterlooworks:applications").url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm",
+  );
+  assert.equal(
+    resolve("waterlooworks:interviews").url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm",
+  );
+  assert.equal(
+    resolve("waterlooworks:dashboard").url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
+  );
+  assert.equal(resolve("learn:home").url, "https://learn.uwaterloo.ca/");
+  assert.equal(resolve("portal:nope").ok, false);
+});
+
+test("resolveTarget: raw urls match the clean allowlisted url", () => {
+  const exact = resolve("https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm");
+  assert.equal(exact.ok, true);
+  assert.equal(exact.rowId, "applications");
+  // query + hash ignored; the allowlisted (clean) url is what opens
+  const messy = resolve(
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm?x=1#y",
+  );
+  assert.equal(messy.ok, true);
+  assert.equal(messy.url, "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm");
+});
+
+test("resolveTarget: discord is refused before the allowlist", () => {
+  for (const arg of [
+    "discord:channel",
+    "discord:events",
+    "discord:home",
+    "https://discord.com/channels/@me",
+    "https://ptb.discord.com/x",
+    "https://discord.gg/abc",
+    "https://discordapp.com/channels/1",
+  ]) {
+    const r = resolve(arg);
+    assert.equal(r.ok, false, arg);
+    assert.match(String(r.reason), /never opened by the tool/);
+  }
+});
+
+test("resolveTarget: https only, on-list paths only", () => {
+  assert.equal(resolve("http://portal.uwaterloo.ca/").ok, false);
+  const off = resolve("https://waterlooworks.uwaterloo.ca/myAccount/logout.htm");
+  assert.equal(off.ok, false);
+  assert.match(String(off.reason), /waterlooworks:applications/); // options listed
+  assert.equal(resolve("https://example.com/").ok, false);
+  assert.equal(resolve("portal").ok, false);
+});
+
+test("canTouch trusts only ids recorded in .opened.json", () => {
+  const opened = [{ targetId: "A1" }, { targetId: "B2" }];
+  assert.equal(canTouch("A1", opened), true);
+  assert.equal(canTouch("B2", opened), true);
+  assert.equal(canTouch("C3", opened), false);
+  assert.equal(canTouch("A1", []), false);
+  assert.equal(canTouch("A1", undefined), false);
+  assert.equal(canTouch("", opened), false);
 });
