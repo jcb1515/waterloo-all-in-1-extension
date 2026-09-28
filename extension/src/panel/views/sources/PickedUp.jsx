@@ -1,48 +1,95 @@
 // @ts-check
-// PLACEHOLDER — owned by W3 (stream/coop). Replace freely.
-//
-// Contract (see coordination/w1.md):
-//   export function PickedUp({sourceId, state, actions, now})
-// Renders in the Sources source-page "Picked up" segment. This minimal
-// version lists the items the source contributed (source or seenIn match).
+// Sources > Picked up segment: every item this source contributed (its
+// source or any seenIn entry — review-pending included), grouped by type
+// with upcoming vs earlier splits. Grouping lives in model/pickedUp.js.
 
 import { useMemo } from "preact/hooks";
+import { pickedUpGroups } from "../../model/pickedUp.js";
+import { adapterForSource } from "../../../core/registry.js";
 import { ItemRow } from "../../../ui/ItemRow.jsx";
+import { Section } from "../../../ui/Section.jsx";
 import { EmptyState } from "../../../ui/EmptyState.jsx";
-import { SearchIcon } from "../../../ui/icons.jsx";
+import { SearchIcon, ExternalLinkIcon } from "../../../ui/icons.jsx";
 
 /**
  * @param {{sourceId: string, state: any, actions: any, now: Date}} props
  */
 export function PickedUp({ sourceId, state, actions, now }) {
-  const rows = useMemo(() => {
-    const hits = [];
-    for (const it of Object.values(state.items || {})) {
-      if (!it) continue;
-      const sources = [it.source, ...(Array.isArray(it.seenIn) ? it.seenIn.map((s) => (s && s.source) || s) : [])];
-      if (sources.includes(sourceId)) hits.push(it);
-    }
-    const ms = (it) => Date.parse(it.startAt || it.dueAt || "") || 0;
-    hits.sort((a, b) => ms(b) - ms(a));
-    return hits;
-  }, [state.items, sourceId]);
+  const groups = useMemo(
+    () => pickedUpGroups(state.items || {}, sourceId, now),
+    [state.items, sourceId, now]
+  );
 
-  if (!rows.length) {
+  /** @param {any[]} list */
+  const rows = (list) =>
+    list.map((item) => (
+      <div key={item.id}>
+        {item.review === "pending" ? (
+          <p class="help">
+            <span class="badge badge-warn">In review</span>
+          </p>
+        ) : null}
+        <ItemRow item={item} now={now} actions={actions} projects={state.projects} />
+      </div>
+    ));
+
+  /** @param {any[]} list */
+  const earlier = (list) =>
+    list.length ? (
+      <details>
+        <summary>Earlier ({list.length})</summary>
+        <div class="card row-card" role="list">
+          {rows(list)}
+        </div>
+      </details>
+    ) : null;
+
+  if (!groups.length) {
+    const adapter = adapterForSource(sourceId);
+    const site = adapter && adapter.origins && adapter.origins[0];
     return (
       <EmptyState
         icon={SearchIcon}
         title="Nothing picked up yet"
-        text="Items this source finds show up here."
-      />
+        text="Items this source finds show up here — open the site to let it read."
+      >
+        {site ? (
+          <button type="button" class="btn btn-sm" onClick={() => actions.open(`${site}/`)}>
+            <ExternalLinkIcon size={13} /> Open site
+          </button>
+        ) : null}
+      </EmptyState>
     );
   }
 
   return (
-    <div class="card row-card" role="list">
-      {rows.slice(0, 40).map((item) => (
-        <ItemRow key={item.id} item={item} now={now} actions={actions} projects={state.projects} />
-      ))}
-      {rows.length > 40 ? <p class="help">…and {rows.length - 40} more</p> : null}
+    <div class="sources-list">
+      {groups.map((g) =>
+        g.collapsed ? (
+          <Section key={g.key}>
+            <details>
+              <summary>
+                {g.label} ({g.count})
+              </summary>
+              {g.upcoming.length ? (
+                <div class="card row-card" role="list">
+                  {rows(g.upcoming)}
+                </div>
+              ) : null}
+              {earlier(g.earlier)}
+            </details>
+          </Section>
+        ) : (
+          <Section key={g.key} title={`${g.label} (${g.count})`}>
+            {g.upcoming.length ? (
+              <div class="card row-card" role="list">
+                {rows(g.upcoming)}
+              </div>
+            ) : null}
+            {earlier(g.earlier)}
+          </Section>
+        )
+      )}
     </div>
   );
 }

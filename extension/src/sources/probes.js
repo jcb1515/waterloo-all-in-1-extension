@@ -28,6 +28,21 @@ import { probe as gcalProbe, CHECKLIST as GCAL_CHECKLIST } from "./gcal/probe.js
  */
 
 /**
+ * Portal's single checklist row: any open Portal page fetches schedule,
+ * exams and term dates (W2's auto-fetch, sources/portal/content.js).
+ * @type {CheckRow}
+ */
+export const PORTAL_OPEN_ROW = {
+  id: "portal-open",
+  label: "Open Portal once",
+  how: "Open any Portal page — your schedule, exams and term dates are read while it's open.",
+  url: "https://portal.uwaterloo.ca/",
+  essential: true,
+  refreshDays: 14,
+  stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+};
+
+/**
  * Learn/Portal have no content-script probe — their rows are satisfied by
  * readStats written from handleObserved/doSync.
  * @type {Record<string, {probe: ((doc: any, href: string) => ProbeResult) | null, checklist: CheckRow[]}>}
@@ -54,28 +69,7 @@ export const CHECK_SOURCES = {
   },
   portal: {
     probe: null,
-    // TODO(W1): when W2's any-open-page Portal fetch lands, replace these two
-    // rows with PORTAL_OPEN_ROW below.
-    checklist: [
-      {
-        id: "portal-schedule",
-        label: "Your class schedule",
-        how: "Open Portal → your class schedule.",
-        url: "https://portal.uwaterloo.ca/",
-        essential: true,
-        refreshDays: 30,
-        stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1, maxAgeMin: 30 },
-      },
-      {
-        id: "portal-exams",
-        label: "Your exam schedule",
-        how: "Open Portal → your exam schedule.",
-        url: "https://portal.uwaterloo.ca/",
-        essential: true,
-        refreshDays: 14,
-        stat: { kind: "observe", scope: "portal:exams", itemsMin: 1, maxAgeMin: 30 },
-      },
-    ],
+    checklist: [PORTAL_OPEN_ROW],
   },
   outline: { probe: outlineProbe, checklist: OUTLINE_CHECKLIST },
   waterlooworks: { probe: wwProbe, checklist: WW_CHECKLIST },
@@ -103,22 +97,6 @@ const PAGE_ALIAS = {
     events: "events-modal",
     "event-detail": "events-modal",
   },
-};
-
-/**
- * The row that replaces both Portal checklist rows once W2's "any open
- * Portal page fetches everything" lands — kept ready here so the swap is a
- * one-line change in CHECK_SOURCES.portal.checklist. Unused until then.
- * @type {CheckRow}
- */
-export const PORTAL_OPEN_ROW = {
-  id: "portal-open",
-  label: "Open Portal once",
-  how: "Open any Portal page — your schedule, exams and term dates are read while it's open.",
-  url: "https://portal.uwaterloo.ca/",
-  essential: true,
-  refreshDays: 14,
-  stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
 };
 
 /**

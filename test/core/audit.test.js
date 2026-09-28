@@ -118,7 +118,7 @@ test("userState orphans prune only dead ids with no recent activity", () => {
 test("onboarding userState keys are known, dated and never pruned", () => {
   const userState = {
     onboardingDismissedAt: iso(t0 - 100 * DAY), // old but a known meta key
-    nudgeSnooze: { "portal:portal-exams": iso(t0 - 20 * DAY) },
+    nudgeSnooze: { "portal:portal-open": iso(t0 - 20 * DAY) },
     gone_no_dates: { notes: "x" },
   };
   const s = snap({ userState });

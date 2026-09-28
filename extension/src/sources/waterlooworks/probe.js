@@ -214,13 +214,20 @@ export function probe(doc, href) {
 
 /**
  * Pages the "Check readers" flow asks the user to open.
- * @type {{id: string, label: string, how: string}[]}
+ * `url` (when set) is a verified page the row's Open button can go to;
+ * `essential` marks the rows onboarding insists on; `refreshDays` is how
+ * often the row should see a fresh read.
+ * @type {{id: string, label: string, how: string, url?: string,
+ *   essential?: boolean, refreshDays?: number}[]}
  */
 export const CHECKLIST = [
   {
     id: "applications",
     label: "Applications list",
     how: "WaterlooWorks → co-op → Applications",
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm",
+    essential: true,
+    refreshDays: 7,
   },
   {
     id: "application-detail",
@@ -231,6 +238,9 @@ export const CHECKLIST = [
     id: "interviews",
     label: "Interviews list",
     how: "co-op → Interviews",
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm",
+    essential: true,
+    refreshDays: 3,
   },
   {
     id: "interview-detail",
@@ -245,7 +255,10 @@ export const CHECKLIST = [
   {
     id: "dashboard",
     label: "Dashboard",
-    how: "Your WaterlooWorks dashboard",
+    how: "WaterlooWorks → Dashboard (the page after you sign in)",
+    url: "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
+    essential: true,
+    refreshDays: 3,
   },
   {
     id: "messages",

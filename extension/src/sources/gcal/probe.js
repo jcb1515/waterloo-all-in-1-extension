@@ -16,26 +16,40 @@ const HINT_ACCOUNT =
   "Couldn't detect your Google account — your own events may not be recognised.";
 const HINT_OPEN = "Open calendar.google.com.";
 
+/**
+ * W1's CheckRow plus the v2 checklist fields (`url` is the page an "Open"
+ * button targets, `essential` marks first-run rows, `refreshDays` nudges
+ * when the last good read is older).
+ * @typedef {import("../probes.js").CheckRow & {
+ *   url?: string, essential?: boolean, refreshDays?: number}} CheckRow
+ */
+
 /** Pages the user should open to verify this reader. `page` is the probe
- *  page kind the item expects. */
+ *  page kind the item expects.
+ * @type {CheckRow[]} */
 export const CHECKLIST = [
   {
     id: "gcal-week",
     page: "gcal-week",
     label: "Week view with a few events",
     how: "Open Google Calendar in Week view on a week that has events.",
+    url: "https://calendar.google.com/calendar/u/0/r/week",
+    essential: true,
+    refreshDays: 14,
   },
   {
     id: "gcal-month",
     page: "gcal-month",
     label: "Month view",
     how: "Switch to Month view.",
+    url: "https://calendar.google.com/calendar/u/0/r/month",
   },
   {
     id: "gcal-schedule",
     page: "gcal-schedule",
     label: "Schedule view",
     how: "Switch to Schedule view.",
+    url: "https://calendar.google.com/calendar/u/0/r/agenda",
   },
   {
     id: "gcal-event",

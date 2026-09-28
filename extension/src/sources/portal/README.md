@@ -1,15 +1,36 @@
 # portal adapter
 
-Reads Portal (portal.uwaterloo.ca) **passively** — its JSON API
-(`portalapi2.uwaterloo.ca/v2/...`) needs a bearer token the extension never
-holds, so there is no fetch tier. `sync` is a `no-tab` stub that only returns
-the accumulated state; everything real arrives through `observe` when the
-recorder relays API responses the student triggers by browsing.
+Reads Portal (portal.uwaterloo.ca) — its JSON API
+(`portalapi2.uwaterloo.ca/v2/...`) needs a bearer token, so there is no
+background fetch tier. `sync` is a `no-tab` stub that only returns the
+accumulated state; data arrives two ways:
+
+1. **Passive observe** — the recorder relays API responses the student
+   triggers by browsing (unchanged, always on).
+2. **Page-load auto-fetch** — `content.js` (registered on
+   `portal.uwaterloo.ca/*`) runs a round on every page load and hourly while
+   the tab stays open: the four GETs below, replayed to the background as
+   the exact `wa1:observed` "net" payloads the passive path would send, so
+   `observe.parse` and downstream merging are identical either way.
+
+### Auto-fetch token rules (hard)
+
+- The token is `localStorage["auth.portal.token"]` — the page's own store,
+  shared with the content script. It is used **only** as each request's
+  `Authorization: Bearer …` header: never stored, never in a message, log,
+  payload or extension storage.
+- GET only, and **never the account-refresh endpoint** — a refresh we
+  trigger could rotate the token and sign the user out of their Portal tab.
+- Missing token, 401 or 403 → stop the round and send nothing.
+- At most one round per tab per 30 minutes (`sessionStorage`
+  `wa1:portal:lastFetch`); each call has a 15 s timeout.
 
 - `map.js` — pure mappers (rows -> items + course/term patches). No chrome,
   no fetch, no DOM.
 - `index.js` — routes payloads by URL path, folds patches into
   `state.courses`/`state.terms`, returns the contract result.
+- `content.js` — the auto-fetch round above (`portalRound`/`portalFetchUrls`
+  exported for tests; the page wiring is an IIFE that no-ops off-site).
 - `parsers.js` — stub; Portal reads are JSON, there is no HTML parser.
 
 ## Timestamps
@@ -87,3 +108,9 @@ only, no values).
   expansion behaviour is unverified.
 - `CourseEnrollments` rows are trusted to carry `courseSubject` +
   `courseCatalogNumber` (not `courseCode`) as the authority.
+- **HYPOTHESIS — DailyEventsV2 query params.** The saved app bundle does not
+  name the call (the `$api.calendar` service lives in another chunk), so
+  `start`/`end` as `YYYY-MM-DD` in `content.js` is inferred from the
+  observed URL shape. Confirm the real param names/format on a live page;
+  if they differ, fix `portalFetchUrls` — `observe.parse` already reads
+  `start`/`end` for its scope.
