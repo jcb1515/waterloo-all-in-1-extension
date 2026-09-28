@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import adapter from "../../extension/src/sources/portal/index.js";
 import {
   portalRound,
+  portalFreeze,
   portalFetchUrls,
   __resetPortalRound,
 } from "../../extension/src/sources/portal/content.js";
@@ -34,7 +35,7 @@ const before = (t) => {
  * `statuses` overrides `status` per call index; a value of "hang" returns a
  * promise that never settles (a frozen task queue).
  */
-const fakeEnv = ({ token = TOKEN, last = 0, status = 200, statuses, body = "{}", visible = true, inProgress = 0 } = {}) => {
+const fakeEnv = ({ token = TOKEN, last = 0, status = 200, statuses, body = "{}", frozen = false, inProgress = 0 } = {}) => {
   /** @type {{url: string, init: any}[]} */
   const calls = [];
   /** @type {any[]} */
@@ -42,12 +43,13 @@ const fakeEnv = ({ token = TOKEN, last = 0, status = 200, statuses, body = "{}",
   let stamp = last;
   let ip = inProgress;
   let summary = null;
-  let vis = visible;
+  let froz = frozen;
   const env = {
     fetchImpl: async (/** @type {string} */ url, /** @type {any} */ init) => {
       calls.push({ url, init });
       const st = statuses && calls.length - 1 < statuses.length ? statuses[calls.length - 1] : status;
       if (st === "hang") return new Promise(() => {});
+      if (typeof st === "function") return st(url, calls.length - 1);
       if (st instanceof Error) throw st;
       return {
         status: st,
@@ -69,15 +71,15 @@ const fakeEnv = ({ token = TOKEN, last = 0, status = 200, statuses, body = "{}",
     setRoundSummary: (/** @type {any} */ s) => {
       summary = s;
     },
-    isVisible: () => vis,
+    isFrozen: () => froz,
     now: NOW,
   };
   return {
     env,
     calls,
     messages,
-    setVisible: (/** @type {boolean} */ v) => {
-      vis = v;
+    setFrozen: (/** @type {boolean} */ v) => {
+      froz = v;
     },
     getStamp: () => stamp,
     getIp: () => ip,
@@ -143,32 +145,46 @@ test("no token: nothing fetched, summary says no-token", async (t) => {
   assert.deepEqual(getSummary() && getSummary().results, []);
 });
 
-test("a hidden tab runs nothing and resumes when visible", async (t) => {
+test("a hidden-but-not-frozen tab still runs its round", async (t) => {
   before(t);
-  const { env, calls, setVisible } = fakeEnv({ visible: false });
+  // Edge only freezes some hidden tabs: visibility alone must not gate.
+  const { env, calls } = fakeEnv(); // isFrozen absent-flag = not frozen
+  const r = await portalRound(env);
+  assert.equal(r.sent, 4);
+  assert.equal(calls.length, 4);
+});
+
+test("a frozen tab runs nothing and resumes after the freeze", async (t) => {
+  before(t);
+  const { env, calls, setFrozen } = fakeEnv({ frozen: true });
   const r1 = await portalRound(env);
-  assert.equal(r1.skipped, "hidden");
+  assert.equal(r1.skipped, "frozen");
   assert.equal(calls.length, 0);
-  setVisible(true);
+  setFrozen(false);
   const r2 = await portalRound(env);
   assert.equal(r2.sent, 4);
   assert.equal(calls.length, 4);
 });
 
-test("a freeze mid-round resumes with no repeated endpoints", async (t) => {
+test("a freeze between endpoints resumes with no repeated endpoints", async (t) => {
   before(t);
   const f = fakeEnv();
-  // Freeze after the second response: the next loop check sees hidden.
-  const realFetch = f.env.fetchImpl;
-  f.env.fetchImpl = async (url, init) => {
-    const res = await realFetch(url, init);
-    if (f.calls.length === 2) f.setVisible(false);
-    return res;
+  // Freeze fires while no fetch is in flight — after the second response
+  // and before the third is issued: the loop's frozen check stops the round.
+  let froze = false;
+  const isFrozen = f.env.isFrozen;
+  f.env.isFrozen = () => {
+    const fzn = f.calls.length >= 2;
+    if (fzn && !froze) {
+      froze = true;
+      portalFreeze();
+    }
+    return froze ? fzn : isFrozen();
   };
   const r1 = await portalRound(f.env);
   assert.equal(r1.paused, true);
   assert.equal(f.calls.length, 2);
-  f.setVisible(true);
+  f.env.isFrozen = isFrozen; // thaw
   const r2 = await portalRound(f.env);
   assert.equal(r2.sent, 2);
   const urls = portalFetchUrls(NOW);
@@ -177,7 +193,57 @@ test("a freeze mid-round resumes with no repeated endpoints", async (t) => {
   assert.ok(f.getStamp() > 0);
 });
 
-test("a hung fetch during a freeze keeps the round in-flight, then finishes", async (t) => {
+test("a freeze mid-fetch re-issues exactly that endpoint once on resume", async (t) => {
+  before(t);
+  const f = fakeEnv({ statuses: [200, "hang", 200, 200, 200] });
+  /** @type {Promise<any>} */
+  const p = portalRound(f.env); // hangs on the second fetch (frozen queue)
+  await new Promise((r) => setTimeout(r, 0)); // let it reach the hung fetch
+  portalFreeze(); // the freeze event: the in-flight fetch is now stale
+  f.setFrozen(true);
+  const mid = await portalRound(f.env);
+  assert.equal(mid.skipped, "frozen");
+  assert.equal(f.calls.length, 2); // no duplicate fetch while frozen
+  f.setFrozen(false);
+  const r2 = await portalRound(f.env); // resume: re-issue endpoint 1, then 2,3
+  assert.equal(r2.sent, 3);
+  const urls = portalFetchUrls(NOW);
+  assert.deepEqual(
+    f.calls.map((c) => c.url),
+    [urls[0], urls[1], urls[1], urls[2], urls[3]],
+  );
+  assert.equal(f.messages.length, 4); // every endpoint replayed exactly once
+  void p; // the hung promise never settles — models the frozen task queue
+});
+
+test("a late stale settle is ignored", async (t) => {
+  before(t);
+  /** @type {(v: any) => void} */
+  let settle = () => {};
+  const f = fakeEnv({
+    statuses: [200, () => new Promise((r) => (settle = r)), 200, 200, 200],
+  });
+  const p1 = portalRound(f.env); // parks on fetch 2
+  await new Promise((r) => setTimeout(r, 0));
+  portalFreeze();
+  f.setFrozen(true);
+  f.setFrozen(false); // thaw before the resume tick
+  const r2 = await portalRound(f.env); // re-issues fetch 2 and finishes
+  assert.equal(r2.done, true);
+  assert.equal(f.messages.length, 4);
+  // The frozen promise resolves minutes later: generation mismatch, so its
+  // result is dropped — no extra replay, no extra summary row.
+  settle({
+    status: 200,
+    headers: { get: () => "application/json" },
+    text: async () => "{}",
+  });
+  await p1;
+  assert.equal(f.messages.length, 4);
+  assert.equal(f.getSummary().results.length, 4);
+});
+
+test("a concurrent round while not frozen is rejected as in-flight", async (t) => {
   before(t);
   const f = fakeEnv({ statuses: [200, "hang"] });
   /** @type {Promise<any>} */
@@ -186,7 +252,7 @@ test("a hung fetch during a freeze keeps the round in-flight, then finishes", as
   const mid = await portalRound(f.env); // same context: the round is running
   assert.equal(mid.skipped, "in-flight");
   assert.equal(f.calls.length, 2); // no duplicate fetch
-  void p; // never settles — the fake models the frozen task queue
+  void p; // never settles — the fake models a slow network
 });
 
 test("the in-progress marker blocks a second load for 2 minutes", async (t) => {

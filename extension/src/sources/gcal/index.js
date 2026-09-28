@@ -128,7 +128,8 @@ const adapter = {
         complete: true,
         readOk: ["gcal"],
         scope: "gcal",
-        session: "signed-in",
+        // No session on a successful read: the scheduler only refreshes
+        // lastOkAt/itemCount/complete when `session` is absent.
         state: { events, lastSeenAt: at },
       };
     },

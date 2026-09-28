@@ -43,11 +43,17 @@ function mergeCourse(map, p) {
 function mergeTerm(map, p) {
   const cur = map[p.termCode] || { termCode: p.termCode };
   for (const k of ["start", "end", "readingWeek", "midtermWeek", "examPeriod", "weeks"]) {
-    if (p[k] == null) continue;
-    cur[k] =
-      typeof p[k] === "object" && !Array.isArray(p[k]) && typeof cur[k] === "object" && cur[k] !== null
-        ? { ...cur[k], ...p[k] }
-        : p[k];
+    const v = p[k];
+    if (v == null) continue;
+    const old = cur[k];
+    if (v && typeof v === "object" && !Array.isArray(v) && old && typeof old === "object") {
+      // A partial or shorter range patch never replaces an established
+      // multi-day range: the stored fields win, new keys still fill gaps.
+      const span = (r) => (r.end && r.start && r.end > r.start ? 2 : r.start || r.end ? 1 : 0);
+      cur[k] = span(v) >= span(old) ? { ...old, ...v } : { ...v, ...old };
+    } else {
+      cur[k] = v;
+    }
   }
   map[p.termCode] = cur;
 }
@@ -186,7 +192,8 @@ const adapter = {
         complete: true,
         readOk: [scope],
         scope,
-        session: "signed-in",
+        // No session on a successful read: the scheduler only refreshes
+        // lastOkAt/itemCount/complete when `session` is absent.
         state,
       };
     },

@@ -139,7 +139,7 @@ test("observe.parse builds items, scope matches seenIn, seenUrls recorded", asyn
   assert.equal(res.complete, true);
   assert.equal(res.scope, "MATH 117");
   assert.ok(res.items.every((i) => i.seenIn[0].scope === res.scope));
-  assert.equal(res.session, "signed-in");
+  assert.ok(!("session" in res)); // success must not set session — it stalls the tile
   assert.equal(res.state.seenUrls["MATH 117"], url);
 
   // A later sync with no settings.urls still reads the observed page.
