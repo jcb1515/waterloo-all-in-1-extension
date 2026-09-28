@@ -293,33 +293,21 @@ async function callSync(adapter, ctx) {
 async function doSync(adapter, settings, reason) {
   const id = adapter.id;
   const now = new Date();
-  const prevState = ((await getLocal("sourceState")) || {})[id];
-  const mv = await getMergedView();
-  const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv, await adapterExtras(adapter.id));
-  const seenVersion = stateVersion(id);
-
-  // The adapter call stays outside the ingest queue so observes aren't
-  // blocked while it fetches.
-  let result = await callSync(adapter, ctx);
-
-  // The fold is queued with observes/captures: a slow sync that finishes
-  // after an observe re-reads the fresh raw and state before writing.
+  // The whole sync — reading prev state, the adapter call, the fold and the
+  // status writes — runs inside the source's ingest queue. A slow sync can
+  // never overwrite a newer observe, and an observe can't interleave
+  // mid-sync; only this source's queue waits on the adapter call.
   return ingest(id, async () => {
-    if (stateVersion(id) !== seenVersion) {
-      // ctx.state moved on while sync() ran (an observe wrote it). Re-run
-      // once against the fresh state so the result — including the adapter's
-      // private next-state — is derived from what is actually stored.
-      const curState = ((await getLocal("sourceState")) || {})[id];
-      const mv2 = await getMergedView();
-      const ctx2 = makeCtx(
-        adapter,
-        settings,
-        curState && curState.state,
-        mv2,
-        await adapterExtras(id)
-      );
-      result = await callSync(adapter, ctx2);
-    }
+    const prevState = ((await getLocal("sourceState")) || {})[id];
+    const mv = await getMergedView();
+    const ctx = makeCtx(
+      adapter,
+      settings,
+      prevState && prevState.state,
+      mv,
+      await adapterExtras(id)
+    );
+    const result = await callSync(adapter, ctx);
 
     const mv2 = await getMergedView();
     await setLocal(rawKey(id), applyResult(mv2.raws[id] || null, result, { mode: "sync" }));
@@ -329,7 +317,6 @@ async function doSync(adapter, settings, reason) {
       ...(cur || {}),
       [id]: nextSourceState((cur || {})[id], result, now, "sync", (rawItems.items || []).length),
     }));
-    bumpStateVersion(id);
     await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
     await recordReadStat({
       source: id,
@@ -368,16 +355,6 @@ function ingest(source, fn) {
   ingestQueues.set(source, run.catch(() => {}));
   return run;
 }
-
-/**
- * Per-adapter write counter for sourceState. A long-running sync snapshots it
- * when building ctx.state; if it moved by fold time, the adapter's state is
- * stale and sync() is re-run once against the fresh one.
- */
-const stateVersions = new Map();
-const stateVersion = (/** @type {string} */ id) => stateVersions.get(id) || 0;
-const bumpStateVersion = (/** @type {string} */ id) =>
-  stateVersions.set(id, stateVersion(id) + 1);
 
 function ingestResult(source, result, scope) {
   return ingest(source, async () => {
@@ -441,14 +418,13 @@ export async function handleObserved(payload) {
         (raw.items || []).length
       ),
     }));
-    bumpStateVersion(adapter.id);
     await recomputeAll(new Date(), resultUpdates(result));
   });
 }
 
 /**
- * Run `fn` over a source's stored adapter state inside its ingest queue, then
- * save. Bumps the state version so an in-flight sync re-runs on the result.
+ * Run `fn` over a source's stored adapter state inside its ingest queue,
+ * then save.
  * @param {string} sourceId
  * @param {(state: any) => any} fn returns the next adapter state
  */
@@ -460,7 +436,6 @@ export async function mutateSourceState(sourceId, fn) {
       const prev = (cur || {})[id] || {};
       return { ...(cur || {}), [id]: { ...prev, state: fn(prev.state || {}) } };
     });
-    bumpStateVersion(id);
   });
 }
 
@@ -675,17 +650,20 @@ export async function projectDelete(id) {
 
 /**
  * wa1:clear-source — drop a source's raw data and state, then recompute.
+ * Runs inside the source's ingest queue so a clear can't be undone by an
+ * in-flight sync or observe landing afterwards.
  * @param {string} source
  */
 export async function clearSource(source) {
-  await chrome.storage.local.remove([rawKey(source)]);
-  await mutateKey("sourceState", (cur) => {
-    const all = { ...(cur || {}) };
-    delete all[source];
-    return all;
+  return ingest(source, async () => {
+    await chrome.storage.local.remove([rawKey(source)]);
+    await mutateKey("sourceState", (cur) => {
+      const all = { ...(cur || {}) };
+      delete all[source];
+      return all;
+    });
+    await recomputeAll(new Date());
   });
-  bumpStateVersion(source);
-  await recomputeAll(new Date());
 }
 
 export { patchUserState };
