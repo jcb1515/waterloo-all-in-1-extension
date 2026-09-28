@@ -37,6 +37,11 @@ export const BF_TIMEOUT_MS = 15000;
 export const BF_RATE_PER_MIN = 20;
 export const BF_MAX_PAGES = 10;
 export const BF_BATCH = 50;
+// A forced (check-now) run must fit W1's 90 s orchestrator timeout: after
+// this wall-clock budget it stops STARTING body fetches, sends what it
+// has and reports check-done partial — the next automatic run (no
+// budget) picks the skipped bodies up.
+export const BF_FORCE_BUDGET_MS = 60 * 1000;
 export const BF_LOCK_PREFIX = "wa1:mail:backfill:lock:";
 export const BF_FAIL_PREFIX = "wa1:mail:backfill:fail:";
 export const OUTLOOK_COUNTS = [50, 100, 200];
@@ -93,14 +98,20 @@ export function checkNowDecision(msg, provider, opts = {}) {
 export function doneFromResult(r) {
   const res = r && typeof r === "object" ? r : {};
   const checked = Number(res.listed) || 0;
-  if (res.stale) return { ok: false, reason: "timeout", checked };
-  if (res.error) return { ok: false, reason: "error", checked };
+  // sent = the sent-folder pass count (inbox messages stay in `checked`);
+  // partial = the forced run's 60 s body budget cut some body fetches.
+  const tail = {
+    sent: Number(res.sentListed) || 0,
+    ...(res.partial ? { partial: true } : {}),
+  };
+  if (res.stale) return { ok: false, reason: "timeout", checked, ...tail };
+  if (res.error) return { ok: false, reason: "error", checked, ...tail };
   const skip = String(res.skipped || "");
-  if (skip === "no-token") return { ok: false, reason: "signed-out", checked };
-  if (skip === "off") return { ok: false, reason: "disabled", checked };
-  if (skip === "not-on-page") return { ok: false, reason: "not-on-page", checked };
-  if (skip) return { ok: false, reason: "error", checked };
-  return { ok: true, checked };
+  if (skip === "no-token") return { ok: false, reason: "signed-out", checked, ...tail };
+  if (skip === "off") return { ok: false, reason: "disabled", checked, ...tail };
+  if (skip === "not-on-page") return { ok: false, reason: "not-on-page", checked, ...tail };
+  if (skip) return { ok: false, reason: "error", checked, ...tail };
+  return { ok: true, checked, ...tail };
 }
 
 /**
@@ -186,9 +197,14 @@ export function makeRate() {
 export async function backfillRound(env, impl) {
   const now = env.now || new Date();
   const nowMs = now.getTime();
-  const t0 = Date.now();
-  const stats = { requests: 0, peakRate: 0, pages: 0, bodies: 0, listed: 0 };
-  const done = (extra = {}) => ({ sent: 0, ms: Date.now() - t0, ...stats, ...extra });
+  // Wall clock — real elapsed time (env.now is the logical reference date).
+  const wallNow = typeof env.wallNow === "function" ? env.wallNow : () => Date.now();
+  const t0 = wallNow();
+  const stats = {
+    requests: 0, peakRate: 0, pages: 0, bodies: 0, listed: 0,
+    sentListed: 0, bodySkipped: 0,
+  };
+  const done = (extra = {}) => ({ sent: 0, ms: wallNow() - t0, ...stats, ...extra });
   if (typeof env.isFrozen === "function" && env.isFrozen()) return done({ skipped: "frozen" });
 
   /** @type {any} */
@@ -226,6 +242,19 @@ export async function backfillRound(env, impl) {
       }
     }
   }
+
+  // The adapter-recorded signatures of bodies already read — a message is
+  // refetched only when it's new or its thread moved on. Read-only state;
+  // applies to forced and automatic runs alike.
+  /** @type {Record<string, string>} */
+  let bodyRead = {};
+  try {
+    bodyRead = (env.getBodyRead ? await env.getBodyRead() : null) || {};
+  } catch {
+    bodyRead = {};
+  }
+  const bodyDeadline = force ? t0 + BF_FORCE_BUDGET_MS : Infinity;
+  let partial = false;
 
   const gen = generation;
   const stale = () => gen !== generation || (env.isFrozen && env.isFrozen());
@@ -325,26 +354,38 @@ export async function backfillRound(env, impl) {
         if (page.threadMap) Object.assign(threadMap, page.threadMap);
         const sentPass = SENT_FOLDERS.has(String(folder).toLowerCase());
         for (const m of msgs) {
+          // The sent pass only closes reply tasks — its rows are not
+          // "checked" mail and never cost a body request. The done
+          // payload reports them separately as `sent`.
+          if (sentPass) continue;
           checked.add(String(m.key));
-          // Bodies only for gated candidates — bulk senders without a gated
-          // reason never cost a request, and the sent pass reads nothing
-          // (its rows only close reply tasks).
-          if (!sentPass && needsBody(m, { settings })) {
-            // eslint-disable-next-line no-await-in-loop
-            const body = await impl.fetchBody(env, { ctx, msg: m, folder, slot, request });
-            if (body === "abort") {
-              failed = true;
-              break;
-            }
-            if (body) {
-              Object.assign(m, body);
-              m.bodyFetched = true;
-              stats.bodies++;
-            }
+          if (!needsBody(m, { settings })) continue;
+          // Forced-run budget: stop STARTING new body fetches past it;
+          // the batches gathered so far still ship and check-done is
+          // marked partial.
+          if (wallNow() >= bodyDeadline) {
+            partial = true;
+            stats.bodySkipped++;
+            continue;
+          }
+          // Same thread revision as the last body read → no new fetch.
+          const sig = m.sig != null ? String(m.sig) : "";
+          if (sig && String(bodyRead[String(m.key)] || "") === sig) continue;
+          // eslint-disable-next-line no-await-in-loop
+          const body = await impl.fetchBody(env, { ctx, msg: m, folder, slot, request });
+          if (body === "abort") {
+            failed = true;
+            break;
+          }
+          if (body) {
+            Object.assign(m, body);
+            m.bodyFetched = true;
+            stats.bodies++;
           }
         }
         if (failed) break;
-        stats.listed += msgs.length;
+        if (sentPass) stats.sentListed += msgs.length;
+        else stats.listed += msgs.length;
         folderMsgs.push(...msgs);
         for (let i = 0; i < msgs.length; i += BF_BATCH) {
           sendPayload(folder, msgs.slice(i, i + BF_BATCH), false);
@@ -401,8 +442,11 @@ export async function backfillRound(env, impl) {
   }
   // The final payload lands even when the run found nothing — it is what
   // advances state.check[provider].at (an empty inbox is still "read").
-  sendPayload(cache.length ? cache[0].folder : "inbox", [], true, { ok: true });
-  return done({ sent });
+  sendPayload(cache.length ? cache[0].folder : "inbox", [], true, {
+    ok: true,
+    ...(partial ? { partial: true } : {}),
+  });
+  return done({ sent, ...(partial ? { partial: true } : {}) });
 }
 
 /**

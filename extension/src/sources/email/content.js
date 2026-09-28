@@ -230,6 +230,18 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
           return null;
         }
       },
+      // Read-only: the signatures the adapter recorded for bodies already
+      // fetched — backfillRound skips a body fetch while the signature
+      // (Gmail last-message-id / Outlook message Id) is unchanged.
+      getBodyRead: async () => {
+        try {
+          const all = /** @type {any} */ (await chrome.storage.local.get("sourceState"));
+          const st = (((all || {}).sourceState || {}).outlook || {}).state || {};
+          return ((st.bodyRead || {})[provider]) || {};
+        } catch {
+          return {};
+        }
+      },
       getLock: () => Number(lsGet(BF_LOCK_PREFIX + provider)) || 0,
       setLock: (/** @type {number} */ at) => {
         try {

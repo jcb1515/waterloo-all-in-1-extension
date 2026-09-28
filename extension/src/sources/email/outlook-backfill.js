@@ -89,17 +89,21 @@ export function outlookMsg(m, sent, acct = "") {
     if (a && !recips.includes(a)) recips.push(a);
   }
   const me = String(acct || "").toLowerCase();
+  const received = Number.isFinite(Date.parse(when || ""))
+    ? new Date(when).toISOString()
+    : undefined;
   return {
     key: String((m && m.ConversationId) || ""),
     messageId: String((m && m.Id) || ""),
+    // Body-read signature: the listed message's Id (falling back to its
+    // timestamp) — a new message in the conversation changes it.
+    sig: String((m && m.Id) || received || "") || undefined,
     url: (m && m.WebLink) || undefined,
     from: String(ea.Name || ""),
     fromEmail: String(ea.Address || ""),
     subject: String((m && m.Subject) || ""),
     preview: String((m && m.BodyPreview) || "").slice(0, 200) || undefined,
-    receivedAt: Number.isFinite(Date.parse(when || ""))
-      ? new Date(when).toISOString()
-      : undefined,
+    receivedAt: received,
     unread: (m && m.IsRead) === false || undefined,
     ...(recips.length ? { recipients: recips.length, toMe: !!me && recips.includes(me) } : {}),
     links: [],

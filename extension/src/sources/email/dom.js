@@ -32,6 +32,9 @@ import {
  * @property {boolean} [fromMe]      sender is the signed-in account
  * @property {boolean} [unread]      the row/thread is unread (list feeds)
  * @property {boolean} [bodyFetched] backfill: this thread's body was read
+ * @property {string} [sig]          backfill: body-read signature — the
+ *   thread/message revision (Gmail last-message-id, Outlook item Id) the
+ *   adapter records so an unchanged body isn't fetched twice
  * @property {string} [messageId]    outlook backfill: the REST item Id
  * @property {boolean} [toMe]        my address appears in To/Cc (backfill)
  * @property {number} [recipients]   To+Cc recipient count (backfill)
