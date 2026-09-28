@@ -934,7 +934,9 @@ export function mergeItemById(earlier, later) {
   const meta = { ...earlier?.meta, ...later?.meta };
   const facts = mergeFacts(later?.meta?.facts, earlier?.meta?.facts);
   if (facts) meta.facts = facts;
-  const prep = { ...earlier?.meta?.prep, ...later?.meta?.prep };
+  const earlierPrep = /** @type {Record<string, unknown>} */ (earlier?.meta?.prep) || {};
+  const laterPrep = /** @type {Record<string, unknown>} */ (later?.meta?.prep) || {};
+  const prep = { ...earlierPrep, ...laterPrep };
   if (Object.keys(prep).length) meta.prep = prep;
   if (Object.keys(meta).length) merged.meta = meta;
   return merged;
