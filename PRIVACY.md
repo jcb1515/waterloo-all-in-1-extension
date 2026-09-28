@@ -105,39 +105,43 @@ downloads your own calendars' export from Google Calendar (the same file as
 Google Calendar's Settings → Export) every 6 hours, using your existing
 Google sign-in. It keeps only event titles and start/end times from about a
 week ago to four months ahead. Descriptions, guests and locations are never
-kept. Subscribed calendars, including this extension's own feed, are never
-used. If the export isn't available you can paste your calendar's secret
-iCal address instead; it is stored only on your computer. What it reads is
-only compared against your items locally, to avoid publishing something
-that's already on your calendar. It is never published or sent anywhere.
+kept. Events from other calendars you've added to Google Calendar (for
+example a UW Flow or Quest schedule) are compared too, matching the course
+code, the class type and the start time, so a class that's already on your
+calendar isn't published a second time. This extension's own feed is
+always ignored. If the export isn't available you can paste your
+calendar's secret iCal address instead; it is stored only on your
+computer. What it reads is only compared against your items locally, to
+avoid publishing something that's already on your calendar. It is never
+published or sent anywhere.
 
 **Email** compares your account address against senders to detect your
 own replies — the address itself is never stored or sent.
 
 **Email (Gmail and Outlook).** While a Gmail or Outlook tab is open, the
-extension reads your recent mail automatically so you don't have to open
-each message. The first time, it looks back over the last 30 days (you can
-choose 7–90 days in Sources → Email → Setup); after that it only reads
-messages newer than the last read, at most every 30 minutes. It never reads
-more than one full look-back every 6 hours, and never makes more than 20
-requests a minute. Gmail is read inside your Gmail tab: a hidden frame
-shows Gmail's own search results, and Gmail's print view of a conversation
-supplies the text. Outlook is read inside your Outlook tab through
-Outlook's own mail API, using the sign-in token Outlook already keeps in
-that tab. The token is used only as the header of those read requests, only
-for the current round. It is never saved, never copied into the extension's
-storage, never logged and never sent anywhere else, and the extension never
-refreshes your Outlook session. Every request is a read: the extension
-cannot send, move, delete, flag or mark mail, and reading doesn't change
-which messages show as unread. Full message text is fetched only for mail
-that looks relevant: co-op, your courses, senders you allow, or wording
-about interviews, deadlines, invitations, forms or fees. It stays in memory
-only while the dated sentences are found. Only the resulting items are
-stored (title, date, the matching sentence, a link back to the message),
-plus a count of messages checked. Your address is only compared on the page
+extension checks your recent mail when the tab loads, at most every 30
+minutes after that, and whenever you press Check now. In Gmail it reads
+the first page of your inbox (up to 50 conversations) exactly as your tab
+shows it, without changing what the tab displays. In Outlook it reads
+your most recent inbox messages (100 by default; you can choose 50, 100
+or 200 in Sources → Email → Setup) through Outlook's own mail API, using
+the sign-in token Outlook already keeps in that tab. The token is used
+only as the header of those read requests, only while a check runs. It is
+never saved, never copied into the extension's storage, never logged and
+never sent anywhere else, and the extension never refreshes your Outlook
+session. Every request is a read: the extension cannot send, move,
+delete, flag or mark mail, and checking doesn't change which messages
+show as unread. Full message text is fetched only for mail that looks
+relevant: co-op, your courses, senders you allow, or wording about
+interviews, deadlines, invitations, forms or fees. Gmail's print view
+supplies that text in Gmail, Outlook's API in Outlook, at no more than 20
+requests a minute. The text stays in memory only while the dated
+sentences are found. Only the resulting items are stored (title, date,
+the matching sentence, a link back to the message), plus how many
+messages were checked and when. Your address is only compared on the page
 to spot your own replies and mail addressed to you; it is never stored.
-Senders you block are never read. Turn either mailbox off, or narrow it to
-course and co-op senders, in Sources → Email → Setup.
+Senders you block are never read. Turn either mailbox off, or narrow it
+to course and co-op senders, in Sources → Email → Setup.
 
 **Check readers** (panel → Sources → Check readers) run counts-only
 probes on pages you open and can download a diagnostic report — the
