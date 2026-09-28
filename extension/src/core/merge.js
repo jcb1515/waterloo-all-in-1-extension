@@ -341,6 +341,99 @@ function rankedMembers(members) {
     .map((x) => x.m);
 }
 
+const TORONTO_DAY_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Toronto",
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+});
+
+/** Toronto civil-day epoch ms for an ISO instant (NaN when unparseable). */
+function torontoDayMs(iso) {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return NaN;
+  let y = 0, mo = 0, d = 0;
+  for (const p of TORONTO_DAY_PARTS.formatToParts(ms)) {
+    if (p.type === "year") y = Number(p.value);
+    else if (p.type === "month") mo = Number(p.value);
+    else if (p.type === "day") d = Number(p.value);
+  }
+  return Date.UTC(y, mo - 1, d);
+}
+
+/**
+ * Coalesce pass — idempotent and merge-only, so canonical ids stay stable.
+ * Clusters pinned apart by stored links (e.g. split before a matcher fix)
+ * merge again when every member of the smaller one scores against the
+ * larger. clusterScore is reused unchanged: a real clash (different course
+ * codes at the same time) still stays split, and a shared source always
+ * blocks, exactly as in step 2.
+ * @param {Map<string, any[]>} clusters cid -> members (mutated)
+ * @param {Record<string, string>} outLinks rawId -> cid (mutated)
+ * @param {Record<string, any>} prevItems canonical items from the last run
+ * @param {any} ctx match context for clusterScore
+ * @returns {Record<string, string>} absorbedCid -> survivorCid
+ */
+function coalesceClusters(clusters, outLinks, prevItems, ctx) {
+  /** @type {Record<string, string>} */
+  const merged = {};
+  // The Toronto day of a cluster's best member's anchor; NaN when anchorless.
+  const dayOf = (members) => {
+    const best = rankedMembers(members)[0];
+    const a = best && anchorOf(best);
+    return a ? torontoDayMs(a) : NaN;
+  };
+  for (;;) {
+    let did = false;
+    const entries = [...clusters.entries()];
+    for (let i = 0; i < entries.length && !did; i++) {
+      for (let j = i + 1; j < entries.length && !did; j++) {
+        const [cidA, mA] = entries[i];
+        const [cidB, mB] = entries[j];
+        const dA = dayOf(mA);
+        const dB = dayOf(mB);
+        if (Number.isNaN(dA) || Number.isNaN(dB) || Math.abs(dA - dB) > DAY_MS) continue;
+
+        // Merge test: every member of the smaller cluster must score
+        // against the larger's members (equal sizes -> try both ways).
+        /** @type {[any[], any[]][]} */
+        const tests = mA.length <= mB.length ? [[mA, mB]] : [[mB, mA]];
+        if (mA.length === mB.length) tests.push([mB, mA]);
+        let pass = false;
+        for (const [lo, hi] of tests) {
+          const hiSources = new Set(hi.map((m) => m.source));
+          if (lo.some((m) => hiSources.has(m.source))) continue;
+          if (lo.every((m) => clusterScore(m, hi, ctx))) {
+            pass = true;
+            break;
+          }
+        }
+        if (!pass) continue;
+
+        // Survivor: the cluster holding the highest itemRank member; on a
+        // tie the one present in prevItems; then the smaller cid.
+        const rA = Math.max(...mA.map(itemRank));
+        const rB = Math.max(...mB.map(itemRank));
+        /** @type {string} */
+        let survCid;
+        if (rA !== rB) survCid = rA > rB ? cidA : cidB;
+        else if (!!prevItems[cidA] !== !!prevItems[cidB]) survCid = prevItems[cidA] ? cidA : cidB;
+        else survCid = cidA < cidB ? cidA : cidB;
+        const lostCid = survCid === cidA ? cidB : cidA;
+        const surv = clusters.get(survCid);
+        const lost = clusters.get(lostCid);
+        if (!surv || !lost) continue;
+        surv.push(...lost);
+        clusters.delete(lostCid);
+        for (const m of lost) outLinks[m.id] = survCid;
+        merged[lostCid] = survCid;
+        did = true;
+      }
+    }
+    if (!did) return merged;
+  }
+}
+
 /**
  * Builds the canonical item for a cluster.
  * @param {string} id canonical id
@@ -433,7 +526,9 @@ function buildItem(id, members, us) {
  *   the WaterlooWorks interview for one application merge.
  * @param {Date|string} p.now
  * @returns {{items: Record<string, any>, links: Record<string, string>,
- *   uidMap: Record<string, any>, updates: any[]}}
+ *   uidMap: Record<string, any>, updates: any[],
+ *   merged: Record<string, string>}} absorbedCid -> survivorCid when the
+ *   coalesce pass re-joined clusters that stored links had split
  */
 export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, userState = {}, applications = {}, now }) {
   const nowDate = now instanceof Date ? now : new Date(now);
@@ -508,6 +603,16 @@ export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, 
     }
   }
 
+  // 3. Coalesce clusters split apart by stored links (merge-only).
+  const merged = coalesceClusters(clusters, outLinks, prevItems, matchCtx);
+  const survivors = new Set(Object.values(merged));
+  /** survivorCid -> absorbed cids, so the survivor inherits their userState. */
+  /** @type {Record<string, string[]>} */
+  const absorbedInto = {};
+  for (const [lost, surv] of Object.entries(merged)) {
+    (absorbedInto[surv] = absorbedInto[surv] || []).push(lost);
+  }
+
   // Sources seen before this run; a canonical formed only by brand-new sources
   // is a bulk import and must not fire "new" updates.
   const seenSources = new Set();
@@ -521,14 +626,21 @@ export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, 
   const updates = [];
 
   for (const [cid, members] of clusters) {
-    const item = buildItem(cid, members, userState[cid]);
+    // Effective userState: the survivor's own keys win; absorbed cids fill
+    // gaps (recomputeAll writes the same merge to storage afterwards).
+    /** @type {Record<string, any>} */
+    const usEff = {};
+    for (const lost of absorbedInto[cid] || []) Object.assign(usEff, userState[lost]);
+    Object.assign(usEff, userState[cid]);
+    const item = buildItem(cid, members, usEff);
     const prev = prevItems[cid];
     const anchor = anchorOf(item);
     const prevAnchor = prev ? anchorOf(prev) : null;
     const sameProvider = prev && prev.meta && prev.meta.dateFrom === item.meta.dateFrom;
 
     if (!prev) {
-      if (members.some((m) => seenSources.has(m.source))) {
+      // A coalesce survivor existed before (as its own canonical): no "new".
+      if (members.some((m) => seenSources.has(m.source)) && !survivors.has(cid)) {
         updates.push(update("new", item, nowIso, `New: ${item.title}`));
       }
     } else if (prevAnchor !== anchor && prevAnchor && anchor) {
@@ -570,9 +682,10 @@ export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, 
     items[cid] = item;
   }
 
-  // Canonicals that vanished while they were exact are real cancellations.
+  // Canonicals that vanished while they were exact are real cancellations —
+  // except absorbed cids, which moved into their survivor.
   for (const [cid, prev] of Object.entries(prevItems)) {
-    if (items[cid]) continue;
+    if (items[cid] || merged[cid]) continue;
     if (prev.confidence === "exact") {
       updates.push({
         id: crypto.randomUUID(),
@@ -585,7 +698,7 @@ export function recompute({ raws = {}, prevItems = {}, links = {}, uidMap = {}, 
     }
   }
 
-  return { items, links: outLinks, uidMap: outUid, updates };
+  return { items, links: outLinks, uidMap: outUid, updates, merged };
 }
 
 /**

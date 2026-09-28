@@ -627,16 +627,58 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
       const sourceState = (await getLocal("sourceState")) || {};
       linked.items = suppressAgainstCalendar(linked.items, gcalOwnEvents(sourceState), now);
     }
+    // Coalesced canonicals: each absorbed id's userState moves onto its
+    // survivor (survivor keys win, absorbed fills gaps).
+    const mergedMap = res.merged || {};
+    const hasMerged = Object.keys(mergedMap).length > 0;
+    /** @type {Record<string, any>} */
+    let nextUserState = mv.userState;
+    if (hasMerged) {
+      nextUserState = { ...mv.userState };
+      for (const [absorbed, surv] of Object.entries(mergedMap)) {
+        const a = nextUserState[absorbed];
+        if (a && typeof a === "object") {
+          nextUserState[surv] = { ...a, ...(nextUserState[surv] || {}) };
+          delete nextUserState[absorbed];
+        }
+      }
+    }
     // Derived to-dos live in their own key — they are not merge raws and the
     // Agenda never sees them.
     const todos = deriveTodos({
       items: linked.items,
       applications: linked.applications,
-      userState: mv.userState,
+      userState: nextUserState,
       settings,
       now,
       prev: mv.todos,
     });
+    if (hasMerged) {
+      // Repoint stored references to absorbed canonical ids.
+      for (const [tid, todo] of Object.entries(todos)) {
+        const m = todo && todo.meta;
+        if (!m) continue;
+        const parentId = mergedMap[m.parentId];
+        const linkedItemId = mergedMap[m.linkedItemId];
+        if (parentId || linkedItemId) {
+          todos[tid] = {
+            ...todo,
+            meta: {
+              ...m,
+              ...(parentId ? { parentId } : {}),
+              ...(linkedItemId ? { linkedItemId } : {}),
+            },
+          };
+        }
+      }
+      for (const [aid, app] of Object.entries(linked.applications)) {
+        if (!app || !Array.isArray(app.itemIds)) continue;
+        const next = app.itemIds.map((x) => mergedMap[x] || x);
+        if (next.some((x, i) => x !== app.itemIds[i])) {
+          linked.applications[aid] = { ...app, itemIds: [...new Set(next)] };
+        }
+      }
+    }
     // All writes happen inside this one queued task — a nested enqueue()
     // (pushUpdates/mutateKey) would deadlock against the outer task.
     const cur = await chrome.storage.local.get("updates");
@@ -654,6 +696,7 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
       courses: mergeCourses(mv.raws),
       terms: mergeTerms(mv.raws),
       updates,
+      ...(hasMerged ? { userState: nextUserState } : {}),
     });
     await refreshBadge();
     // Republish the calendar feed (debounced) when it's enabled.
