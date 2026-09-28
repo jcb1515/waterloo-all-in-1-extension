@@ -203,26 +203,36 @@ test("scheduleItems maps dashboard rows, reusing interview ids per job", () => {
   assert.equal(jobless.type, "interview");
 });
 
-test("dashboardEventItems keeps only rows the student registered for", () => {
+test("dashboardEventItems emits every dated row; only Registered is auto", () => {
   const { events } = parsers.parseDashboard(doc("dashboard-live.html"));
-  // The fixture models the Career Centre's public listing — "Registration
-  // Required" and no-badge rows are invites, not the student's plans. Only
-  // the synthetic "Registered" row becomes an item.
+  // Every dated row of the public listing lands as a pending event; only
+  // the row showing the student's registration is calendar-ready.
   const items = dashboardEventItems(events.rows, NOW);
-  assert.equal(items.length, 1);
-  const kept = items[0];
+  assert.equal(items.length, 6);
+  const kept = items.find((i) => i.meta.registrationStatus === "Registered");
+  assert.ok(kept, "the registered row is present");
+  assert.equal(kept.review, "auto");
+  assert.equal(kept.meta.registered, true);
   assert.match(kept.id, /^waterlooworks:event:[0-9a-f]+$/);
   assert.equal(kept.type, "event");
   assert.equal(kept.title, "Mock Interview Workshop");
-  assert.equal(kept.org, "Career Centre Events");
+  assert.equal(kept.org, undefined, "no host clause in the title");
+  assert.equal(kept.meta.category, "Career Centre Events");
   assert.equal(kept.startAt, "2026-09-29T22:00:00.000Z");
   assert.equal(kept.endAt, "2026-09-29T23:30:00.000Z");
   assert.equal(kept.location, "TC 3317");
-  assert.equal(kept.meta.registrationStatus, "Registered");
+  for (const it of items) {
+    if (it !== kept) assert.equal(it.review, "pending", it.title);
+  }
 });
 
-test("dashboardEventItems drops required / not-registered / waitlist rows", () => {
-  const base = { startAt: "2026-09-29T14:00:00.000Z", name: "E", category: "C" };
+test("dashboardEventItems: badges shape review and registration meta", () => {
+  const base = {
+    date: "2026-09-29",
+    startAt: "2026-09-29T14:00:00.000Z",
+    name: "E",
+    category: "C",
+  };
   for (const registration of [
     "Registration Required",
     "Not Registered",
@@ -232,19 +242,29 @@ test("dashboardEventItems drops required / not-registered / waitlist rows", () =
     undefined,
     "",
   ]) {
+    const [it] = dashboardEventItems([{ ...base, registration }], NOW);
+    assert.equal(it.review, "pending", `"${registration}" must be pending`);
     assert.equal(
-      dashboardEventItems([{ ...base, registration }], NOW).length,
-      0,
-      `"${registration}" must not emit an item`
+      it.meta.registered,
+      registration ? false : undefined,
+      `"${registration}" registered meta`
     );
   }
   for (const registration of ["Registered", "Registered — seat confirmed"]) {
-    assert.equal(
-      dashboardEventItems([{ ...base, registration }], NOW).length,
-      1,
-      `"${registration}" must emit an item`
-    );
+    const [it] = dashboardEventItems([{ ...base, registration }], NOW);
+    assert.equal(it.review, "auto", `"${registration}" must be auto`);
+    assert.equal(it.meta.registered, true);
   }
+  const [waitlisted] = dashboardEventItems(
+    [{ ...base, registration: "Waitlist" }],
+    NOW
+  );
+  assert.equal(waitlisted.meta.waitlisted, true);
+  // A row with no date is never emitted — never a time without a date.
+  assert.equal(
+    dashboardEventItems([{ name: "X", startAt: base.startAt }], NOW).length,
+    0
+  );
 });
 
 test("postingItems only emits a deadline while it is still in the future", () => {

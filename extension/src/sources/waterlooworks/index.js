@@ -123,12 +123,30 @@ function cachedItems(state) {
     // a dashboard schedule's endAt survives the interviews-list row.
     byId.set(item.id, earlier ? mergeItemById(earlier, item) : item);
   }
-  const restEventKeys = new Set(rest.map(eventDupKey).filter(Boolean));
+  // A registrations-grid row duplicates a dashboard event (the grid only
+  // lists events the student registered for): keep the dashboard item,
+  // upgraded to registered, and drop the grid copy.
+  const dashEventKeys = new Set(dashEvents.map(eventDupKey).filter(Boolean));
+  const dupEventKeys = new Set(
+    rest.map(eventDupKey).filter((k) => k && dashEventKeys.has(k))
+  );
   const out = [];
   for (const item of byId.values()) {
     const key = eventDupKey(item);
-    if (key && dashEvents.includes(item) && restEventKeys.has(key)) continue;
-    out.push(item);
+    if (!key || !dupEventKeys.has(key)) {
+      out.push(item);
+      continue;
+    }
+    if (!dashEvents.includes(item)) continue; // rest-side dup — dropped.
+    if (item.review === "pending" || item.meta?.registered === false) {
+      out.push({
+        ...item,
+        review: "auto",
+        meta: { ...item.meta, registered: true, waitlisted: undefined },
+      });
+    } else {
+      out.push(item);
+    }
   }
   return out;
 }
@@ -621,10 +639,9 @@ export default {
         }
         if (dash.events) {
           state.lastGood["dash-events"] = {
-            items: dashboardEventItems(arr(obj(dash.events).rows), now).slice(
-              0,
-              LAST_GOOD_CAP
-            ),
+            items: dashboardEventItems(arr(obj(dash.events).rows), now, {
+              url: payload.url,
+            }).slice(0, LAST_GOOD_CAP),
             at: payload.at,
           };
         }
