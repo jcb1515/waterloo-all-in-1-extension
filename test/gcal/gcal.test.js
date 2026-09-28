@@ -234,8 +234,8 @@ test("gcal extract never leaks names, owners, locations or addresses", () => {
 
 /* --------------------------- observe.parse --------------------------- */
 
-test("observe.parse keeps rolling state; a re-read range deletes", async () => {
-  const week = gcalExtract(docOf("gcal-week"), WEEK_URL, { now: NOW });
+test("observe.parse keeps rolling state; a settled re-read range deletes", async () => {
+  const week = { ...gcalExtract(docOf("gcal-week"), WEEK_URL, { now: NOW }), settled: true };
   const res1 = await parse(week);
   assert.equal(res1.complete, true);
   assert.equal(res1.scope, "gcal");
@@ -252,19 +252,46 @@ test("observe.parse keeps rolling state; a re-read range deletes", async () => {
   assert.ok(find(res2.state.events, "Thanksgiving")); // outside the range, kept
 
   // A different range (the day view) merges instead of wiping everything.
-  const day = gcalExtract(docOf("gcal-day"), DAY_URL, { now: NOW });
+  const day = { ...gcalExtract(docOf("gcal-day"), DAY_URL, { now: NOW }), settled: true };
   const res3 = await parse(day, res2.state);
   assert.ok(find(res3.state.events, "Study group"));
   assert.ok(find(res3.state.events, "Chat about robotics"));
   assert.ok(!find(res3.state.events, "Mystery"));
 
   // A null range (schedule view) never deletes.
-  const sched = gcalExtract(docOf("gcal-schedule"), AGENDA_URL, { now: NOW });
+  const sched = { ...gcalExtract(docOf("gcal-schedule"), AGENDA_URL, { now: NOW }), settled: true };
   const res4 = await parse(sched, res3.state);
   assert.deepEqual(titles(res4.state.events).sort(), titles(res3.state.events).sort());
 });
 
-test("observe.parse drops events outside the [now-1d, now+60d] window", async () => {
+test("observe.parse: an unsettled read merges but never range-deletes", async () => {
+  const week = { ...gcalExtract(docOf("gcal-week"), WEEK_URL, { now: NOW }), settled: true };
+  const res1 = await parse(week);
+  assert.ok(find(res1.state.events, "Mystery"));
+
+  // Unsettled re-read with Mystery gone AND a fresh event: Mystery stays
+  // (no range deletion), the new event still merges in.
+  const churn = {
+    ...week,
+    settled: false,
+    events: [
+      ...week.events.filter((e) => e.title !== "Mystery"),
+      { title: "New one", startAt: "2026-09-29T20:00:00.000Z", allDay: false, calendarKind: "own" },
+    ],
+  };
+  const res2 = await parse(churn, res1.state);
+  assert.ok(find(res2.state.events, "Mystery"));
+  assert.ok(find(res2.state.events, "New one"));
+
+  // A missing settled flag behaves the same as settled: false.
+  const noFlag = { ...week };
+  delete noFlag.settled;
+  const res3 = await parse(noFlag, res2.state);
+  assert.ok(find(res3.state.events, "Mystery"));
+});
+
+test("observe.parse drops events outside the [now-7d, now+120d] window", async () => {
+  // NOW = 2026-09-28T12:00Z -> window [2026-09-21T12:00Z, 2027-01-26T12:00Z].
   const mk = (t, at, extra = {}) => ({
     title: t,
     startAt: at,
@@ -276,18 +303,21 @@ test("observe.parse drops events outside the [now-1d, now+60d] window", async ()
     v: 1,
     view: "week",
     range: null,
+    settled: true,
     events: [
-      mk("too old", "2026-09-26T11:59:00.000Z"), // before now-1d
-      mk("edge old", "2026-09-27T12:00:00.000Z"),
-      mk("edge new", "2026-11-27T12:00:00.000Z"),
-      mk("too far", "2026-11-27T12:01:00.000Z"),
+      mk("too old", "2026-09-21T11:59:00.000Z"), // before now-7d
+      mk("edge old", "2026-09-21T12:00:00.000Z"),
+      mk("edge new", "2027-01-26T12:00:00.000Z"),
+      mk("too far", "2027-01-26T12:01:00.000Z"),
+      // Started before the window but still running: kept (overlap).
+      mk("spanning", "2026-09-20T00:00:00.000Z", { endAt: "2026-09-22T00:00:00.000Z" }),
       mk("bad kind", "2026-10-01T12:00:00.000Z", { calendarKind: "nope" }),
       mk("", "2026-10-01T12:00:00.000Z"),
       { startAt: "not a date", allDay: false, calendarKind: "own" },
       "garbage",
     ],
   });
-  assert.deepEqual(titles(res.state.events).sort(), ["edge new", "edge old"]);
+  assert.deepEqual(titles(res.state.events).sort(), ["edge new", "edge old", "spanning"]);
 });
 
 test("observe.parse dedupes title+startAt preferring own", async () => {
@@ -305,20 +335,20 @@ test("observe.parse dedupes title+startAt preferring own", async () => {
   assert.equal(res.state.events[0].calendarKind, "own");
 });
 
-test("observe.parse caps at 500, nearest to now first", async () => {
+test("observe.parse caps at 3000, nearest to now first", async () => {
   const events = [];
-  for (let i = -10; i < 590; i++) {
+  for (let i = -20; i < 3300; i++) {
     events.push({
       title: `e${i}`,
-      startAt: new Date(NOW.getTime() + i * 2 * 3600e3).toISOString(),
+      startAt: new Date(NOW.getTime() + i * 30 * 60 * 1000).toISOString(),
       allDay: false,
       calendarKind: "own",
     });
   }
-  const res = await parse({ v: 1, view: "week", range: null, events });
-  assert.equal(res.state.events.length, 500);
+  const res = await parse({ v: 1, view: "week", range: null, settled: true, events });
+  assert.equal(res.state.events.length, 3000);
   assert.ok(find(res.state.events, "e0")); // nearest survives
-  assert.ok(!find(res.state.events, "e589")); // farthest dropped
+  assert.ok(!find(res.state.events, "e3299")); // farthest dropped
   const sorted = res.state.events.map((e) => e.startAt);
   assert.deepEqual(sorted, [...sorted].sort());
 });
@@ -336,11 +366,12 @@ test("observe.parse fails soft on bad JSON and non-objects", async () => {
 
 test("gcal adapter shape", async () => {
   assert.equal(adapter.id, "gcal");
-  assert.equal(adapter.intervalMinutes, 0);
+  assert.equal(adapter.intervalMinutes, 360);
   assert.deepEqual(adapter.observe.urlPatterns, []);
   const res = await adapter.sync(ctx({ x: 1 }));
   assert.equal(res.complete, false);
   assert.equal(res.session, "no-tab");
+  assert.deepEqual(res.state, { x: 1 });
 });
 
 /* ------------------------------ static ------------------------------ */
@@ -364,14 +395,35 @@ test("gcal sources contain no forbidden APIs", () => {
   for (const file of [
     "content.js",
     "dom.js",
-    "index.js",
     "probe.js",
     "parsers.js",
     "selectors.js",
+    "zip.js",
+    "ics.js",
   ]) {
     const src = fs.readFileSync(path.join(SRC, file), "utf8");
     for (const re of FORBIDDEN) {
       assert.equal(re.test(src), false, `${file} contains ${re}`);
     }
   }
+});
+
+test("gcal adapter only fetches the export URL or validated iCal URLs, GET only", () => {
+  const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "gcal");
+  const src = fs.readFileSync(path.join(SRC, "index.js"), "utf8");
+  // No bare fetch/XHR etc. anywhere (same rules as the passive files).
+  for (const re of [/XMLHttpRequest/, /\bWebSocket\b/, /localStorage/, /document\.cookie/]) {
+    assert.equal(re.test(src), false, `index.js contains ${re}`);
+  }
+  // Every fetch goes through ctx.fetch — two call sites: the export and
+  // the validated icalUrls loop.
+  const bare = src.replace(/ctx\.fetch\s*\(/g, "");
+  assert.equal(/\bfetch\s*\(/.test(bare), false, "index.js has a non-ctx fetch");
+  const calls = [...src.matchAll(/ctx\.fetch\s*\(\s*([^,)]+)/g)].map((m) => m[1].trim());
+  assert.equal(calls.length, 2);
+  assert.ok(/EXPORT_URL/.test(calls[0]), `first fetch must be the export URL, got ${calls[0]}`);
+  // The fallback call's argument comes from the ICAL_URL_RE-filtered list.
+  assert.ok(/ICAL_URL_RE\.test/.test(src), "icalUrls are validated before fetch");
+  // GET only: no init may set a method.
+  assert.equal(/method\s*:/.test(src), false, "index.js sets a request method");
 });

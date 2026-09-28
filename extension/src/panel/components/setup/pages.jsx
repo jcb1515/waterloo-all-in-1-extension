@@ -5,6 +5,7 @@
 
 import { SourceBasics } from "./SourceBasics.jsx";
 import { EmailProviders, EmailBackfill, EmailFilters } from "../EmailSetup.jsx";
+import { GcalRead } from "../GcalSetup.jsx";
 import { DiscordWatched, DiscordChannels } from "../DiscordSetup.jsx";
 import { OutlineManager } from "../OutlineSetup.jsx";
 import { WaterlooworksRefreshToggle } from "../WaterlooworksSetup.jsx";
@@ -174,5 +175,23 @@ export function DiscordSetupPage(p) {
 
 /** @param {{state: any, actions: any}} p */
 export function GcalSetup(p) {
-  return <SourceBasics sourceId="gcal" {...p} />;
+  const src =
+    (p.state.settings &&
+      p.state.settings.sources &&
+      p.state.settings.sources.gcal) ||
+    {};
+  const st = p.state.sourceState && p.state.sourceState.gcal;
+  const save = (patch) =>
+    p.actions.saveSettings({ sources: { gcal: { ...src, ...patch } } });
+  return (
+    <SourceBasics sourceId="gcal" {...p}>
+      <GcalRead
+        src={src}
+        st={st}
+        save={save}
+        sync={() => p.actions.sync("gcal")}
+        now={p.state.now}
+      />
+    </SourceBasics>
+  );
 }

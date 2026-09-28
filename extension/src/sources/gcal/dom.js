@@ -462,6 +462,52 @@ export function dedupeEvents(events) {
   return [...map.values()];
 }
 
+/* --------------------------- settle / heartbeat --------------------------- */
+
+/** ms a populated grid's chip set must sit unchanged before it is settled. */
+export const SETTLE_MS = 1500;
+/** An empty grid settles slower — late chip loads must not delete a week. */
+export const SETTLE_EMPTY_MS = 5000;
+/** Re-emit at least this often so an open tab keeps the read fresh. */
+export const HEARTBEAT_MS = 30 * 60 * 1000;
+
+/**
+ * The content script's send gate. A read counts as settled when the grid
+ * is present and its chip-set signature has not changed for SETTLE_MS
+ * (SETTLE_EMPTY_MS when there are no chips at all). Only settled sends may
+ * carry `settled: true`, which is what lets the adapter apply
+ * visible-range deletion; the heartbeat still re-sends whatever the last
+ * view was (settled or not) every HEARTBEAT_MS so the read stays fresh.
+ */
+export function gcalGate() {
+  /** @type {string|null} */
+  let lastSig = null;
+  let changeAt = 0;
+  let lastSentAt = 0;
+  return {
+    /**
+     * @param {boolean} gridPresent @param {number} chipCount
+     * @param {string} signature @param {number} nowMs
+     * @returns {{send: boolean, settled: boolean, heartbeat: boolean}}
+     */
+    tick(gridPresent, chipCount, signature, nowMs) {
+      if (!gridPresent) return { send: false, settled: false, heartbeat: false };
+      if (signature !== lastSig) {
+        lastSig = signature;
+        changeAt = nowMs;
+      }
+      const quiet = nowMs - changeAt;
+      const settled = quiet >= (chipCount > 0 ? SETTLE_MS : SETTLE_EMPTY_MS);
+      const heartbeat = lastSentAt > 0 && nowMs - lastSentAt >= HEARTBEAT_MS;
+      return { send: settled || heartbeat, settled, heartbeat };
+    },
+    /** @param {number} nowMs */
+    sent(nowMs) {
+      lastSentAt = nowMs;
+    },
+  };
+}
+
 /* ------------------------------ extract ------------------------------ */
 
 /**

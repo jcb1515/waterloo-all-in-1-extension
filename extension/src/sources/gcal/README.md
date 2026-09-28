@@ -1,16 +1,59 @@
-# Google Calendar (gcal) — passive reader for duplicate suppression
+# Google Calendar (gcal) — duplicate suppression
 
-Reads whatever the user has open on `calendar.google.com` — event chips in
-day/week/month/schedule views plus any open event-detail popup — and keeps a
-rolling `state.events` of what is already on their calendar. It produces **no
-Items**; W1's `suppressAgainstCalendar` compares Item candidates against this
-state and sets `meta.onCalendar = "google"` on matches so nothing is published
-twice.
+Two readers keep a rolling `state.events` of what is already on the user's
+calendar, and it produces **no Items**; W1's `suppressAgainstCalendar`
+compares Item candidates against this state and sets
+`meta.onCalendar = "google"` on matches so nothing is published twice.
 
-**Passive only.** No fetch/XHR/WebSocket, no navigation or clicks, no storage
-or tokens. The extract carries only `title`, `startAt`, `endAt`, `allDay` and
+- **Export read (sync, every 6 h)** — `exporticalzip` from the service
+  worker via `ctx.fetch` (the same URL is 403 from a page tab). The zip
+  holds only the user's OWN calendars, so everything it yields is
+  `calendarKind: "own"`.
+- **Passive DOM read (observe)** — whatever the user has open on
+  `calendar.google.com`: chips in day/week/month/schedule views plus an
+  open event-detail popup. This is where subscribed calendars (including
+  our own feed) live — the export never contains them.
+
+**Passive only in the page.** The content script sends no request
+(fetch/XHR/WebSocket), never navigates or clicks, never touches storage or
+tokens. The extract carries only `title`, `startAt`, `endAt`, `allDay` and
 `calendarKind` — never descriptions, guests, locations, owners, response
-statuses, event ids or calendar ids.
+statuses, event ids or calendar ids. The export read keeps only SUMMARY,
+DTSTART/DTEND/DURATION, RRULE, EXDATE, RECURRENCE-ID, STATUS and UID while
+parsing — nothing else leaves the ICS.
+
+## Export read (index.js sync → zip.js → ics.js)
+
+`GET https://calendar.google.com/calendar/u/<account>/exporticalzip` with
+`{binary: true}` (account from `settings.sources.gcal.account`, default 0):
+
+- `status 0` → `error {code: "unreachable"}`.
+- login redirect, HTML content-type or a body that isn't `PK`
+  → `session: "signed-out"`, state preserved.
+- `zip.js` reads the central directory (methods 0/8, deflate-raw via
+  `DecompressionStream`) with caps: ≤ 50 entries, ≤ 20 MB per entry, ≤ 40
+  MB total. Entries named `@import.calendar.google.com` or
+  `@group.v.calendar.google.com` are skipped, and any calendar whose
+  `X-WR-CALNAME`/`PRODID` contains "Waterloo All-in-1" (defensive — the
+  export only holds own calendars).
+- `ics.js` unfolds lines and reads VEVENTs only; RRULEs (FREQ
+  DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL, COUNT, UNTIL, BYDAY incl.
+  ordinals, BYMONTHDAY, BYMONTH) expand in the event's own wall-clock
+  zone so a DST flip keeps the local time; ≤ 1000 occurrences per event;
+  EXDATE removes slots; RECURRENCE-ID overrides replace or cancel (a
+  cancelled master drops). Floating times read as America/Toronto;
+  Windows TZIDs map to their IANA names; unknown zones fall back to
+  Toronto.
+- Only occurrences overlapping `[now − 7 d, now + 120 d]` are kept; the
+  DOM observe path uses the same window. `state.events` = own ICS events
+  ∪ DOM-read events of other kinds still in-window, deduped
+  (title+startAt, own wins), capped at 3000 nearest to now.
+  `state.ics = {at, calendars, events}` — counts only.
+- **Fallback:** `settings.sources.gcal.icalUrls` — secret iCal addresses
+  the user pastes in Setup (validated against
+  `^https://calendar\.google\.com/calendar/ical/`, used only when the
+  export fails, parsed the same way). They live in local settings, are
+  never logged, and never reach items, evidence or state.
 
 ## Extract (content.js → observe.parse)
 
@@ -80,16 +123,22 @@ The signed-in address is read with email's `accountEmail` (`a[aria-label^="Googl
 optional valid endAt, boolean allDay, known calendarKind) and maintains:
 
 ```js
-state = { events: GcalEvent[], lastSeenAt }
+state = { events: GcalEvent[], lastSeenAt, ics? }
 ```
 
 `events` = previous events **minus** those whose `startAt` falls inside the
-new `range` (when non-null — a null range never deletes), **plus** the new
-events; deduped (own wins), kept inside `[now − 1 day, now + 60 days]`,
-sorted by startAt, capped at 500 (nearest to now kept). Result is always
-`{items: [], complete: true, readOk: ["gcal"], scope: "gcal",
-session: "signed-in", state}`; bad JSON → `{items: [], complete: false,
-scope: "gcal", state: prev}`.
+new `range` — only when the payload's `settled === true` (the content
+script marks a read settled once the grid's chip set is unchanged for
+1.5 s, or 5 s for an empty grid; an unsettled read merges without ever
+deleting) — **plus** the new events; deduped (own wins), kept inside
+`[now − 7 days, now + 120 days]` (same window as the export read), sorted
+by startAt, capped at 3000 (nearest to now kept). Result is always
+`{items: [], complete: true, readOk: ["gcal"], scope: "gcal", state}`;
+bad JSON → `{items: [], complete: false, scope: "gcal", state: prev}`.
+
+The content script re-sends the last read at least every 30 min
+(heartbeat) so an open tab keeps `lastSeenAt` fresh even when nothing
+changes.
 
 ## Probe / checklist
 

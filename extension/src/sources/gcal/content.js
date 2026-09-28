@@ -7,32 +7,52 @@
 //   - never navigate or click, never touch storage or tokens,
 //   - only the structural extract (titles, times, calendarKind) travels to
 //     OUR OWN background; descriptions/guests/locations never leave the DOM.
+//
+// Sends only settled reads: the grid must be present and its chip set
+// unchanged for the settle window (gcalGate in dom.js) — a still-rendering
+// view must never apply visible-range deletion. A heartbeat re-sends at
+// least every 30 min so an open tab keeps the read fresh.
 
 import { MSG } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
-import { gcalExtract } from "./dom.js";
+import { gcalExtract, gcalGate } from "./dom.js";
+import { GCAL } from "./selectors.js";
 
 (() => {
   if (location.hostname !== "calendar.google.com") return;
 
   const DEBOUNCE_MS = 2000;
+  const TICK_MS = 5000;
   const BODY_CAP = 1024 * 1024;
+  const gate = gcalGate();
   /** @type {string|null} */
   let lastHash = null;
   /** @type {number|undefined} */
   let timer;
 
-  const send = () => {
+  const tick = () => {
     try {
+      const now = Date.now();
       const ext = gcalExtract(document, location.href);
-      // Events OR a range: an empty visible week still matters — it means
-      // events there were deleted and the rolling state must drop them.
-      if (!ext || (!ext.events.length && !ext.range)) return;
-      const body = JSON.stringify(ext);
+      const grid = ext.view !== "other";
+      const chips = document.querySelectorAll(GCAL.chip).length;
+      // The signature covers everything the adapter would merge or delete:
+      // the view, its visible range and each event's identity.
+      const sig = hashString(
+        JSON.stringify({
+          v: ext.view,
+          r: ext.range,
+          e: (ext.events || []).map((e) => `${e.title}|${e.startAt}`),
+        }),
+      );
+      const { send, settled, heartbeat } = gate.tick(grid, chips, sig, now);
+      if (!send) return;
+      const body = JSON.stringify({ ...ext, settled });
       if (!body || body.length > BODY_CAP) return;
       const hash = hashString(body);
-      if (hash === lastHash) return;
+      if (hash === lastHash && !heartbeat) return;
       lastHash = hash;
+      gate.sent(now);
       Promise.resolve(
         chrome.runtime.sendMessage({
           type: MSG.OBSERVED,
@@ -54,21 +74,24 @@ import { gcalExtract } from "./dom.js";
     if (timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
-      send();
+      tick();
     }, DEBOUNCE_MS);
   };
 
   const start = () => {
-    send();
+    tick();
+    // Mutations cover view changes; the interval covers the heartbeat and
+    // lets an empty/stable grid reach its settle window.
     new MutationObserver(schedule).observe(document.documentElement, {
       childList: true,
       subtree: true,
       characterData: true,
     });
+    setInterval(tick, TICK_MS);
   };
 
   if (document.readyState === "complete") start();
   else addEventListener("load", start, { once: true });
-  addEventListener("hashchange", send);
-  addEventListener("popstate", send);
+  addEventListener("hashchange", tick);
+  addEventListener("popstate", tick);
 })();
