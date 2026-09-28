@@ -140,7 +140,7 @@ function cachedItems(state) {
     arr(lastGood["coop-dates"]?.items),
     arr(lastGood.notices?.items),
     arr(lastGood["rankings-tasks"]?.items),
-    arr(lastGood.shortlist?.items)
+    arr(lastGood["jobs-folder"]?.items)
   );
   /** @type {Map<string, any>} */
   const byId = new Map();
@@ -162,10 +162,10 @@ function cachedItems(state) {
   const dupEventKeys = new Set(
     rest.map(eventDupKey).filter((k) => k && dashEventKeys.has(k))
   );
-  // A shortlisted posting's Apply deadline supersedes the deadline the
+  // A My Jobs folder posting's Apply deadline supersedes the deadline the
   // viewed-posting page produced for the same job.
   const applyJobs = new Set(
-    arr(lastGood.shortlist?.items)
+    arr(lastGood["jobs-folder"]?.items)
       .map((item) => item?.meta?.jobId)
       .filter(Boolean)
   );
@@ -730,20 +730,21 @@ export default {
           delete state.needsUpdate[kind];
         }
       }
-      if (parsed.shortlist) {
-        // Observe-only: the shortlist grid is reached by buildForm POSTs the
-        // refresh round never sends, so this only fires when the student
-        // opens their own shortlist.
-        state.lastGood.shortlist = {
+      if (parsed["jobs-folder"]) {
+        // Observe-only: a folder view is a Vue filter the refresh round
+        // never applies, so this only fires when the student opens one of
+        // their own My Jobs folders.
+        state.lastGood["jobs-folder"] = {
           items: applyItems(
-            arr(obj(parsed.shortlist).rows),
+            arr(obj(parsed["jobs-folder"]).rows),
             arr(state.applications),
-            now
+            now,
+            { folder: arr(obj(parsed["jobs-folder"]).folders).join(", ") }
           ).slice(0, LAST_GOOD_CAP),
           at: payload.at,
         };
-        readOk.push("shortlist");
-        delete state.needsUpdate.shortlist;
+        readOk.push("jobs-folder");
+        delete state.needsUpdate["jobs-folder"];
       }
 
       // Fail-soft: a URL that should have yielded a section but didn't means

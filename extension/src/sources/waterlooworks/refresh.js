@@ -22,6 +22,10 @@ const OBSERVE_SEL = [
   // dashboard: day headings sit in <strong> above each schedule table, and
   // the "Rank and Match" notice lives in .orbis-posting-actions
   "strong", ".orbis-posting-actions",
+  // jobs.htm: the applied-filter pill list carries the "Folders: …" pill
+  // that marks a My Jobs folder view, and the card list holds the postings —
+  // a card's p.label parent rule below keeps the same card markup either way.
+  "ul.tag-rail__list", "ul.doc-viewer__card-list",
 ].join(",");
 
 const THROTTLE_KEY = "wa1:ww-refresh-at";

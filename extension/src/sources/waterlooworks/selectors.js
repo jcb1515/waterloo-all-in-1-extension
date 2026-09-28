@@ -76,19 +76,6 @@ export const HEADER_KEYS = Object.freeze({
     "status": "statusText",
     "conflicts": "conflictsText",
   }),
-  // Postings -> Shortlist grid: same column family as a job search grid,
-  // distinguished by the page's own shortlist marker (see isShortlist).
-  shortlist: Object.freeze({
-    "job title": "jobTitle",
-    "job id": "jobId",
-    "term": "term",
-    "organization": "employer",
-    "division": "division",
-    "location": "location",
-    "city": "city",
-    "app deadline": "appDeadline",
-    "applications": "numApps",
-  }),
 });
 
 /** A table is of a kind when its cleaned headers include ALL of these labels. */
@@ -98,7 +85,6 @@ export const TABLE_RULES = Object.freeze({
   events: Object.freeze(["event date", "registration status"]),
   messages: Object.freeze(["date received", "subject"]),
   schedule: Object.freeze(["time", "type", "name", "status"]),
-  shortlist: Object.freeze(["job id", "app deadline"]),
 });
 
 /** Dashboard URL: /myAccount root and dashboard.htm are the same page. */
@@ -119,13 +105,18 @@ export const DASH_NOTICE_SELECTOR =
   '.alert, .orbis-posting-actions, .user-dashboard [class*="grid-item"]';
 
 /**
- * Elements that can identify the page itself as the Shortlist: real headings,
- * breadcrumbs, fieldset legends, or the ACTIVE nav tab — never a plain tab
- * link (a job-search page links to the shortlist without being it).
+ * The My Jobs folder view is the jobs.htm card list filtered by an applied
+ * "Folders: <name>" pill. Applied filters render as pill buttons inside
+ * .tag-rail__list (the quick filters sit in the same list, so the text must
+ * match, not the container). The pill's close icon appends "close" to its
+ * textContent — "Folders: cycle 1close" — so the name capture stops before
+ * an optional trailing "close".
  */
-export const SHORTLIST_MARKER_SELECTOR =
-  "h1, h2, h3, h4, legend, .breadcrumb, .panel-heading, .nav-tabs li.active a, .nav-tabs a.active, li.active > a";
-export const SHORTLIST_MARKER_RE = /short\s?list/i;
+export const FOLDER_PILL_SELECTOR = ".tag-rail__list button, .tag-rail button";
+export const FOLDER_PILL_RE = /^Folders:\s*(.+?)\s*(?:close)?$/i;
+/** One job card per li; the posting id is the li id's numeric tail. */
+export const JOB_CARD_LIST_SELECTOR = "ul.doc-viewer__card-list > li";
+export const JOB_CARD_ID_RE = /^doc-viewer-card-(\d+)$/;
 /** Its heading: "RANKING (2027 - Winter)" -> term "2027 - Winter". */
 export const DASH_RANKINGS_HEADING_RE = /^rankings?\s*\(([^)]+)\)/i;
 
