@@ -95,29 +95,29 @@ async function transition(jobId, fromText, toText, toStatus, label) {
 }
 
 test("applied -> not-selected: one bell update, none on reread", () =>
-  transition("488135", "Applied", "Not Selected", "not-selected", "Not selected"));
+  transition("151515", "Applied", "Not Selected", "not-selected", "Not selected"));
 
 test("applied -> selected-for-interview -> interview-scheduled", async () => {
-  const first = await readApps(setStatus(APPS_HTML, "488135", "Applied"));
+  const first = await readApps(setStatus(APPS_HTML, "151515", "Applied"));
   const second = await readApps(
-    setStatus(APPS_HTML, "488135", "Selected for Interview"),
+    setStatus(APPS_HTML, "151515", "Selected for Interview"),
     first.state
   );
   assert.deepEqual(
     second.updates.map((u) => u.id),
-    ["waterlooworks:488135:selected-for-interview"]
+    ["waterlooworks:151515:selected-for-interview"]
   );
   const third = await readApps(
-    setStatus(APPS_HTML, "488135", "Interview Scheduled"),
+    setStatus(APPS_HTML, "151515", "Interview Scheduled"),
     second.state
   );
   assert.deepEqual(
     third.updates.map((u) => u.id),
-    ["waterlooworks:488135:interview-scheduled"]
+    ["waterlooworks:151515:interview-scheduled"]
   );
   assert.equal(third.updates[0].text.slice(0, 16), "Interview booked");
   const fourth = await readApps(
-    setStatus(APPS_HTML, "488135", "Interview Scheduled"),
+    setStatus(APPS_HTML, "151515", "Interview Scheduled"),
     third.state
   );
   assert.equal(fourth.updates.length, 0);
@@ -140,15 +140,15 @@ test("selected-for-interview -> offer -> declined", async () => {
 });
 
 test("ranked -> matched", async () => {
-  const first = await readApps(setStatus(APPS_HTML, "488135", "Ranked"));
-  const second = await readApps(setStatus(APPS_HTML, "488135", "Matched"), first.state);
-  assert.deepEqual(second.updates.map((u) => u.id), ["waterlooworks:488135:matched"]);
-  const third = await readApps(setStatus(APPS_HTML, "488135", "Matched"), second.state);
+  const first = await readApps(setStatus(APPS_HTML, "151515", "Ranked"));
+  const second = await readApps(setStatus(APPS_HTML, "151515", "Matched"), first.state);
+  assert.deepEqual(second.updates.map((u) => u.id), ["waterlooworks:151515:matched"]);
+  const third = await readApps(setStatus(APPS_HTML, "151515", "Matched"), second.state);
   assert.equal(third.updates.length, 0);
 });
 
 test("applied -> withdrawn", () =>
-  transition("488135", "Applied", "Withdrawn", "withdrawn", "Withdrawn"));
+  transition("151515", "Applied", "Withdrawn", "withdrawn", "Withdrawn"));
 
 test("page-2 apps submitted >7 days ago seed silently (no 'new' flood)", async () => {
   const page1 = await readApps(fixture("applications-pending.html"));

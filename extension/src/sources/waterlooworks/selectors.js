@@ -105,7 +105,7 @@ export const SCHEDULE_INTERVIEW_RE = /^interview\s+for\s+(.+?)\s*\((\d{4,})\)\s*
 export const NEW_MESSAGES_LABEL_RE = /^new messages$/i;
 export const WEBCAM_LABEL_RE = /webcam appointments/i;
 
-/** Posting h1: "488135 - Analog/Mixed-Signal Engineering Co-op". */
+/** Posting h1: "151515 - Analog/Mixed-Signal Engineering Co-op". */
 export const POSTING_H1_RE = /^(\d{4,})\s*-\s*(.+)$/;
 
 /** Posting field label that carries the application deadline. */

@@ -70,7 +70,7 @@ test("parseApplications maps columns by label, not position", () => {
   assert.equal(ok, true);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows[0], {
-    jobId: "488135",
+    jobId: "151515",
     jobTitle: "Analog/Mixed-Signal Engineering Co-op",
     employer: "Globex",
     division: "Hardware",
@@ -108,7 +108,7 @@ test("parseInterviews reads the rendered list", () => {
   assert.equal(ok, true);
   assert.equal(rows.length, 3);
   assert.deepEqual(rows[0], {
-    jobId: "488135",
+    jobId: "151515",
     jobTitle: "Analog/Mixed-Signal Engineering Co-op",
     employer: "Globex",
     division: "Hardware",
@@ -121,7 +121,7 @@ test("parseInterviews reads the rendered list", () => {
     method: "On Campus",
   });
   assert.equal(rows[1].scheduleStatus, "Cancelled");
-  assert.equal(rows[2].jobId, "488135"); // second interview, same job
+  assert.equal(rows[2].jobId, "151515"); // second interview, same job
 });
 
 test("parseEventRegistrations reads the dashboard table", () => {
@@ -151,7 +151,7 @@ test("parseMessages reads the inbox table without bodies", () => {
 test("parsePosting reads label/value tables and skips long-text fields", () => {
   const posting = parsers.parsePosting(doc("posting.html"));
   assert.equal(posting.ok, true);
-  assert.equal(posting.jobId, "488135");
+  assert.equal(posting.jobId, "151515");
   assert.equal(posting.jobTitle, "Analog/Mixed-Signal Engineering Co-op");
   assert.equal(posting.employer, "Globex");
   assert.equal(posting.division, "Hardware");
@@ -179,7 +179,7 @@ test("parsePosting works when label/value pairs are divs", () => {
 test("parseInterviewDetail reads a booked interview", () => {
   const detail = parsers.parseInterviewDetail(doc("interview-detail-booked.html"));
   assert.equal(detail.ok, true);
-  assert.equal(detail.jobId, "488135");
+  assert.equal(detail.jobId, "151515");
   assert.equal(detail.jobTitle, "Analog/Mixed-Signal Engineering Co-op");
   assert.equal(detail.employer, "Globex");
   assert.equal(detail.division, "Hardware");
@@ -228,7 +228,7 @@ test("parseMessageDetail keeps metadata; bodyText is transient only", () => {
   assert.equal(detail.subCategory, "Schedule Open - Pick Time Slot (2039)");
   assert.equal(detail.attachedTo, "Interview Schedule");
   assert.equal(detail.createdAt, "2026-09-25T16:01:00.000Z");
-  assert.equal(detail.linkedJobId, "488135");
+  assert.equal(detail.linkedJobId, "151515");
   assert.equal(detail.linkedJobTitle, "Analog/Mixed-Signal Engineering Co-op");
   // bodyText is returned for one-shot date extraction; the adapter must
   // never persist it (asserted at the adapter level).
@@ -271,8 +271,8 @@ test("parseDashboard reads schedule, events, counts and the rankings notice", ()
       startAt: "2026-10-02T20:00:00.000Z", // 4:00 PM Toronto (EDT)
       endAt: "2026-10-02T20:30:00.000Z",
       entryType: "Interview",
-      name: "Interview for Analog/Mixed-Signal Engineering Co-op (488135)",
-      jobId: "488135",
+      name: "Interview for Analog/Mixed-Signal Engineering Co-op (151515)",
+      jobId: "151515",
       jobTitle: "Analog/Mixed-Signal Engineering Co-op",
       status: "Confirmed",
       conflicts: "0",

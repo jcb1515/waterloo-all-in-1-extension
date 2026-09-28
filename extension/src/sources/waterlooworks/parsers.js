@@ -594,7 +594,7 @@ export function parseInterviewDetail(doc) {
     slots: [],
   };
 
-  // "Interviewing For Job": "#488135" then title (a link), employer, division —
+  // "Interviewing For Job": "#151515" then title (a link), employer, division —
   // on separate lines inside the value.
   const jobPair = byLabel.get(INTERVIEW_DETAIL_LABEL);
   if (jobPair) {

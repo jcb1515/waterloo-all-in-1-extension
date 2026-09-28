@@ -148,7 +148,7 @@ const detailGrid = (onclick, linkText = "current tab") =>
         </li></ul>
       </div></td>
       <td>Individual</td><td>Main Campus</td><td>In-Person</td>
-      <td>488135</td><td>Job Title</td><td>Org</td><td>Div</td>
+      <td>151515</td><td>Job Title</td><td>Org</td><td>Div</td>
     </tr></tbody>
   </table>`);
 

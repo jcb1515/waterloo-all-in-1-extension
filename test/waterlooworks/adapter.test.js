@@ -112,12 +112,12 @@ test("second read with a status change emits a status update + history", async (
   const updates = second.updates;
   assert.equal(updates.length, 1);
   assert.equal(updates[0].kind, "status");
-  assert.equal(updates[0].id, "waterlooworks:488135:selected-for-interview");
+  assert.equal(updates[0].id, "waterlooworks:151515:selected-for-interview");
   assert.equal(
     updates[0].text,
     "Interview invite: Globex · Analog/Mixed-Signal Engineering Co-op"
   );
-  assert.equal(updates[0].refId, "waterlooworks:488135");
+  assert.equal(updates[0].refId, "waterlooworks:151515");
   // Updates ride on SyncResult.updates — nothing persisted in state.
   assert.equal(second.state.lastUpdates, undefined);
   const app = second.state.applications[0];
@@ -156,7 +156,7 @@ test("same-id dashboard schedule + interviews-list items merge, keeping endAt", 
   // The dashboard schedule carries start+end; the interviews list carries
   // location+method but no end. Under the id map the later item won
   // wholesale — now they merge field by field, and facts union by label.
-  const sharedId = "waterlooworks:interview:488135";
+  const sharedId = "waterlooworks:interview:151515";
   const scheduleItem = {
     id: sharedId,
     source: "waterlooworks",
@@ -165,8 +165,8 @@ test("same-id dashboard schedule + interviews-list items merge, keeping endAt", 
     startAt: "2026-10-02T20:00:00.000Z",
     endAt: "2026-10-02T20:30:00.000Z",
     status: "open",
-    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: AT }],
-    meta: { jobId: "488135", facts: [{ label: "Type", value: "In-Person" }] },
+    seenIn: [{ source: "waterlooworks", key: "interview:151515", scope: "waterlooworks", at: AT }],
+    meta: { jobId: "151515", facts: [{ label: "Type", value: "In-Person" }] },
   };
   const listItem = {
     id: sharedId,
@@ -176,8 +176,8 @@ test("same-id dashboard schedule + interviews-list items merge, keeping endAt", 
     startAt: "2026-10-02T20:00:00.000Z",
     location: "TC 2218",
     status: "open",
-    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: AT }],
-    meta: { jobId: "488135", facts: [{ label: "Where", value: "TC 2218" }] },
+    seenIn: [{ source: "waterlooworks", key: "interview:151515", scope: "waterlooworks", at: AT }],
+    meta: { jobId: "151515", facts: [{ label: "Where", value: "TC 2218" }] },
   };
   const state = {
     lastGood: {
@@ -383,7 +383,7 @@ test("the live dashboard folds schedule + upcoming events + volatile counts", as
     ["event", "event", "interview"]
   );
   const interview = result.items.find((it) => it.type === "interview");
-  assert.equal(interview.id, "waterlooworks:interview:488135");
+  assert.equal(interview.id, "waterlooworks:interview:151515");
   assert.equal(interview.startAt, "2026-10-02T20:00:00.000Z");
   assert.equal(interview.endAt, "2026-10-02T20:30:00.000Z");
   const events = result.items.filter((it) =>
@@ -448,7 +448,7 @@ test("booked interview detail merges onto the list item by id", async () => {
     payload("interview-detail-booked.html", `${WW}/interviews.htm`, "net"),
     makeCtx(first.state)
   );
-  const item = second.items.find((i) => i.id === "waterlooworks:interview:488135");
+  const item = second.items.find((i) => i.id === "waterlooworks:interview:151515");
   assert.equal(item.location, "Virtual Room 106");
   assert.equal(item.endAt, "2026-10-02T20:30:00.000Z");
   assert.equal(item.meta.prep.interviewer, "Pat Example");
@@ -468,7 +468,7 @@ test("interview-detail reads accumulate per job", async () => {
     makeCtx(first.state)
   );
   assert.ok(second.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
-  assert.ok(second.items.find((i) => i.id === "waterlooworks:interview:488135"));
+  assert.ok(second.items.find((i) => i.id === "waterlooworks:interview:151515"));
   // A booked detail for the SAME job drops that job's timeslot item.
   const third = await adapter.observe.parse(
     payload("interview-detail-booked-400001.html", `${WW}/interviews.htm`, "net"),
@@ -476,7 +476,7 @@ test("interview-detail reads accumulate per job", async () => {
   );
   assert.ok(!third.items.find((i) => i.id === "waterlooworks:timeslot:400001"));
   assert.ok(third.items.find((i) => i.id === "waterlooworks:interview:400001"));
-  assert.ok(third.items.find((i) => i.id === "waterlooworks:interview:488135"));
+  assert.ok(third.items.find((i) => i.id === "waterlooworks:interview:151515"));
 });
 
 // Mirrors W1's scope-mode fold — extension/src/core/merge.js applyResult
@@ -518,7 +518,7 @@ test("posting reads accumulate per job and expire per job", async () => {
     ctx
   );
   assert.equal(first.items.length, 1);
-  assert.equal(first.items[0].id, "waterlooworks:deadline:488135");
+  assert.equal(first.items[0].id, "waterlooworks:deadline:151515");
   // Viewing posting B adds its deadline without touching A's.
   const second = await adapter.observe.parse(
     payload("posting-divs.html", `${WW}/jobs.htm`, "net"),
@@ -526,7 +526,7 @@ test("posting reads accumulate per job and expire per job", async () => {
   );
   assert.deepEqual(
     second.items.map((i) => i.id).sort(),
-    ["waterlooworks:deadline:488135", "waterlooworks:deadline:488200"]
+    ["waterlooworks:deadline:151515", "waterlooworks:deadline:488200"]
   );
   // Re-viewing A after its deadline passed removes only A's item.
   const third = await adapter.observe.parse(
@@ -546,7 +546,7 @@ test("posting pages yield deadline items only while the deadline is future", asy
     ctx
   );
   assert.equal(result.items.length, 1);
-  assert.equal(result.items[0].id, "waterlooworks:deadline:488135");
+  assert.equal(result.items[0].id, "waterlooworks:deadline:151515");
   assert.equal(result.items[0].type, "application-deadline");
 });
 
@@ -561,7 +561,7 @@ test("message detail persists privacy-safe metadata only", async () => {
   const details = result.state.messageDetails;
   assert.equal(details.length, 1);
   assert.equal(details[0].subject, "Cycle 1 applications due on WaterlooWorks");
-  assert.equal(details[0].linkedJobId, "488135");
+  assert.equal(details[0].linkedJobId, "151515");
   const serialized = JSON.stringify(details);
   assert.ok(!serialized.includes("confidential"));
   assert.ok(!serialized.includes("A Student"));

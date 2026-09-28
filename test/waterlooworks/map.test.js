@@ -37,10 +37,10 @@ test("toApplications normalizes statuses into the contract shape", () => {
   const apps = toApplications(rows);
   assert.equal(apps.length, 3);
   assert.deepEqual(apps[0], {
-    id: "waterlooworks:488135",
+    id: "waterlooworks:151515",
     employer: "Globex",
     jobTitle: "Analog/Mixed-Signal Engineering Co-op",
-    jobId: "488135",
+    jobId: "151515",
     cycle: "2027 - Winter",
     jobStatus: "Interview Selections Complete",
     submittedOn: "2026-09-15T20:12:00.000Z",
@@ -55,18 +55,18 @@ test("toApplications normalizes statuses into the contract shape", () => {
 
 test("mergeItemById: later wins per field, earlier fills the gaps — both orders", () => {
   const schedule = {
-    id: "waterlooworks:interview:488135",
+    id: "waterlooworks:interview:151515",
     source: "waterlooworks",
     type: "interview",
     title: "Interview: X",
     startAt: "2026-10-02T20:00:00.000Z",
     endAt: "2026-10-02T20:30:00.000Z",
     status: "open",
-    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: "a" }],
-    meta: { jobId: "488135", facts: [{ label: "Type", value: "In-Person" }] },
+    seenIn: [{ source: "waterlooworks", key: "interview:151515", scope: "waterlooworks", at: "a" }],
+    meta: { jobId: "151515", facts: [{ label: "Type", value: "In-Person" }] },
   };
   const list = {
-    id: "waterlooworks:interview:488135",
+    id: "waterlooworks:interview:151515",
     source: "waterlooworks",
     type: "interview",
     title: "Interview: X",
@@ -74,8 +74,8 @@ test("mergeItemById: later wins per field, earlier fills the gaps — both order
     location: "TC 2218",
     status: "open",
     details: "Type: In-Person\nMethod: In-Person",
-    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: "b" }],
-    meta: { jobId: "488135", facts: [{ label: "Where", value: "TC 2218" }] },
+    seenIn: [{ source: "waterlooworks", key: "interview:151515", scope: "waterlooworks", at: "b" }],
+    meta: { jobId: "151515", facts: [{ label: "Where", value: "TC 2218" }] },
   };
   for (const merged of [
     mergeItemById(schedule, list), // dashboard first, list later
@@ -93,8 +93,8 @@ test("mergeItemById: later wins per field, earlier fills the gaps — both order
   }
   // Later wins shared labels and shared fields.
   const shared = mergeItemById(
-    { ...list, meta: { jobId: "488135", facts: [{ label: "Type", value: "FromList" }] } },
-    { ...schedule, meta: { jobId: "488135", facts: [{ label: "Type", value: "FromDash" }] } }
+    { ...list, meta: { jobId: "151515", facts: [{ label: "Type", value: "FromList" }] } },
+    { ...schedule, meta: { jobId: "151515", facts: [{ label: "Type", value: "FromDash" }] } }
   );
   assert.deepEqual(shared.meta.facts, [{ label: "Type", value: "FromDash" }]);
 });
@@ -105,7 +105,7 @@ test("interviewItems builds interview Items with contract fields", () => {
   assert.equal(items.length, 3);
 
   const first = items[0];
-  assert.equal(first.id, "waterlooworks:interview:488135");
+  assert.equal(first.id, "waterlooworks:interview:151515");
   assert.equal(first.source, "waterlooworks");
   assert.equal(first.type, "interview");
   assert.equal(first.title, "Interview: Analog/Mixed-Signal Engineering Co-op");
@@ -118,13 +118,13 @@ test("interviewItems builds interview Items with contract fields", () => {
   assert.deepEqual(first.seenIn, [
     {
       source: "waterlooworks",
-      key: "interview:488135",
+      key: "interview:151515",
       scope: "waterlooworks", // unified scope: the adapter's union is authoritative
       at: NOW_ISO,
     },
   ]);
   assert.match(first.details, /Type: In-Person/);
-  assert.equal(first.meta.jobId, "488135");
+  assert.equal(first.meta.jobId, "151515");
   assert.equal(first.meta.prep.format, "In-Person");
   assert.deepEqual(first.evidence, { method: "html" });
 
@@ -139,9 +139,9 @@ test("interviewItems suffixes duplicate jobIds deterministically", () => {
   const items = interviewItems(rows, NOW);
   const ids = items.map((i) => i.id);
   assert.deepEqual(ids, [
-    "waterlooworks:interview:488135",
+    "waterlooworks:interview:151515",
     "waterlooworks:interview:488200",
-    "waterlooworks:interview:488135:2026-11-30",
+    "waterlooworks:interview:151515:2026-11-30",
   ]);
   // Re-parsing produces identical ids (deterministic).
   assert.deepEqual(
@@ -171,7 +171,7 @@ test("scheduleItems maps dashboard rows, reusing interview ids per job", () => {
   const items = scheduleItems(schedule.rows, [], NOW);
   assert.equal(items.length, 2);
   const interview = items[0];
-  assert.equal(interview.id, "waterlooworks:interview:488135");
+  assert.equal(interview.id, "waterlooworks:interview:151515");
   assert.equal(interview.type, "interview");
   assert.equal(
     interview.title,
@@ -180,12 +180,12 @@ test("scheduleItems maps dashboard rows, reusing interview ids per job", () => {
   assert.equal(interview.startAt, "2026-10-02T20:00:00.000Z");
   assert.equal(interview.endAt, "2026-10-02T20:30:00.000Z");
   assert.equal(interview.status, "open");
-  assert.equal(interview.meta.jobId, "488135");
+  assert.equal(interview.meta.jobId, "151515");
   assert.equal(interview.meta.status, "Confirmed");
   // The employer resolves from stored applications.
   const withApps = scheduleItems(
     schedule.rows,
-    [{ jobId: "488135", employer: "Globex" }],
+    [{ jobId: "151515", employer: "Globex" }],
     NOW
   );
   assert.equal(withApps[0].org, "Globex");
@@ -251,12 +251,12 @@ test("postingItems only emits a deadline while it is still in the future", () =>
   const posting = parsers.parsePosting(doc("posting.html"));
   const future = postingItems(posting, NOW);
   assert.equal(future.length, 1);
-  assert.equal(future[0].id, "waterlooworks:deadline:488135");
+  assert.equal(future[0].id, "waterlooworks:deadline:151515");
   assert.equal(future[0].type, "application-deadline");
   assert.equal(future[0].title, "Apply: Analog/Mixed-Signal Engineering Co-op");
   assert.equal(future[0].org, "Globex");
   assert.equal(future[0].dueAt, "2026-09-30T13:00:00.000Z");
-  assert.equal(future[0].meta.jobId, "488135");
+  assert.equal(future[0].meta.jobId, "151515");
 
   const past = postingItems(posting, new Date("2026-12-01T00:00:00.000Z"));
   assert.equal(past.length, 0);
@@ -267,7 +267,7 @@ test("interviewDetailItems: booked detail enriches the list item's id", () => {
   const items = interviewDetailItems(detail, NOW);
   assert.equal(items.length, 1);
   const item = items[0];
-  assert.equal(item.id, "waterlooworks:interview:488135");
+  assert.equal(item.id, "waterlooworks:interview:151515");
   assert.equal(item.type, "interview");
   assert.equal(item.startAt, "2026-10-02T20:00:00.000Z");
   assert.equal(item.endAt, "2026-10-02T20:30:00.000Z");
@@ -308,8 +308,8 @@ test("linkItems attaches item ids onto matching Applications", () => {
   );
   const linked = linkItems(apps, items);
   assert.deepEqual(linked[0].itemIds.sort(), [
-    "waterlooworks:interview:488135",
-    "waterlooworks:interview:488135:2026-11-30",
+    "waterlooworks:interview:151515",
+    "waterlooworks:interview:151515:2026-11-30",
   ]);
   assert.deepEqual(linked[1].itemIds, ["waterlooworks:interview:488200"]);
   assert.deepEqual(linked[2].itemIds, []);
@@ -329,7 +329,7 @@ test("mergeInterviewScopes lets the detail win on shared fields", () => {
   const merged = mergeInterviewScopes(listItems, detailItems);
   assert.equal(merged.length, 3); // 2 unique ids + one replaced
 
-  const mergedItem = merged.find((i) => i.id === "waterlooworks:interview:488135");
+  const mergedItem = merged.find((i) => i.id === "waterlooworks:interview:151515");
   assert.equal(mergedItem.location, "Virtual Room 106"); // detail wins
   assert.equal(mergedItem.endAt, "2026-10-02T20:30:00.000Z"); // detail adds
   assert.equal(mergedItem.meta.prep.interviewer, "Pat Example"); // detail adds
@@ -341,7 +341,7 @@ test("mergeInterviewScopes lets the detail win on shared fields", () => {
     mergedItem.details.indexOf("Type: In-Person") <
       mergedItem.details.indexOf("Interviewer: Pat Example")
   );
-  assert.ok(merged.find((i) => i.id === "waterlooworks:interview:488135:2026-11-30"));
+  assert.ok(merged.find((i) => i.id === "waterlooworks:interview:151515:2026-11-30"));
 
   // Detail-only items (e.g. timeslots) come through untouched.
   const timeslot = interviewDetailItems(
@@ -518,7 +518,7 @@ test("interview list rows carry Employer/Job/Method/Type/Where/Booking facts", (
   );
   const f = factsOf(items[0]);
   assert.equal(f.get("Employer"), "Globex");
-  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Job"), "151515 - Analog/Mixed-Signal Engineering Co-op");
   assert.equal(f.get("Method"), "On Campus");
   assert.equal(f.get("Type"), "In-Person");
   assert.equal(f.get("Where"), "TC 2218");
@@ -536,7 +536,7 @@ test("interview detail facts add Interviewer/Instructions/Booking", () => {
   const [item] = interviewDetailItems(detail, NOW);
   const f = factsOf(item);
   assert.equal(f.get("Employer"), "Globex");
-  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Job"), "151515 - Analog/Mixed-Signal Engineering Co-op");
   assert.equal(f.get("Method"), "Employer Arranged Webcam");
   assert.equal(f.get("Type"), "Individual");
   assert.equal(f.get("Where"), "Virtual Room 106");
@@ -555,7 +555,7 @@ test("merged interview keeps detail facts, fills gaps from the list", () => {
     NOW
   );
   const merged = mergeInterviewScopes(list, detail).find(
-    (i) => i.id === "waterloooworks:interview:488135" || i.id === "waterlooworks:interview:488135"
+    (i) => i.id === "waterloooworks:interview:151515" || i.id === "waterlooworks:interview:151515"
   );
   const f = factsOf(merged);
   assert.equal(f.get("Interviewer"), "Pat Example"); // detail adds
@@ -577,7 +577,7 @@ test("timeslot deadline facts: Job, Employer, Earliest slot, Rule", () => {
 test("application-deadline facts: Job, Employer, Work term, Level, City", () => {
   const [item] = postingItems(parsers.parsePosting(doc("posting.html")), NOW);
   const f = factsOf(item);
-  assert.equal(f.get("Job"), "488135 - Analog/Mixed-Signal Engineering Co-op");
+  assert.equal(f.get("Job"), "151515 - Analog/Mixed-Signal Engineering Co-op");
   assert.equal(f.get("Employer"), "Globex");
   assert.equal(f.get("Work term"), "2027 - Winter");
   assert.equal(f.get("Level"), "Junior");
