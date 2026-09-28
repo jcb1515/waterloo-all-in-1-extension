@@ -42,7 +42,15 @@ export const REPLY_RE =
   /\b(please (reply|respond|confirm|let me know)|let me know|get back to me|are you (available|free)|what times? works?|when (are|would) you (be )?(free|available)|rsvp)\b/i;
 
 /** The first matching line ends the new part of a message body (quotes). */
-export const QUOTE_CUT_RE = /^(On .+ wrote:|From: .+|-{2,}\s*Original Message\s*-{2,})\s*$/m;
+/**
+ * Quoted-history boundary: a reply's `On <date> <who> wrote:` header, an
+ * Outlook `From: … Sent:` header (one line in list previews, separate lines
+ * in bodies), or an `Original Message`/underscore separator. Everything from
+ * the match on is somebody else's old text — never date-worthy. `On … wrote:`
+ * requires a weekday/month/digit after "On" so prose can't trip it.
+ */
+export const QUOTE_CUT_RE =
+  /\bOn (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d)[^\n]{0,200}?\bwrote:|\bFrom:[^\n]{0,200}?\bSent:|^From:[^\n]{0,200}\r?\n\s*Sent:|^-{2,}\s*Original Message\s*-{2,}\s*$|^_{4,}\s*$/im;
 
 /* ---- invite cards (the RSVP card the client renders above a message) ---- */
 
@@ -122,6 +130,7 @@ export const KEYWORDS = [
   "tapeout",
   "design review",
   "rsvp",
+  "invite",
   "invited",
   "invitation",
   "register",
@@ -294,7 +303,7 @@ export const TYPE_RULES = [
   // Event nouns get their group as the item category — they outrank the
   // generic meeting rule so "club meeting"/"coffee chat" classify right.
   ...EVENT_GROUPS.map(([group, re]) => /** @type {[RegExp, string, string]} */ ([re, "event", group])),
-  [/\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul/i, "meeting"],
+  [/\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul|\binvite[sd]?\b|\binvitations?\b/i, "meeting"],
   [/due|deadlines?|extensions?/i, "deadline"],
 ];
 

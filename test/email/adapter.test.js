@@ -328,7 +328,11 @@ test("gmail invite card: date lives in the card, not the .a3s body", async () =>
   assert.equal(m.invite.where, "Microsoft Teams Meeting");
   assert.equal(m.invite.organizer, "Jane Doe");
 
-  const res = await adapter.observe.parse(payload("gmail", out), ctx({}));
+  // Observed before the invite's day — anything already over is dropped.
+  const res = await adapter.observe.parse(
+    payload("gmail", out),
+    ctx({}, { now: new Date("2026-09-28T15:00:00.000Z") }),
+  );
   assert.equal(res.items.length, 1); // the conflict line must not become an item
   const i = res.items[0];
   assert.equal(i.type, "meeting");
@@ -349,7 +353,10 @@ test("outlook invite card -> meeting item", async () => {
   assert.equal(out.view, "message");
   assert.equal(out.messages[0].key, "conv-inv");
   assert.match(out.messages[0].invite.whenText, /9\/29\/2026/);
-  const res = await adapter.observe.parse(payload("outlook", out), ctx({}));
+  const res = await adapter.observe.parse(
+    payload("outlook", out),
+    ctx({}, { now: new Date("2026-09-28T15:00:00.000Z") }),
+  );
   assert.equal(res.items.length, 1);
   const i = res.items[0];
   assert.equal(i.type, "meeting");
@@ -368,6 +375,7 @@ test("rsvp-by keyword -> pending deadline", () => {
         "[ACTION REQUIRED] Congratulations, you're in CommuniHacks (MLH) - RSVP by Sept 30!",
       receivedAt: "2026-09-27T18:01:00.000Z",
     }),
+    { now: new Date("2026-09-28T15:00:00.000Z") }, // observed before the deadline
   );
   assert.equal(i.type, "deadline");
   assert.equal(i.dueAt, "2026-10-01T03:59:00.000Z"); // Sept 30 23:59 Toronto
@@ -592,6 +600,7 @@ test("a list row's label date anchors relative dates in the preview", () => {
       preview: "can we meet tomorrow at 3pm?",
       receivedAt: "2026-09-25T04:00:00.000Z", // the "Sep 25" label
     }),
+    { now: new Date("2026-09-25T20:00:00.000Z") }, // observed Sep 25
   );
   assert.equal(i.type, "meeting");
   assert.equal(i.startAt, "2026-09-26T19:00:00.000Z"); // tomorrow = Sep 26, not now
