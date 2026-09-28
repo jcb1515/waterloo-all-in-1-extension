@@ -6,6 +6,7 @@
 */
 
 import { normCourseCode } from "../../core/contract.js";
+import { titleSimilarity } from "../../core/merge.js";
 
 /**
  * Google Calendar invite subjects:
@@ -23,6 +24,21 @@ export const EASTERN_TZ = /^(E[SD]?T|Eastern|America\/Toronto|GMT-0?[45])/i;
 
 export const MEET_LINK =
   /teams\.microsoft\.com\/l\/meetup-join|zoom\.us\/j\/|meet\.google\.com\/|waterlooworks\.uwaterloo\.ca/i;
+
+/** Booking links — kept on the Msg but never treated as invite evidence. */
+export const BOOK_LINK =
+  /calendly\.com\/|calendar\.app\.google\/|calendar\.google\.com\/calendar\/appointments|outlook\.office\.com\/bookwithme|outlook\.office365\.com\/owa\/calendar\/[^\s"'<>]*bookings|\/bookings\//i;
+
+/** Wording that turns a booking link (or alone) into a book-a-call task. */
+export const BOOK_RE =
+  /schedule a (call|time|meeting|chat)|book a (time|call|slot|meeting)|pick a time|find a time/i;
+
+/** Phrases that mean a reply is owed, plus "?"-sentences addressed to "you". */
+export const REPLY_RE =
+  /\b(please (reply|respond|confirm|let me know)|let me know|get back to me|are you (available|free)|what times? works?|when (are|would) you (be )?(free|available)|rsvp)\b/i;
+
+/** The first matching line ends the new part of a message body (quotes). */
+export const QUOTE_CUT_RE = /^(On .+ wrote:|From: .+|-{2,}\s*Original Message\s*-{2,})\s*$/m;
 
 /* ---- invite cards (the RSVP card the client renders above a message) ---- */
 
@@ -107,6 +123,34 @@ export const KEYWORDS = [
   "register",
   "registration",
   "event",
+  "meet",
+  "call",
+  "phone",
+  "phone screen",
+  "chat",
+  "coffee chat",
+  "sync",
+  "catch up",
+  "available",
+  "availability",
+  "schedule",
+  "reschedule",
+  "office hours",
+  "info session",
+  "workshop",
+  "assessment",
+  "coding challenge",
+  "online assessment",
+  "hirevue",
+  "onsite",
+  "zoom",
+  "teams meeting",
+  "google meet",
+  "calendly",
+  "book",
+  "confirm",
+  "reminder",
+  "action required",
 ];
 
 const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
@@ -119,20 +163,48 @@ export function keywordRe(extra) {
   return new RegExp(`\\b(?:${words.join("|")})\\b`, "i");
 }
 
-/** Item type from the keyword inside the hit's sentence. @type {[RegExp, string][]} */
+/** "OA" only ever counts capitalised — too many lowercase collisions. */
+export const OA_KW = /\bOA\b/;
+
+/**
+ * Keyword match for a date's sentence: the insensitive word list, or a
+ * case-sensitive capital "OA".
+ * @param {string} sentence @param {RegExp} kwRe
+ */
+export function keywordOf(sentence, kwRe) {
+  const m = String(sentence || "").match(kwRe) || String(sentence || "").match(OA_KW);
+  return m ? m[0] : undefined;
+}
+
+/** Item type from the keyword inside the hit's sentence. @type {[RegExp, string, string?][]} */
 export const TYPE_RULES = [
-  [/interview/i, "interview"],
+  [/interview|phone screen|\bscreen(ing)?\b|hirevue|onsite/i, "interview"],
   [/offer/i, "offer-deadline"],
   [/rank(ing)?/i, "cycle-date"],
   [/\b(rsvp|register|registration|sign\s*up|apply)\b[^.!?\n]{0,25}\b(by|before|deadline)\b/i, "deadline"],
+  [/online assessment|coding challenge|\bassessment\b/i, "deadline", "assessment"],
+  [/\bOA\b/, "deadline", "assessment"], // capital-OA only, case-sensitive
   [/mid-?terms?|exams?/i, "exam"],
-  [/meetings?|design reviews?|tapeout/i, "meeting"],
+  [/\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul/i, "meeting"],
+  [/office hours|info session|workshop/i, "event"],
   [/due|deadlines?|extensions?/i, "deadline"],
 ];
 
+/**
+ * @param {string} sentence
+ * @returns {{type: string, category?: string}}
+ */
 export function mailType(sentence) {
-  for (const [re, t] of TYPE_RULES) if (re.test(sentence)) return t;
-  return "event";
+  for (const [re, t, cat] of TYPE_RULES) if (re.test(sentence)) return { type: t, category: cat };
+  return { type: "event" };
+}
+
+/** Bulk sender mail: no-reply-style local parts or list-footer boilerplate. */
+export function isBulk(msg) {
+  const local = String(msg.fromEmail || "").split("@")[0] || "";
+  if (/^(no-?reply|do-?not-?reply|notifications?|newsletters?)\b/i.test(local)) return true;
+  return /unsubscribe|view (it |this (email |message )?)?in (your )?browser|manage (your )?(email |subscription )?preferences/i
+    .test(String(msg.body || ""));
 }
 
 export const DEADLINE_TYPES = new Set(["deadline", "offer-deadline", "cycle-date"]);
@@ -143,9 +215,27 @@ const list = (v) =>
     .map((s) => String(s).trim())
     .filter(Boolean);
 
-/** Sender domain minus its TLD, leftmost label — "acme" for acme.example.com. */
-export function employerOf(email) {
+/** Mailboxes that can't be employers — use the sender's display name. */
+const PERSONAL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
+  "yahoo.com", "yahoo.ca", "icloud.com", "me.com", "proton.me", "protonmail.com",
+]);
+
+/**
+ * Employer-ish label for a sender: first domain label ("acme" for
+ * acme.example.com), or — on a personal domain — the cleaned display name
+ * (quotes and a trailing " via …" removed), never "gmail".
+ * @param {string} email @param {string} [fromName]
+ */
+export function employerOf(email, fromName) {
   const domain = String(email || "").split("@")[1] || "";
+  if (PERSONAL_DOMAINS.has(domain.toLowerCase())) {
+    const name = String(fromName || "")
+      .replace(/^["']+|["']+$/g, "")
+      .replace(/\s+via\s+.*$/i, "")
+      .trim();
+    return name || undefined;
+  }
   const labels = domain.split(".").filter(Boolean);
   return labels.length ? labels[0] : undefined;
 }
@@ -158,14 +248,20 @@ export function isCoopSender(msg) {
   return /uwaterloo\.ca$/.test(domain) && /co-?op|waterlooworks|ccd|career/i.test(`${msg.from} ${msg.subject}`);
 }
 
+/** ctx.applications may be an array or an id-keyed map. @param {any} v */
+const appList = (v) =>
+  Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : [];
+
 /**
  * The sender gate for Review items: co-op, Learn, a course instructor,
- * a course code in the subject, or a settings team/sender match.
+ * a course code in the subject, a settings team/sender match, or an
+ * employer match against ctx.applications (WaterlooWorks).
  * @param {any} msg
- * @param {{courses?: any[], settings?: Record<string, any>}} [ctx]
- * @returns {{ok: boolean, course?: string, team?: string, coop?: boolean}}
+ * @param {{courses?: any[], settings?: Record<string, any>, applications?: any}} [ctx]
+ * @returns {{ok: boolean, course?: string, team?: string, coop?: boolean,
+ *   employer?: string, jobId?: string}}
  */
-export function senderGate(msg, { courses = [], settings = {} } = {}) {
+export function senderGate(msg, { courses = [], settings = {}, applications } = {}) {
   const email = String(msg.fromEmail || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const subject = String(msg.subject || "");
@@ -192,6 +288,26 @@ export function senderGate(msg, { courses = [], settings = {} } = {}) {
   }
   for (const s of list(settings.senders)) {
     if (fromLine.includes(s.toLowerCase())) return { ok: true };
+  }
+  // An application employer: fuzzy on the display name or the domain label,
+  // or a literal domain-label token inside the employer name.
+  const domainLabel = (domain.split(".")[0] || "").toLowerCase();
+  for (const app of appList(applications)) {
+    const emp = String((app && app.employer) || "");
+    if (!emp) continue;
+    const tokens = emp.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if (
+      titleSimilarity(emp, null, String(msg.from || ""), null) >= 0.6 ||
+      titleSimilarity(emp, null, domainLabel, null) >= 0.6 ||
+      (domainLabel.length >= 4 && tokens.includes(domainLabel))
+    ) {
+      return {
+        ok: true,
+        coop: true,
+        employer: emp,
+        jobId: app.jobId == null ? undefined : String(app.jobId),
+      };
+    }
   }
   return { ok: false };
 }

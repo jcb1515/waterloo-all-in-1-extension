@@ -74,7 +74,7 @@ const dateFor = (monText, day, { now, termCode } = /** @type {{now?: Date, termC
 
 const SKIP_LINE = /reading week|midterm week|no class|no lectures/i;
 const REVIEW_FOR = /\breview (?:session )?for\b/i;
-const OFFICE_RE =
+export const OFFICE_RE =
   /(mon|tues|wednes|thurs|fri)days?\s+(\d{1,2}(?::\d{2})?\s*[ap]m)\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m)\s+in\s+([A-Z]{2,4}\s*-?\s*\d{3,4}[A-Z]?)/gi;
 const OFFICE_DAY = { mon: 1, tues: 2, wednes: 3, thurs: 4, fri: 5 };
 

@@ -140,7 +140,7 @@ function timesOf(text) {
 }
 
 /** Siblings of `#id` up to the next h2.header. (ids are fixed literals) */
-function sectionEls(doc, id) {
+export function sectionEls(doc, id) {
   const h2 = doc.querySelector(`#${id}`);
   const out = [];
   if (!h2) return out;

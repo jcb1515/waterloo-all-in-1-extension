@@ -258,3 +258,29 @@ test("review: a bare end day before the start day rolls into the next month", ()
   assert.equal(h.startAt, "2026-12-30T05:00:00.000Z");
   assert.equal(h.endAt, "2027-01-03T05:00:00.000Z");
 });
+
+/* --------------------- casual meridiem guess (mail text) --------------------- */
+
+// now = Tue Sep 29 2026, 11:00 EDT.
+const MAIL = { now: new Date("2026-09-29T15:00:00Z") };
+
+test("meridiem guess: 'Thursday at 2' is 2 PM, not 2 AM", () => {
+  const h = one("can we meet Thursday at 2?", MAIL);
+  assert.equal(h.startAt, "2026-10-01T18:00:00.000Z");
+  assert.equal(h.allDay, false);
+});
+
+test("meridiem guess: hours 8-11 stay AM ('call at 9 on Friday')", () => {
+  const h = one("call at 9 on Friday", MAIL);
+  assert.equal(h.startAt, "2026-10-02T13:00:00.000Z");
+});
+
+test("meridiem guess: 'lunch at 12' stays noon", () => {
+  const h = one("lunch at 12 on Friday", MAIL);
+  assert.equal(h.startAt, "2026-10-02T16:00:00.000Z");
+});
+
+test("meridiem guess: a 24-hour '13:00' is untouched", () => {
+  const h = one("13:00 on Oct 5", MAIL);
+  assert.equal(h.startAt, "2026-10-05T17:00:00.000Z");
+});

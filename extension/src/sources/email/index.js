@@ -8,7 +8,7 @@
 */
 
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
-import { itemsFromMessage } from "./extract.js";
+import { itemsFromMessage, SENT_FOLDERS, taskItems } from "./extract.js";
 import { GMAIL_SCAN_QUERY, OUTLOOK_SCAN_QUERY } from "./rules.js";
 
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
@@ -129,26 +129,50 @@ const adapter = {
         scan.provider === provider &&
         Math.abs(now.getTime() - Date.parse(scan.startedAt || "")) <= SCAN_TTL_MS
       );
-      const allowed = folder === "search" || inFolders || (scanOn && data.view === "message");
+      // Sent folders only ever close reply tasks — never produce items.
+      const allowed =
+        !SENT_FOLDERS.has(folder || "") &&
+        (folder === "search" || inFolders || (scanOn && data.view === "message"));
 
       /** @type {import("../../core/contract.js").Item[]} */
       const items = [];
       const msgs = data.messages.filter((m) => m && m.key);
+      /** @type {{m: any, items: import("../../core/contract.js").Item[]}[]} */
+      const prod = msgs.map((m) => ({ m, items: [] }));
       if (allowed) {
-        for (const m of msgs) {
-          items.push(
-            ...itemsFromMessage(m, {
-              provider,
-              now,
-              termCode: termCodeFor(now),
-              textDates: ctx.textDates || extractDates,
-              courses: ctx.courses || [],
-              settings,
-              at,
-            }),
-          );
+        for (const p of prod) {
+          p.items = itemsFromMessage(p.m, {
+            provider,
+            now,
+            termCode: termCodeFor(now),
+            textDates: ctx.textDates || extractDates,
+            courses: ctx.courses || [],
+            settings,
+            applications: /** @type {any} */ (ctx).applications,
+            at,
+          });
+          items.push(...p.items);
         }
       }
+
+      // Reply-needed / book-a-call tasks + their completion (sent-folder and
+      // excluded-folder views still close open tasks).
+      const tasks = taskItems(
+        prod,
+        { view: String(data.view), folder, allowed },
+        prev,
+        {
+          provider,
+          now,
+          termCode: termCodeFor(now),
+          textDates: ctx.textDates || extractDates,
+          courses: ctx.courses || [],
+          settings,
+          applications: /** @type {any} */ (ctx).applications,
+          at,
+        },
+      );
+      items.push(...tasks.items);
 
       // Guided scan bookkeeping: a search list queues unread rows; any read
       // thread leaves the queue and is marked scanned (newest 1000 kept).
@@ -190,6 +214,8 @@ const adapter = {
         counts: { ...(prev.counts || {}), [provider]: msgs.length },
         scanned,
         scanQueue,
+        ...(Object.keys(tasks.replies).length ? { replies: tasks.replies } : {}),
+        ...(Object.keys(tasks.bookings).length ? { bookings: tasks.bookings } : {}),
       };
       return {
         items,

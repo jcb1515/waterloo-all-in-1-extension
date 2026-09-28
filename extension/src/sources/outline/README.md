@@ -198,3 +198,16 @@ review `update`.
 - Section pickers use the DOM `"LEC 002"` format; settings must match.
 - `TUT`/`LAB`/`SEM` row shapes are assumed identical to `LEC` (same cells).
 - `Grp a-b:` parsing assumes that literal prefix in deadline cells.
+
+## Probe / checklist
+
+`probe.js` (`probe(doc, href)` → `{page, counts, ok, hints}`) backs W1's
+"Check readers" screen — **counts only**, no text or ids. It reuses
+`parseOutline`'s selectors: page `outline` needs a `/viewer/view/` URL with
+outline content; `login` is a non-outline host or a page without outline
+content whose text matches `LOGIN_WORDS` (the same regex `isLoginShell`
+uses — real outlines can contain "log in" nav links, so the word match
+only counts without `.outline-courses`); `outline-other` is on-host but not
+a usable viewer page. `ok` = outline + `title` + (`scheduleRows` or
+`assessmentRows`) > 0. `CHECKLIST` is the open-these-pages list for the
+Check screen (`{id, label, how, page}`).
