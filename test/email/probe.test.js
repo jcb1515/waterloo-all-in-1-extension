@@ -67,7 +67,7 @@ test("probe: inviteCard count only on the two card fixtures", () => {
 test("probe: account detected only where the account button exists", () => {
   for (const f of FIXTURES) {
     const r = probe(docOf(f.name), f.url);
-    const want = /thread-(ask|reply)/.test(f.name) ? 1 : 0;
+    const want = /thread-(ask|reply)|outlook-list/.test(f.name) ? 1 : 0;
     assert.equal(r.counts.account, want, f.name);
   }
 });

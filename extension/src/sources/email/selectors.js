@@ -34,14 +34,16 @@ export const CARD = {
   main: '[role="main"]',
 };
 
-// The signed-in account button — read only to recognise the user's own
-// messages (fromMe); the address is compared in memory and never emitted.
+// The signed-in account — read only to recognise the user's own messages
+// (fromMe); the address is compared in memory and never emitted.
 export const ACCOUNT = {
   // Gmail: aria-label "Google Account: <name> (<email>)".
   gmail: 'a[aria-label^="Google Account:"]',
-  // OWA: the me-control carries the address as text or in its aria-label.
+  // OWA: the account's folder-tree root carries the address in
+  // data-folder-name/title (the me-control only shows the display name).
+  // Keep the older me-control selectors as fallbacks.
   outlook:
-    '#mectrl_currentAccount_secondary, [data-testid="mectrl_currentAccount_secondary"], header button[aria-label*="@"]',
+    '[role="treeitem"][data-folder-name*="@"], #mectrl_currentAccount_secondary, [data-testid="mectrl_currentAccount_secondary"], header button[aria-label*="@"]',
 };
 
 // Quoted-history containers stripped out of body text so old asks don't
