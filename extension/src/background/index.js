@@ -18,6 +18,7 @@ import { UI } from "../core/messages.js";
 import { ADAPTERS, adapterForSource, observePatternsFor } from "../core/registry.js";
 import { migrateStorage, getLocal, setLocal, enqueue, mutateKey } from "../core/store.js";
 import { auditStore, applySafeFixes } from "../core/audit.js";
+import { adaptersToSyncOnUpdate } from "./update.js";
 import { recordProbe, checkReport } from "../sources/probes.js";
 import {
   runSync,
@@ -118,10 +119,28 @@ async function catchUp() {
   }
 }
 
+/**
+ * An extension update can change adapter mappings, so every interval
+ * adapter re-syncs once now instead of waiting for its next alarm.
+ * Sequential, fail-soft per adapter.
+ */
+async function syncAfterUpdate() {
+  for (const a of adaptersToSyncOnUpdate(ADAPTERS)) {
+    try {
+      await runSync(a.id, "manual");
+    } catch (e) {
+      console.warn(`[wa1] update sync ${a.id}`, e);
+    }
+  }
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   migrateStorage()
     .then(setup)
     .then(catchUp)
+    .then(() => {
+      if (details && details.reason === "update") return syncAfterUpdate();
+    })
     .catch((e) => console.warn("[wa1] install", e));
   syncOptionalContentScripts();
   if (details && details.reason === "install") {

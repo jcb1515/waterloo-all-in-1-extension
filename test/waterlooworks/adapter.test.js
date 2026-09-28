@@ -11,7 +11,9 @@ import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
 import { messageKey } from "../../extension/src/sources/waterlooworks/map.js";
 import { applyResult } from "../../extension/src/core/merge.js";
-import adapter from "../../extension/src/sources/waterlooworks/index.js";
+import adapter, {
+  COOP_DATES_VERSION,
+} from "../../extension/src/sources/waterlooworks/index.js";
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -865,4 +867,85 @@ test("sync through real applyResult: success is authoritative, failure keeps cac
   assert.equal(r3.complete, false);
   const raw3 = applyResult(raw, r3, { mode: "sync" });
   assert.ok(raw3.items.some((i) => i.id === closeId), "failure keeps cache");
+});
+
+/* --- co-op dates mapping version ----------------------------------------- */
+
+test("sync bypasses the 24 h throttle when coopDates has no version", async () => {
+  // fetchedAt 1 h ago would normally skip the fetch, but an unversioned
+  // record came from before the mapping fix — stale items must go.
+  const upgraded = {
+    coopDates: { fetchedAt: "2026-09-20T11:00:00.000Z" },
+    lastGood: {
+      "coop-dates": {
+        items: [
+          { id: "waterlooworks:cycle:stale", type: "cycle-date", category: "rankings-due", title: "Cycle 1: Student ranking consults", dueAt: "2026-09-21T18:00:00.000Z", status: "open" },
+        ],
+        at: "2026-09-19T00:00:00.000Z",
+      },
+    },
+  };
+  const { ctx, calls } = syncCtx(upgraded);
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 1, "stale version forces a fetch");
+  assert.equal(res.complete, true);
+  assert.equal(res.state.coopDates.version, COOP_DATES_VERSION);
+  assert.ok(res.state.coopDates.entries.length > 0, "public entries stored");
+  const ranked = res.items.filter(
+    (i) => i.type === "cycle-date" && i.category === "rankings-due"
+  );
+  // Fixture has exactly one "rankings close" line; consults must not land here.
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].title, "Cycle 1: Student rankings close");
+  assert.ok(
+    !res.items.some((i) => i.id === "waterlooworks:cycle:stale"),
+    "stale mapped items replaced wholesale"
+  );
+});
+
+test("sync with current version + entries honours the 24 h throttle", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  const fresh = {
+    ...seeded.state,
+    coopDates: {
+      ...seeded.state.coopDates,
+      fetchedAt: "2026-09-20T11:00:00.000Z", // 1 h ago
+    },
+  };
+  const { ctx, calls } = syncCtx(fresh);
+  const res = await adapter.sync(ctx);
+  assert.equal(calls.length, 0, "versioned + recent fetch stays throttled");
+  assert.equal(res.complete, false);
+});
+
+test("observe.parse re-maps stale coop entries without a fetch", async () => {
+  const seeded = await adapter.sync(syncCtx({}).ctx);
+  const stale = {
+    ...seeded.state,
+    lastGood: {
+      ...seeded.state.lastGood,
+      "coop-dates": {
+        items: [
+          { id: "waterlooworks:cycle:stale", type: "cycle-date", category: "rankings-due", title: "Cycle 1: Student ranking consults", dueAt: "2026-09-21T18:00:00.000Z", status: "open" },
+        ],
+        at: "2026-09-19T00:00:00.000Z",
+      },
+    },
+    coopDates: { ...seeded.state.coopDates, version: COOP_DATES_VERSION - 1 },
+  };
+  // makeCtx has no ctx.fetch — the re-map must be fetch-free.
+  const res = await adapter.observe.parse(
+    payload("applications.html", `${WW}/applications.htm`, "net"),
+    makeCtx(stale)
+  );
+  assert.equal(res.state.coopDates.version, COOP_DATES_VERSION);
+  assert.ok(
+    !res.items.some((i) => i.id === "waterlooworks:cycle:stale"),
+    "stale mapped items replaced"
+  );
+  const ranked = res.items.filter(
+    (i) => i.type === "cycle-date" && i.category === "rankings-due"
+  );
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].title, "Cycle 1: Student rankings close");
 });
