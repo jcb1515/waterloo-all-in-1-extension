@@ -201,6 +201,73 @@ test("exam items carry room, seat and duration facts", async () => {
   assert.deepEqual(math.meta.facts, [{ label: "Duration", value: "2 h 30 min" }]);
 });
 
+test("a matched TST slot stays in tstIndex so the midterm keeps its facts", async () => {
+  // Live order is CourseSchedule then ExamSchedule every round. With an
+  // examIndex from the previous round the second schedule read matched the
+  // slot but dropped it from tstIndex, so the following exams read emitted
+  // a bare midterm (no section/room/Test slot) that overwrote the merge.
+  const exams = JSON.stringify({
+    meta: { status: 200, type: "success" },
+    data: [
+      {
+        title: "MATH 117 Midterm",
+        startDate: "2026-10-22T16:30:00", // overlaps TST 101 (16:30-18:20)
+        endDate: "2026-10-22T18:30:00",
+        location: "",
+        seatCode: null,
+        seatInstructions: null,
+      },
+    ],
+  });
+  const midtermOf = (/** @type {any} */ res) =>
+    res.items.filter((i) => i.type === "exam" && i.org === "MATH 117");
+  const assertMerged = (/** @type {any} */ res, /** @type {string} */ step) => {
+    const m = midtermOf(res);
+    assert.equal(m.length, 1, `${step}: one midterm`);
+    const item = m[0];
+    assert.equal(item.id, "portal:exam:MATH117:midterm", step);
+    assert.equal(item.section, "TST 101", step);
+    const facts = Object.fromEntries(
+      (item.meta.facts || []).map((/** @type {any} */ f) => [f.label, f.value]),
+    );
+    return facts;
+  };
+
+  // Round 1, schedule first: the TST row is an unmatched midterm — section
+  // and room already known, no exam facts yet.
+  const r1 = await adapter.observe.parse(payload(URLS.schedule, json("schedule")), ctx());
+  assertMerged(r1, "r1 schedule");
+  // Round 1, exams: the slot folds in — Section/Test slot/Room facts land.
+  const r2 = await adapter.observe.parse(payload(URLS.exams, exams), ctx(r1.state));
+  let facts = assertMerged(r2, "r1 exams");
+  assert.equal(facts["Section"], "TST 101");
+  assert.equal(facts["Room"], "MC 4020"); // exam location empty -> slot room
+  assert.ok(facts["Test slot"], "slot window fact");
+  assert.ok(facts["Duration"], "exam duration fact");
+
+  // Round 2, schedule with the examIndex in state: matched — and the slot
+  // must STILL be in tstIndex.
+  const r3 = await adapter.observe.parse(
+    payload(URLS.schedule, json("schedule")),
+    ctx(r2.state),
+  );
+  facts = assertMerged(r3, "r2 schedule");
+  assert.equal(facts["Section"], "TST 101");
+  assert.ok(facts["Test slot"], "matched schedule keeps the Test slot fact");
+  assert.deepEqual(
+    r3.state.tstIndex["MATH 117"].map((/** @type {any} */ t) => t.section),
+    ["TST 101"],
+  );
+
+  // Round 2, exams: same merged item — no bare-midterm regression.
+  const r4 = await adapter.observe.parse(payload(URLS.exams, exams), ctx(r3.state));
+  facts = assertMerged(r4, "r2 exams");
+  assert.equal(facts["Section"], "TST 101");
+  assert.equal(facts["Room"], "MC 4020");
+  assert.ok(facts["Test slot"]);
+  assertSaneDates(r4.items);
+});
+
 test("MinValue finals become a tentative exam-period window when known", async () => {
   // DailyEventsV2 carries the term's exam period (Dec 10-23).
   const r1 = await adapter.observe.parse(payload(URLS.events, json("events")), ctx());
@@ -287,7 +354,7 @@ test("ExamSchedule + CourseSchedule TST merge, schedule read first", async () =>
   // Exam location was "": the TST room is used, seat/seat-instructions carried.
   assert.equal(mid.location, "RCH 301 · Seat B07");
   assert.equal(mid.details, "Use odd-numbered seats");
-  assert.equal(mid.section, undefined);
+  assert.equal(mid.section, "TST 101"); // slot section lands on the item
   assert.deepEqual(mid.meta.facts, [
     { label: "Room", value: "RCH 301" },
     { label: "Seat", value: "B07" },
