@@ -111,7 +111,15 @@ not > 1 day before the message). Triggers decide the type — first match
 wins: assigned task verb → `task`; deadline word or "by <date>" →
 `deadline`; meeting word → `meeting`; bare `<t:>` in a watched channel →
 `event`. No trigger → no item. An assigned task with no date gets
-`dueAt = sent + 7d` with `meta.undated`. All items are `review: "pending"`.
+`dueAt = sent + 2d` at 17:00 Toronto (DST-safe via `zonedIso`) with
+`meta.undated`. All items are `review: "pending"`.
+
+Shared task seam (`meta.action`): reply to-dos carry `"reply"`; assigned
+tasks carry `"submit-document"` when a hand-in cue (`submit`/`upload`/
+`hand in`/`turn in`/`send`) co-occurs with a document noun (`report`/`doc`/
+`document`/`slides`/`deck`/`file`/`pdf`/`write-up`/`resume`/`poster`),
+otherwise `"other"`. Unassigned `deadline`/`meeting`/`event` items carry
+no `meta.action`.
 
 Assigned-to-me = direct mention of selfId, a role ping of a known role,
 the DOM "mentioned" highlight, or any mentions-endpoint message that isn't

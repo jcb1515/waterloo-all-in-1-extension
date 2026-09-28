@@ -148,7 +148,8 @@ export function probe(doc, href) {
  * marks the rows onboarding insists on; `refreshDays` is how often the row
  * should see a fresh read.
  * @type {{id: string, label: string, how: string, url?: string,
- *   essential?: boolean, refreshDays?: number}[]}
+ *   essential?: boolean, refreshDays?: number,
+ *   stat?: {kind: "observe", scope: string}}[]}
  */
 export const CHECKLIST = [
   {
@@ -158,6 +159,7 @@ export const CHECKLIST = [
     url: "https://discord.com/channels/@me",
     essential: true,
     refreshDays: 3,
+    stat: { kind: "observe", scope: "discord:channel" },
   },
   {
     id: "timestamp",
@@ -171,6 +173,7 @@ export const CHECKLIST = [
     url: "https://discord.com/channels/@me",
     essential: true,
     refreshDays: 7,
+    stat: { kind: "observe", scope: "discord:events" },
   },
   {
     id: "event-detail",

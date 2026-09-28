@@ -1010,6 +1010,17 @@ export default {
             state.guilds = evictGuilds(state, settings);
           }
           recomputeWatch(state, settings, nowIso);
+          // A settled guild-channel inventory read — even with zero
+          // channels — counts as a complete read of the channel scope.
+          if (
+            extract.settled === true &&
+            loc.guildId &&
+            loc.guildId !== "@me"
+          ) {
+            result.readOk = ["discord:channel"];
+            result.complete = true;
+            return finish();
+          }
         } else if (extract.type === "messages") {
           if (loc.guildId === "@me") {
             // Location only — DM content is never read.
@@ -1093,6 +1104,17 @@ export default {
               );
             }
             state.lastGood.events = kept;
+          }
+          // A settled Events-modal read — even with zero cards — counts as
+          // a complete read of the events scope for that guild.
+          if (
+            extract.settled === true &&
+            guildId &&
+            guildId !== "@me"
+          ) {
+            result.readOk = ["discord:events"];
+            result.complete = true;
+            return finish();
           }
         }
         else if (extract.type === "location") {
