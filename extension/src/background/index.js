@@ -172,11 +172,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === MSG.OBSERVED) {
-    handleObserved(msg.payload).catch(() => {});
+    handleObserved(msg.payload).catch((e) =>
+      console.warn("[wa1] observe", e && e.message)
+    );
     return false;
   }
   if (msg.type === MSG.CAPTURE) {
-    handleCapture(msg).catch(() => {});
+    handleCapture(msg).catch((e) =>
+      console.warn("[wa1] observe", e && e.message)
+    );
     return false;
   }
   if (msg.type === UI.SYNC) {

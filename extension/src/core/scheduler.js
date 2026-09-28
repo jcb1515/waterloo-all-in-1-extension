@@ -41,15 +41,23 @@ const MINUTE = 60 * 1000;
 let PARSE_TIMEOUT_MS = 30 * 1000;
 let SYNC_TIMEOUT_MS = 5 * MINUTE;
 
-/** Reject after `ms`; wa1Timeout marks it so callers can tell a timeout from a throw. */
-function after(ms, message) {
-  return new Promise((_, reject) =>
-    setTimeout(() => {
+/**
+ * Race `promise` against a `ms` timeout. The losing timer is cleared (and
+ * unref'd) so it can't hold the service worker — or a test process — alive.
+ * wa1Timeout marks the error so callers can tell a timeout from a throw.
+ */
+function withTimeout(promise, ms, message) {
+  /** @type {any} */
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => {
       const e = /** @type {any} */ (new Error(message));
       e.wa1Timeout = true;
       reject(e);
-    }, ms)
-  );
+    }, ms);
+    if (typeof t.unref === "function") t.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
 /** @param {{parseMs?: number, syncMs?: number}} [t] */
@@ -271,7 +279,7 @@ function makeCtx(adapter, settings, state, mv, extras) {
     // Offscreen parses answer over sendMessage — an unanswered one would
     // hang the source's ingest queue forever, so cap it.
     parseHtml: (a, b, opts) =>
-      Promise.race([parseHtml(a, b, opts), after(PARSE_TIMEOUT_MS, `parse timeout: ${adapter.id}`)]),
+      withTimeout(parseHtml(a, b, opts), PARSE_TIMEOUT_MS, `parse timeout: ${adapter.id}`),
     textDates: extractDates,
     log: (message, data) =>
       appendLog(id, data === undefined ? String(message) : `${message} ${safeJson(data)}`),
@@ -300,10 +308,11 @@ function safeJson(v) {
 /** Call adapter.sync, converting a throw or a hang into an error SyncResult. */
 async function callSync(adapter, ctx) {
   try {
-    return await Promise.race([
+    return await withTimeout(
       /** @type {any} */ (adapter).sync(ctx),
-      after(SYNC_TIMEOUT_MS, "sync timed out"),
-    ]);
+      SYNC_TIMEOUT_MS,
+      "sync timed out"
+    );
   } catch (e) {
     const err = /** @type {any} */ (e);
     if (err && err.wa1Timeout) {
@@ -394,10 +403,26 @@ function ingest(source, fn) {
 
 function ingestResult(source, result, scope) {
   return ingest(source, async () => {
-    const mv = await getMergedView();
-    const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope });
-    await setLocal(rawKey(source), raw);
-    await recomputeAll(new Date(), resultUpdates(result));
+    try {
+      const mv = await getMergedView();
+      const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope });
+      await setLocal(rawKey(source), raw);
+      await recomputeAll(new Date(), resultUpdates(result));
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      const msg = String((err && err.message) || err);
+      try {
+        await appendLog(source, `capture failed: ${msg}`);
+      } catch {}
+      try {
+        await recordReadStat({
+          source,
+          at: new Date().toISOString(),
+          kind: "capture",
+          error: msg,
+        });
+      } catch {}
+    }
   });
 }
 
@@ -412,50 +437,67 @@ export async function handleObserved(payload) {
   if (!adapter || typeof parse !== "function") return;
   const source = payload.source;
   return ingest(source, async () => {
-    const mv = await getMergedView();
-    const settings = await getSettings();
-    const st = ((await getLocal("sourceState")) || {})[adapter.id];
-    let result;
     try {
-      result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv, await adapterExtras(adapter.id)));
-    } catch (e) {
-      const err = /** @type {any} */ (e);
-      await appendLog(source, `observe failed: ${(err && err.message) || err}`);
+      const mv = await getMergedView();
+      const settings = await getSettings();
+      const st = ((await getLocal("sourceState")) || {})[adapter.id];
+      let result;
+      try {
+        result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv, await adapterExtras(adapter.id)));
+      } catch (e) {
+        await failObserve(source, payload, e);
+        return;
+      }
+      if (!result || !Array.isArray(result.items)) return;
+      const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
+      await setLocal(rawKey(source), raw);
       await recordReadStat({
         source,
         at: new Date().toISOString(),
         kind: "observe",
         path: statPath(payload.url),
-        error: String((err && err.message) || err),
+        scope: result.scope,
+        items: result.items.length,
       });
-      return;
+      // The adapter's private state moves forward on every observe too, so its
+      // next diff/compares start from this read; the visible status fields move
+      // only per nextSourceState's rules.
+      await mutateKey("sourceState", (cur) => ({
+        ...(cur || {}),
+        [adapter.id]: nextSourceState(
+          (cur || {})[adapter.id],
+          result,
+          new Date(),
+          "observe",
+          (raw.items || []).length
+        ),
+      }));
+      await recomputeAll(new Date(), resultUpdates(result));
+    } catch (e) {
+      // Anything outside the parse — storage reads, folds, the recompute —
+      // must still leave a trace: a swallowed error looks exactly like a
+      // missing observe in the user's storage.
+      await failObserve(source, payload, e);
     }
-    if (!result || !Array.isArray(result.items)) return;
-    const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
-    await setLocal(rawKey(source), raw);
+  });
+}
+
+/** Log + readStat for a failed observe, each best-effort so a dead store can't rethrow. */
+async function failObserve(source, payload, e) {
+  const err = /** @type {any} */ (e);
+  const msg = String((err && err.message) || err);
+  try {
+    await appendLog(source, `observe failed: ${msg}`);
+  } catch {}
+  try {
     await recordReadStat({
       source,
       at: new Date().toISOString(),
       kind: "observe",
-      path: statPath(payload.url),
-      scope: result.scope,
-      items: result.items.length,
+      path: statPath(payload && payload.url),
+      error: msg,
     });
-    // The adapter's private state moves forward on every observe too, so its
-    // next diff/compares start from this read; the visible status fields move
-    // only per nextSourceState's rules.
-    await mutateKey("sourceState", (cur) => ({
-      ...(cur || {}),
-      [adapter.id]: nextSourceState(
-        (cur || {})[adapter.id],
-        result,
-        new Date(),
-        "observe",
-        (raw.items || []).length
-      ),
-    }));
-    await recomputeAll(new Date(), resultUpdates(result));
-  });
+  } catch {}
 }
 
 /**
