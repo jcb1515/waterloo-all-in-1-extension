@@ -79,6 +79,8 @@ test("first applications read stores applications and emits no updates", async (
   assert.deepEqual(result.state.lastReadOk, ["applications"]);
   assert.equal(result.state.applications.length, 3);
   assert.equal(result.state.applications[0].status, "applied");
+  // The Job Status column is kept on the stored application.
+  assert.equal(result.state.applications[0].jobStatus, "Interview Selections Complete");
   assert.equal(result.state.applications[1].status, "not-selected");
   assert.deepEqual(result.updates, []);
   assert.equal(result.state.lastUpdates, undefined);
