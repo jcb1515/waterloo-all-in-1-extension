@@ -239,3 +239,16 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   list scope rather than over-removing.
 
 `parsers.js` stays a stub — there is no fetch tier to parse.
+
+## Probe / checklist
+
+`probe.js` (`probe(doc, href)` → `{page, counts, ok, hints}`) backs W1's
+"Check readers" screen — selector-hit **counts only**, never text, names,
+ids or addresses. Page kinds mirror `extractFor`'s view split:
+`gmail-list`/`gmail-message`/`outlook-list`/`outlook-message` (plus
+`-other` for a known host on a non-mail path, `unknown` for anything else).
+`ok` needs the selectors each view actually parses (list: rows + subjects;
+message: messages + a body). `account` counts 1 when the signed-in address
+was detected (compare-only, never emitted). `CHECKLIST` lists the pages a
+user should open — `{id, label, how, page}` where `page` is the probe page
+kind that ticks the item.

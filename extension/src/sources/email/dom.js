@@ -85,7 +85,7 @@ const MEET_LINK =
 const GOOGLE_REDIRECT = /^https?:\/\/www\.google\.com\/url\?/i;
 
 /** Meeting/co-op hrefs under el, Google redirect wrappers unwrapped. */
-function linksOf(el) {
+export function linksOf(el) {
   /** @type {string[]} */
   const out = [];
   for (const a of (el && el.querySelectorAll("a[href]")) || []) {
@@ -191,7 +191,7 @@ const linesOf = (el) =>
  * Returns {whenText, title?, where?, organizer?} or null.
  * @param {any} doc @param {boolean} gmail
  */
-function inviteCard(doc, gmail) {
+export function inviteCard(doc, gmail) {
   const scope = (doc.querySelector && doc.querySelector(CARD.main)) || (gmail ? doc : null);
   if (!scope) return null;
   /** @type {any} */ let best = null;

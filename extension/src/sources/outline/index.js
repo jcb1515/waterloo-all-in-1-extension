@@ -21,7 +21,7 @@ import { parseSyllabusText } from "./syllabus.js";
 /** @typedef {import("../../core/contract.js").Adapter} Adapter */
 
 const ORIGIN = "https://outline.uwaterloo.ca";
-const LOGIN_WORDS = /duo|shibboleth|saml|oidc|adfs|idp\.uwaterloo|sign[ -]?in|log[ -]?in/i;
+export const LOGIN_WORDS = /duo|shibboleth|saml|oidc|adfs|idp\.uwaterloo|sign[ -]?in|log[ -]?in/i;
 
 /** True when a FetchResult looks like an SSO login shell, not an outline. */
 export function isLoginShell(res) {
