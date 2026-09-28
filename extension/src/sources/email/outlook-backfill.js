@@ -53,38 +53,6 @@ export function outlookToken(values, nowMs) {
   return best ? best.secret : null;
 }
 
-/** @param {string} iso */
-const encIso = (iso) => encodeURIComponent(iso);
-
-/**
- * The folder-list request path for one pass.
- * @param {string} folder "inbox"|"sent"
- * @param {{since?: string|null, lookbackDays: number}} plan
- * @param {Date|number|string} now
- */
-export function outlookListPath(folder, plan, now) {
-  const sent = folder === "sent";
-  const stamp = sent ? "SentDateTime" : "ReceivedDateTime";
-  const select = sent
-    ? "Id,SentDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients"
-    : "Id,ReceivedDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients";
-  /** @type {string} */
-  let filter;
-  const since = plan && plan.since && Date.parse(String(plan.since));
-  if (Number.isFinite(since)) {
-    filter = `${stamp} gt ${new Date(Number(since)).toISOString()}`;
-  } else {
-    const days = (plan && plan.lookbackDays) || 30;
-    const base = new Date(now || Date.now()).getTime() - days * 86400000;
-    filter = `${stamp} ge ${new Date(base).toISOString()}`;
-  }
-  return (
-    `/api/v2.0/me/mailfolders/${sent ? "sentitems" : "inbox"}/messages` +
-    `?$top=50&$select=${select}&$filter=${encIso(filter)}` +
-    `&$orderby=${encodeURIComponent(`${stamp} desc`)}&$count=true`
-  );
-}
-
 /** The single-message body path. @param {string} id */
 export function outlookBodyPath(id) {
   return `/api/v2.0/me/messages/${encodeURIComponent(id)}?$select=Body,IsRead`;
@@ -138,6 +106,23 @@ export function outlookMsg(m, sent, acct = "") {
   };
 }
 
+/**
+ * The folder-list request path for one pass: newest N rows, no date filter.
+ * @param {string} folder "inbox"|"sent"
+ */
+export function outlookListPath(folder) {
+  const sent = folder === "sent";
+  const stamp = sent ? "SentDateTime" : "ReceivedDateTime";
+  const select = sent
+    ? "Id,SentDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients"
+    : "Id,ReceivedDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients";
+  return (
+    `/api/v2.0/me/mailfolders/${sent ? "sentitems" : "inbox"}/messages` +
+    `?$top=50&$select=${select}` +
+    `&$orderby=${encodeURIComponent(`${stamp} desc`)}&$count=true`
+  );
+}
+
 const H = (/** @type {string} */ token) => ({
   Authorization: `Bearer ${token}`,
   Accept: "application/json",
@@ -161,6 +146,7 @@ function bodyLinks(/** @type {string} */ text) {
  */
 export const outlookBackfill = {
   provider: "outlook",
+  skipReason: "no-token",
 
   /** @param {any} settings */
   folders(settings) {
@@ -206,9 +192,7 @@ export const outlookBackfill = {
       }
     }
     const path =
-      typeof cursor === "string" && cursor
-        ? cursor
-        : outlookListPath(folder, plan, env.now || new Date());
+      typeof cursor === "string" && cursor ? cursor : outlookListPath(folder);
     /** @type {any} */
     let res;
     try {
@@ -237,9 +221,15 @@ export const outlookBackfill = {
     const messages = data.value
       .map((/** @type {any} */ m) => outlookMsg(m, sent, ctx.acct))
       .filter((/** @type {any} */ m) => m.key);
+    // Newest N rows only: inbox follows plan.count (50/100/200), the sent
+    // pass is capped at one page (50) — it only closes reply tasks.
+    const seen = (ctx.seen && ctx.seen[folder]) || 0;
+    ctx.seen = { ...(ctx.seen || {}), [folder]: seen + messages.length };
+    const target = sent ? 50 : (plan && plan.count) || 100;
+    const next = outlookNextPath(data["@odata.nextLink"]);
     return {
       messages,
-      nextCursor: outlookNextPath(data["@odata.nextLink"]),
+      nextCursor: next && ctx.seen[folder] < target ? next : null,
     };
   },
 

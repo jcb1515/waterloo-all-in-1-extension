@@ -8,16 +8,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseHTML } from "linkedom";
-import adapter, {
-  startMailScan,
-  stopMailScan,
-} from "../../extension/src/sources/email/index.js";
+import adapter from "../../extension/src/sources/email/index.js";
 import { extractFor, parseListLabel } from "../../extension/src/sources/email/dom.js";
 import { itemsFromMessage } from "../../extension/src/sources/email/extract.js";
-import {
-  GMAIL_SCAN_QUERY,
-  OUTLOOK_SCAN_QUERY,
-} from "../../extension/src/sources/email/rules.js";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "email");
@@ -436,56 +429,6 @@ test("gmail #search hash: query is folder 'search', never the id", () => {
   const list = extractFor(document, "https://mail.google.com/mail/u/0/#search/filename%3Aics");
   assert.equal(list.view, "list");
   assert.equal(list.folder, "search");
-});
-
-test("guided scan: deeplink, queueing, scanned bookkeeping", async () => {
-  const started = startMailScan({}, { provider: "gmail", now: NOW });
-  assert.equal(
-    started.url,
-    "https://mail.google.com/mail/u/0/#search/" + encodeURIComponent(GMAIL_SCAN_QUERY(60)),
-  );
-  assert.equal(started.state.scan.provider, "gmail");
-
-  const rows = [
-    msg({ key: "s1", subject: "Invitation: A" }),
-    msg({ key: "s2", subject: "Invitation: B" }),
-    msg({ key: "s3", subject: "Invitation: C" }),
-  ];
-  const res1 = await adapter.observe.parse(
-    payload("gmail", wrap("gmail", rows, "list", "search"), {
-      url: "https://mail.google.com/mail/u/0/#search/q",
-    }),
-    ctx({}, { state: { ...started.state, scanned: { s3: "t" } } }),
-  );
-  assert.deepEqual(res1.state.scanQueue.map((q) => q.key), ["s1", "s2"]);
-  assert.equal(res1.state.scanQueue[0].url, "https://mail.google.com/mail/u/0/#all/s1");
-
-  // Opening a queued thread under "archive" still yields its invite while a
-  // scan is active; the key leaves the queue and is marked scanned.
-  const inv = msg({ key: "s1", subject: GCAL, links: ["https://meet.google.com/abc-defg-hij"] });
-  const res2 = await adapter.observe.parse(
-    payload("gmail", wrap("gmail", [inv], "message", "archive")),
-    ctx({}, { state: res1.state }),
-  );
-  assert.equal(res2.items.length, 1);
-  assert.deepEqual(res2.state.scanQueue.map((q) => q.key), ["s2"]);
-  assert.ok(res2.state.scanned.s1);
-
-  // No active scan -> archive is filtered, nothing is produced.
-  const res3 = await adapter.observe.parse(
-    payload("gmail", wrap("gmail", [inv], "message", "archive")),
-    ctx({}, { state: {} }),
-  );
-  assert.equal(res3.items.length, 0);
-
-  const stopped = stopMailScan(res2.state);
-  assert.equal(stopped.scan, undefined);
-  assert.equal(stopped.scanQueue, undefined);
-  assert.ok(stopped.scanned.s1);
-
-  const o = startMailScan({}, { provider: "outlook", now: NOW });
-  assert.equal(o.url, null);
-  assert.equal(o.query, OUTLOOK_SCAN_QUERY);
 });
 
 test("DOM: outlook list and message views", () => {

@@ -19,6 +19,10 @@ import { gcalExtract, gcalGate } from "./dom.js";
 import { GCAL } from "./selectors.js";
 
 (() => {
+  // Re-injected by W1 on install/update/startup — the second copy returns.
+  const g = /** @type {any} */ (globalThis);
+  if (g.__wa1_gcal) return;
+  g.__wa1_gcal = true;
   if (location.hostname !== "calendar.google.com") return;
 
   const DEBOUNCE_MS = 2000;

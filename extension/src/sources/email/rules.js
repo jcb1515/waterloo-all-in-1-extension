@@ -135,14 +135,6 @@ export function normCardWhen(s) {
   return t;
 }
 
-/* ---- guided scan ---------------------------------------------------- */
-
-/** @param {number} days */
-export const GMAIL_SCAN_QUERY = (days) =>
-  `(filename:ics OR subject:(invitation OR invite OR invited OR meeting OR interview OR rsvp)) newer_than:${days}d`;
-export const OUTLOOK_SCAN_QUERY =
-  "invitation OR invite OR invited OR meeting OR interview OR rsvp";
-
 /** Words that make a mail date-worthy (word-bounded; multi-word ok). */
 export const KEYWORDS = [
   "interview",

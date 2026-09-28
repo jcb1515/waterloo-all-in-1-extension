@@ -1,22 +1,23 @@
 // @ts-check
 /*
-  Gmail backfill acquisition. Two request kinds, both same-origin GETs with
-  the page's own cookies:
+  Gmail mail read. Two acquisition paths, both read-only:
 
-    - list pages come from a hidden same-origin iframe pointed at
-      `/mail/u/<n>/#search/<encoded query>` (paging via `/p2`, `/p3`…). The
-      rendered `tr.zA` rows are parsed by the SAME extractFor() path the
-      passive reader uses, so keys/subjects/previews/senders/receivedAt are
-      identical. Unread rows carry the `zE` class; `data-legacy-thread-id`
-      and `data-legacy-last-message-id` feed the Atom threadMap.
+    - the list comes from the OPEN TAB's own inbox DOM — the same
+      extractFor() list path the passive reader uses, so keys/subjects/
+      previews/senders/receivedAt are identical. The tab must show the
+      first inbox page ("#inbox", not "#inbox/p2" or a thread id); runs are
+      gated on that by content.js and again by impl.skipReason below.
+      `tr.zA` rows' `data-legacy-thread-id` / `data-legacy-last-message-id`
+      feed the Atom threadMap, and the `zE` class marks unread rows.
     - bodies come from `GET /mail/u/<n>/?view=pt&search=all&th=<threadHex>`,
-      the rendered print view (no `ik` needed — `view=om` is NOT used).
+      the rendered print view (no `ik` needed — `view=om` is NOT used),
+      fetched only for needsBody candidates under the shared rate cap.
 
-  Nothing here changes read state, navigates a user tab, or posts to the
-  page. The iframe is ours and is removed when the round ends.
+  Nothing here changes read state, navigates or focuses the user tab, or
+  posts to the page. There is no iframe: framing Gmail on the same origin
+  syncs the top URL hash, which is a user-visible navigation.
 */
 
-import { BF_MAX_PAGES } from "./backfill.js";
 import {
   accountEmail,
   extractFor,
@@ -27,82 +28,16 @@ import {
 import { QUOTE_SEL } from "./selectors.js";
 import { extractDates } from "../../lib/textdates/index.js";
 
-const SETTLE_MS = 1500;
-const POLL_MS = 300;
-const PAGE_DEADLINE_MS = 45000;
-const QUIET_PAGE_MS = 9000; // an empty result set still counts as settled
 const BODY_CAP = 20000;
+const LIST_CAP = 50; // the first inbox page
 
 const textOf = (/** @type {any} */ el) =>
   String((el && el.textContent) || "").replace(/\s+/g, " ").trim();
 const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 
-/**
- * The list query for one folder pass.
- * @param {string} folder "inbox"|"sent"
- * @param {{since?: string|null, lookbackDays: number}} plan
- */
-export function gmailListQuery(folder, plan) {
-  const box = folder === "sent" ? "in:sent" : "in:inbox";
-  if (plan && plan.since) {
-    const t = Date.parse(String(plan.since));
-    if (Number.isFinite(t)) return `${box} after:${Math.floor(t / 1000)}`;
-  }
-  return `${box} newer_than:${(plan && plan.lookbackDays) || 30}d`;
-}
-
-/** The hidden-iframe list URL for one search page (1-based pages). */
-export function gmailSearchPath(account, query, page = 1) {
-  return `/mail/u/${account}/#search/${encodeURIComponent(query)}${page > 1 ? `/p${page}` : ""}`;
-}
-
 /** The print-view body URL for a thread's legacy id. */
 export function gmailPrintPath(account, threadId) {
   return `/mail/u/${account}/?view=pt&search=all&th=${encodeURIComponent(threadId)}`;
-}
-
-/**
- * Wait until the iframe's search page has rendered and the row count is
- * stable (~1.5 s). Returns the document, or null on timeout/freeze.
- * @param {any} env @param {any} frame
- */
-async function settleList(env, frame) {
-  const settleMs = env.settleMs ?? SETTLE_MS;
-  const pollMs = env.pollMs ?? POLL_MS;
-  const quietMs = env.quietMs ?? QUIET_PAGE_MS;
-  const deadline = env.pageDeadlineMs ?? PAGE_DEADLINE_MS;
-  const end = Date.now() + deadline;
-  let last = -1;
-  let changedAt = Date.now();
-  const navAt = Date.now();
-  for (;;) {
-    if (env.isFrozen && env.isFrozen()) return null;
-    if (Date.now() >= end) return null;
-    /** @type {any} */
-    let doc = null;
-    /** @type {string} */
-    let hash = "";
-    try {
-      doc = frame.doc();
-      hash = String(frame.href() || "");
-    } catch {
-      doc = null;
-    }
-    const rows =
-      doc && doc.querySelectorAll ? doc.querySelectorAll("tr.zA").length : 0;
-    if (rows !== last) {
-      last = rows;
-      changedAt = Date.now();
-    } else if (
-      /#search\//.test(hash) &&
-      Date.now() - changedAt >= settleMs &&
-      (last > 0 || Date.now() - navAt >= quietMs)
-    ) {
-      return doc;
-    }
-    // eslint-disable-next-line no-await-in-loop
-    await env.sleep(pollMs);
-  }
 }
 
 const EMAIL_RE_G = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
@@ -252,72 +187,52 @@ export function printViewParts(doc, { acct = "", now } = {}) {
 
 /**
  * The Gmail impl for backfillRound(). env supplies: account (the /u/<n>/
- * index), makeFrame(url) -> {navigate(url), doc(), href(), remove()},
- * parseHtml(text), sleep(ms), pageUrl.
+ * index), doc() -> the tab's live Document, onInbox() -> bool, parseHtml,
+ * sleep, pageUrl.
  */
 export const gmailBackfill = {
   provider: "gmail",
+  skipReason: "not-on-page",
 
-  /** @param {any} settings */
-  folders(settings) {
-    const f = Array.isArray(settings.folders) ? settings.folders : ["inbox"];
-    const out = ["inbox"];
-    if (f.some((x) => String(x).toLowerCase() === "sent")) out.push("sent");
-    return out;
+  /** @param {any} _settings — the read is the tab's own inbox page. */
+  folders(_settings) {
+    return ["inbox"];
   },
 
-  /** Create the hidden iframe once per round. */
+  /** The tab must be showing the inbox's first page; nothing else opens. */
   open(env) {
-    if (typeof env.makeFrame !== "function") return null;
-    const frame = env.makeFrame("about:blank");
-    return frame ? { frame, acct: "" } : null;
+    if (env.onInbox && !env.onInbox()) return null;
+    return { acct: "" };
   },
 
-  async listPage(env, { ctx, folder, cursor, plan, slot }) {
-    const page = Number(cursor) || 1;
-    const query = gmailListQuery(folder, plan);
-    const url = gmailSearchPath(env.account || 0, query, page);
-    await slot();
-    ctx.frame.navigate(url);
-    const doc = await settleList(env, ctx.frame);
+  /** One page only: the inbox list as rendered in this tab. */
+  async listPage(env, { ctx }) {
+    const doc = typeof env.doc === "function" ? env.doc() : null;
     if (!doc || !doc.querySelectorAll) return null;
     if (!ctx.acct) ctx.acct = accountEmail(doc);
-    /** @type {string} */
-    let href = "";
-    try {
-      href = String(ctx.frame.href() || "");
-    } catch {
-      href = "";
-    }
-    const ext = extractFor(doc, href || `https://mail.google.com${url}`, {
-      now: env.now,
-    });
+    const ext = extractFor(doc, env.pageUrl || "", { now: env.now });
     /** @type {Record<string, string>} */
     const threadMap = {};
-    let unreadCount = 0;
-    for (const tr of doc.querySelectorAll("tr.zA")) {
-      const th = tr.getAttribute("data-legacy-thread-id");
-      const lm = tr.getAttribute("data-legacy-last-message-id");
-      if (th && lm && lm !== th) threadMap[lm] = th;
-      if (/\bzE\b/.test(String(tr.className || ""))) unreadCount++;
-    }
-    const messages = (ext.messages || []).map((m) => ({ ...m }));
-    if (unreadCount) {
-      // Rows the list marks unread keep that flag for the body's gate.
+    const unread = new Set();
+    {
+      const rows = doc.querySelectorAll("tr.zA");
+      for (const tr of rows) {
+        const th = tr.getAttribute("data-legacy-thread-id");
+        const lm = tr.getAttribute("data-legacy-last-message-id");
+        if (th && lm && lm !== th) threadMap[lm] = th;
+      }
       let i = 0;
-      for (const tr of doc.querySelectorAll("tr.zA")) {
+      const messages = (ext.messages || []).slice(0, LIST_CAP);
+      for (const tr of rows) {
         if (i >= messages.length) break;
-        if (/\bzE\b/.test(String(tr.className || ""))) messages[i].unread = true;
+        if (/\bzE\b/.test(String(tr.className || ""))) unread.add(i);
         i++;
       }
+      messages.forEach((m, i) => {
+        if (unread.has(i)) m.unread = true;
+      });
+      return { messages, threadMap, nextCursor: null };
     }
-    return {
-      messages,
-      threadMap,
-      // Keep paging while a full page came back — the run-level page cap
-      // (<=10) is enforced by the orchestrator.
-      nextCursor: messages.length >= 50 ? page + 1 : null,
-    };
   },
 
   async fetchBody(env, { ctx, msg, request }) {
@@ -373,13 +288,7 @@ export const gmailBackfill = {
     };
   },
 
-  close(env, ctx) {
-    try {
-      ctx.frame.remove();
-    } catch {
-      /* already gone */
-    }
+  close() {
+    /* nothing opened — the tab's own DOM needs no cleanup */
   },
 };
-
-export { BF_MAX_PAGES };

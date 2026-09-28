@@ -242,6 +242,10 @@ async function runRound(env, round) {
 }
 
 (() => {
+  // Re-injected by W1 on install/update/startup — the second copy returns.
+  const g = /** @type {any} */ (globalThis);
+  if (g.__wa1_outline) return;
+  g.__wa1_outline = true;
   // The fetch round runs on any outline.uwaterloo.ca tab; the snapshotter
   // only on /viewer/view/ pages (the real outlines).
   if (typeof location === "undefined" || location.hostname !== "outline.uwaterloo.ca") {
