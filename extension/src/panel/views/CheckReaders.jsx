@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "preact/hooks";
 import { checklistFor, CHECK_SOURCES } from "../../sources/probes.js";
-import { IS_PREVIEW, send } from "../data.js";
+import { IS_PREVIEW, send, query } from "../data.js";
 import { UI } from "../../core/messages.js";
 import { ClipboardCheckIcon } from "../../ui/icons.jsx";
 
@@ -56,6 +56,8 @@ export function CheckReaders({ state, actions, now }) {
     0
   );
   const rowCount = sources.reduce((n, s) => n + s.rows.length, 0);
+  /** ?saw=<source>:<rowId> pre-opens that row's "What it saw" (previews). */
+  const saw = query.get("saw") || "";
 
   const downloadReport = async () => {
     const day = new Date().toISOString().slice(0, 10);
@@ -80,7 +82,7 @@ export function CheckReaders({ state, actions, now }) {
         passing.
       </p>
       {sources.map((s) => (
-        <SourceCheck key={s.id} meta={s} rows={s.rows} actions={actions} />
+        <SourceCheck key={s.id} meta={s} rows={s.rows} actions={actions} openSaw={saw} />
       ))}
       <div class="source-actions">
         <button type="button" class="btn btn-sm" onClick={downloadReport}>
@@ -95,7 +97,7 @@ export function CheckReaders({ state, actions, now }) {
  * One source's checklist card plus its "Something missed?" capture.
  * @param {{meta: any, rows: any[], actions: any}} p
  */
-function SourceCheck({ meta, rows, actions }) {
+function SourceCheck({ meta, rows, actions, openSaw }) {
   const [note, setNote] = useState("");
   const [saved, setSaved] = useState(false);
   const [missOpen, setMissOpen] = useState(false);
@@ -146,7 +148,7 @@ function SourceCheck({ meta, rows, actions }) {
       </div>
       <ul class="check-rows">
         {rows.map((r) => (
-          <CheckRow key={r.row.id} result={r} />
+          <CheckRow key={r.row.id} result={r} open={openSaw === `${meta.id}:${r.row.id}`} />
         ))}
       </ul>
       <div class="check-missed">
@@ -177,9 +179,9 @@ function SourceCheck({ meta, rows, actions }) {
 }
 
 /**
- * @param {{result: any}} p
+ * @param {{result: any, open?: boolean}} p
  */
-function CheckRow({ result }) {
+function CheckRow({ result, open }) {
   const { row, status, text, counts, hints } = result;
   const s = STATUS_ICON[status] || STATUS_ICON.unchecked;
   const countsList = Object.entries(counts || {});
@@ -203,7 +205,7 @@ function CheckRow({ result }) {
         </div>
       </div>
       {countsList.length ? (
-        <details class="check-saw">
+        <details class="check-saw" open={open || undefined}>
           <summary>What it saw</summary>
           <ul class="check-counts">
             {countsList.map(([k, v]) => (

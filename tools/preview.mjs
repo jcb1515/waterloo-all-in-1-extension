@@ -139,6 +139,9 @@ const SHOTS_POST3 = [
   { name: "options-general-tabs-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#panel-tabs" },
   { name: "options-sources-mailscan-light", url: "/src/options/options.html?preview=1&mailscan=outlook#sources", size: [1280, 900] },
   { name: "panel-sources-mailscan-light", url: "/src/panel/panel.html?preview=1&mailscan=1&view=sources", size: [400, 900] },
+  { name: "options-about-health-light", url: "/src/options/options.html?preview=1&health=1#about", size: [1280, 900], scroll: "#health" },
+  { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=waterlooworks:applications", size: [400, 900] },
+  { name: "panel-check-readers-dark", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=waterlooworks:applications", size: [400, 900], dark: true },
 ];
 
 const SHOTS =

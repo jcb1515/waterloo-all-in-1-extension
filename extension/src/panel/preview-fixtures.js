@@ -1182,5 +1182,46 @@ export function previewState(nowD = new Date(), variants = {}) {
   // exactly what recompute would store.
   const todos = deriveTodos({ items, applications, userState, settings, now: nowD });
 
-  return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt, projects };
+  // "Check readers" preview data: a deliberately mixed set — WaterlooWorks
+  // reads OK, Discord's channel probe failed, everything else is a mix of
+  // readStats-satisfied and not-yet-checked rows.
+  const probes = {
+    waterlooworks: {
+      applications: {
+        counts: { listRows: 25, interviews: 3, deadlines: 2 },
+        ok: true,
+        hints: [],
+        at: iso(now - 4 * MIN),
+      },
+      interviews: {
+        counts: { rows: 6, datetimes: 6, employers: 4 },
+        ok: true,
+        hints: [],
+        at: iso(now - 6 * MIN),
+      },
+    },
+    discord: {
+      channel: {
+        counts: { guildRail: 4, channelRows: 0, categories: 0, unreadChannels: 0, messageRows: 0, messageTimes: 0 },
+        ok: false,
+        hints: ["Scroll the channel list so channels load.", "Open a channel with recent messages."],
+        at: iso(now - 3 * MIN),
+      },
+    },
+    outlook: {
+      "outlook-list": {
+        counts: { listRows: 18, unread: 3, datedRows: 5 },
+        ok: true,
+        hints: [],
+        at: iso(now - 8 * MIN),
+      },
+    },
+  };
+  const readStats = [
+    { source: "learn", at: iso(now - 12 * MIN), kind: "sync", scope: "learn", items: 30 },
+    { source: "waterlooworks", at: iso(now - 5 * MIN), kind: "observe", path: "/applications", scope: "waterlooworks", items: 3 },
+    { source: "discord", at: iso(now - 2 * MIN), kind: "observe", path: "/api/channels/<id>", scope: "discord", items: 2 },
+  ];
+
+  return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt, projects, probes, readStats };
 }
