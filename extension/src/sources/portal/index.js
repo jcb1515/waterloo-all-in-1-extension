@@ -128,12 +128,32 @@ const adapter = {
 
       if (/student\/CourseSchedule\/?$/i.test(path)) {
         scope = "portal:schedule";
-        const r = mapSchedule(body.data || [], { scope, at, instructors: state.instructors });
+        const r = mapSchedule(body.data || [], {
+          scope,
+          at,
+          instructors: state.instructors,
+          examIndex: state.examIndex,
+        });
         items = r.items;
+        state.tstIndex = r.tstIndex;
         for (const p of r.patches) mergeCourse(state.courses, p);
       } else if (/student\/ExamSchedule\/?$/i.test(path)) {
         scope = "portal:exams";
-        items = mapExams(body.data || [], { scope, at });
+        // The term's exam period (from a TermInfo read, else adapter ctx) is
+        // what lets an unscheduled final become a tentative exam window.
+        const terms = { ...state.terms };
+        for (const t of ctx.terms || []) {
+          if (t && t.termCode != null && terms[t.termCode] == null) terms[t.termCode] = t;
+        }
+        const r = mapExams(body.data || [], {
+          scope,
+          at,
+          terms,
+          courses: state.courses,
+          tstIndex: state.tstIndex,
+        });
+        items = r.items;
+        state.examIndex = r.examIndex;
       } else if (/student\/CourseEnrollments\//i.test(path)) {
         scope = "portal:enrollments";
         const rows = Array.isArray(body.data)

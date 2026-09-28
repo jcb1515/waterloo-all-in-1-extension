@@ -16,6 +16,9 @@
     "table",
     // label/value fallbacks: dl blocks and .label/.value-style pairs
     "dl", ".label", ".control-label", ".field-label",
+    // dashboard: day headings sit in <strong> above each schedule table, and
+    // the "Rank and Match" notice lives in .orbis-posting-actions
+    "strong", ".orbis-posting-actions",
   ].join(",");
   const loadedAt = Date.now();
   /** @type {string|null} */

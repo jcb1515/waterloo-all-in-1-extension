@@ -302,6 +302,130 @@ export function interviewDetailItems(detail, now) {
 }
 
 /**
+ * Dashboard "Your Upcoming Schedule" rows -> Items. Interview rows reuse the
+ * `interview:<jobId>` id so they collapse onto list/detail items for the
+ * same job (cachedItems keeps the richer of the two); other entry types are
+ * plain events.
+ * @param {any[]} rows  parseDashboard schedule rows
+ * @param {any[]} applications  state.applications, for employer enrichment
+ * @param {Date} now
+ * @returns {Item[]}
+ */
+export function scheduleItems(rows, applications, now) {
+  const nowIso = iso(now);
+  const apps = arr(applications);
+  const used = new Set();
+  const items = [];
+  for (const row of arr(rows)) {
+    if (!row?.startAt) continue;
+    const employer = row.jobId
+      ? apps.find((app) => app?.jobId === row.jobId)?.employer || undefined
+      : undefined;
+    const isInterview = /\binterview\b/i.test(row.entryType || "") ||
+      /\binterview\b/i.test(row.name || "");
+    /** @type {string} */
+    let key;
+    /** @type {string} */
+    let type;
+    /** @type {string} */
+    let title;
+    if (isInterview) {
+      type = "interview";
+      title = row.jobTitle ? `Interview: ${row.jobTitle}` : "Interview";
+      key = row.jobId
+        ? `interview:${row.jobId}`
+        : `schedule-interview:${fnv(`${row.name || ""}|${row.startAt}`)}`;
+    } else {
+      type = "event";
+      title = String(row.name || "").trim() || "Appointment";
+      key = `schedule:${fnv(`${row.entryType || ""}|${row.name || ""}|${row.startAt}`)}`;
+    }
+    let id = itemId(SOURCE, key);
+    let n = 2;
+    while (used.has(id)) {
+      key = `${key}-${n++}`;
+      id = itemId(SOURCE, key);
+    }
+    used.add(id);
+    items.push({
+      id,
+      source: SOURCE,
+      type,
+      title,
+      org: employer,
+      startAt: row.startAt,
+      endAt: row.endAt || undefined,
+      status: cancelled(row.status) ? "cancelled" : "open",
+      confidence: "exact",
+      review: "auto",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      meta: {
+        jobId: row.jobId,
+        scheduleType: row.entryType,
+        status: row.status,
+        conflicts: row.conflicts,
+        facts: factsOf([
+          ["Employer", employer],
+          ["Job", row.jobTitle ? `${row.jobId} - ${row.jobTitle}` : row.jobId],
+          ["Type", row.entryType],
+          ["Status", row.status],
+        ]),
+      },
+      evidence: { method: "html" },
+    });
+  }
+  return items;
+}
+
+/**
+ * Dashboard "Upcoming Events / Workshops" rows -> event Items. The day comes
+ * from each table's colspan'd header, times from the row's range text.
+ * @param {any[]} rows  parseDashboard events rows
+ * @param {Date} now
+ * @returns {Item[]}
+ */
+export function dashboardEventItems(rows, now) {
+  const nowIso = iso(now);
+  const used = new Set();
+  const items = [];
+  for (const row of arr(rows)) {
+    if (!row?.startAt) continue;
+    /** @type {string} */
+    let key = `event:${fnv(`${row.category || ""}|${row.name || ""}|${row.startAt}`)}`;
+    let id = itemId(SOURCE, key);
+    let n = 2;
+    while (used.has(id)) {
+      key = `${key}-${n++}`;
+      id = itemId(SOURCE, key);
+    }
+    used.add(id);
+    items.push({
+      id,
+      source: SOURCE,
+      type: "event",
+      title: row.name || "Event",
+      org: row.category || undefined,
+      startAt: row.startAt,
+      endAt: row.endAt || undefined,
+      location: row.location || undefined,
+      status: cancelled(row.registration) ? "cancelled" : "open",
+      confidence: "exact",
+      review: "auto",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      meta: {
+        registrationStatus: row.registration,
+        facts: factsOf([
+          ["Category", row.category],
+          ["Registration", row.registration],
+          ["Location", row.location],
+        ]),
+      },
+    });
+  }
+  return items;
+}
+
+/**
  * @param {any[]} rows  parseEventRegistrations rows
  * @param {Date} now
  * @returns {Item[]}

@@ -35,6 +35,37 @@ import { normalizePath } from "../capture/redact.js";
 const MAX_CONCURRENT = 2;
 const MINUTE = 60 * 1000;
 
+// Hang guards: an offscreen parse that never answers must not freeze a
+// source's ingest queue, and a sync must not hold it forever. Mutated only
+// by __setTimeoutsForTest.
+let PARSE_TIMEOUT_MS = 30 * 1000;
+let SYNC_TIMEOUT_MS = 5 * MINUTE;
+
+/**
+ * Race `promise` against a `ms` timeout. The losing timer is cleared (and
+ * unref'd) so it can't hold the service worker — or a test process — alive.
+ * wa1Timeout marks the error so callers can tell a timeout from a throw.
+ */
+function withTimeout(promise, ms, message) {
+  /** @type {any} */
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => {
+      const e = /** @type {any} */ (new Error(message));
+      e.wa1Timeout = true;
+      reject(e);
+    }, ms);
+    if (typeof t.unref === "function") t.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
+/** @param {{parseMs?: number, syncMs?: number}} [t] */
+export function __setTimeoutsForTest(t = {}) {
+  if (t.parseMs != null) PARSE_TIMEOUT_MS = t.parseMs;
+  if (t.syncMs != null) SYNC_TIMEOUT_MS = t.syncMs;
+}
+
 /* --------------------------- pure helpers --------------------------- */
 
 /**
@@ -245,7 +276,10 @@ function makeCtx(adapter, settings, state, mv, extras) {
     })),
     fetch: t1Fetch,
     relay: relayFetch,
-    parseHtml,
+    // Offscreen parses answer over sendMessage — an unanswered one would
+    // hang the source's ingest queue forever, so cap it.
+    parseHtml: (a, b, opts) =>
+      withTimeout(parseHtml(a, b, opts), PARSE_TIMEOUT_MS, `parse timeout: ${adapter.id}`),
     textDates: extractDates,
     log: (message, data) =>
       appendLog(id, data === undefined ? String(message) : `${message} ${safeJson(data)}`),
@@ -271,12 +305,23 @@ function safeJson(v) {
   }
 }
 
-/** Call adapter.sync, converting a throw into an error SyncResult. */
+/** Call adapter.sync, converting a throw or a hang into an error SyncResult. */
 async function callSync(adapter, ctx) {
   try {
-    return await /** @type {any} */ (adapter).sync(ctx);
+    return await withTimeout(
+      /** @type {any} */ (adapter).sync(ctx),
+      SYNC_TIMEOUT_MS,
+      "sync timed out"
+    );
   } catch (e) {
     const err = /** @type {any} */ (e);
+    if (err && err.wa1Timeout) {
+      return {
+        items: [],
+        complete: false,
+        error: { code: "timeout", message: "sync timed out" },
+      };
+    }
     return {
       items: [],
       complete: false,
@@ -293,33 +338,21 @@ async function callSync(adapter, ctx) {
 async function doSync(adapter, settings, reason) {
   const id = adapter.id;
   const now = new Date();
-  const prevState = ((await getLocal("sourceState")) || {})[id];
-  const mv = await getMergedView();
-  const ctx = makeCtx(adapter, settings, prevState && prevState.state, mv, await adapterExtras(adapter.id));
-  const seenVersion = stateVersion(id);
-
-  // The adapter call stays outside the ingest queue so observes aren't
-  // blocked while it fetches.
-  let result = await callSync(adapter, ctx);
-
-  // The fold is queued with observes/captures: a slow sync that finishes
-  // after an observe re-reads the fresh raw and state before writing.
+  // The whole sync — reading prev state, the adapter call, the fold and the
+  // status writes — runs inside the source's ingest queue. A slow sync can
+  // never overwrite a newer observe, and an observe can't interleave
+  // mid-sync; only this source's queue waits on the adapter call.
   return ingest(id, async () => {
-    if (stateVersion(id) !== seenVersion) {
-      // ctx.state moved on while sync() ran (an observe wrote it). Re-run
-      // once against the fresh state so the result — including the adapter's
-      // private next-state — is derived from what is actually stored.
-      const curState = ((await getLocal("sourceState")) || {})[id];
-      const mv2 = await getMergedView();
-      const ctx2 = makeCtx(
-        adapter,
-        settings,
-        curState && curState.state,
-        mv2,
-        await adapterExtras(id)
-      );
-      result = await callSync(adapter, ctx2);
-    }
+    const prevState = ((await getLocal("sourceState")) || {})[id];
+    const mv = await getMergedView();
+    const ctx = makeCtx(
+      adapter,
+      settings,
+      prevState && prevState.state,
+      mv,
+      await adapterExtras(id)
+    );
+    const result = await callSync(adapter, ctx);
 
     const mv2 = await getMergedView();
     await setLocal(rawKey(id), applyResult(mv2.raws[id] || null, result, { mode: "sync" }));
@@ -329,7 +362,6 @@ async function doSync(adapter, settings, reason) {
       ...(cur || {}),
       [id]: nextSourceState((cur || {})[id], result, now, "sync", (rawItems.items || []).length),
     }));
-    bumpStateVersion(id);
     await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
     await recordReadStat({
       source: id,
@@ -369,22 +401,28 @@ function ingest(source, fn) {
   return run;
 }
 
-/**
- * Per-adapter write counter for sourceState. A long-running sync snapshots it
- * when building ctx.state; if it moved by fold time, the adapter's state is
- * stale and sync() is re-run once against the fresh one.
- */
-const stateVersions = new Map();
-const stateVersion = (/** @type {string} */ id) => stateVersions.get(id) || 0;
-const bumpStateVersion = (/** @type {string} */ id) =>
-  stateVersions.set(id, stateVersion(id) + 1);
-
 function ingestResult(source, result, scope) {
   return ingest(source, async () => {
-    const mv = await getMergedView();
-    const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope });
-    await setLocal(rawKey(source), raw);
-    await recomputeAll(new Date(), resultUpdates(result));
+    try {
+      const mv = await getMergedView();
+      const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope });
+      await setLocal(rawKey(source), raw);
+      await recomputeAll(new Date(), resultUpdates(result));
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      const msg = String((err && err.message) || err);
+      try {
+        await appendLog(source, `capture failed: ${msg}`);
+      } catch {}
+      try {
+        await recordReadStat({
+          source,
+          at: new Date().toISOString(),
+          kind: "capture",
+          error: msg,
+        });
+      } catch {}
+    }
   });
 }
 
@@ -399,56 +437,72 @@ export async function handleObserved(payload) {
   if (!adapter || typeof parse !== "function") return;
   const source = payload.source;
   return ingest(source, async () => {
-    const mv = await getMergedView();
-    const settings = await getSettings();
-    const st = ((await getLocal("sourceState")) || {})[adapter.id];
-    let result;
     try {
-      result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv, await adapterExtras(adapter.id)));
-    } catch (e) {
-      const err = /** @type {any} */ (e);
-      await appendLog(source, `observe failed: ${(err && err.message) || err}`);
+      const mv = await getMergedView();
+      const settings = await getSettings();
+      const st = ((await getLocal("sourceState")) || {})[adapter.id];
+      let result;
+      try {
+        result = await parse(payload, makeCtx(adapter, settings, st && st.state, mv, await adapterExtras(adapter.id)));
+      } catch (e) {
+        await failObserve(source, payload, e);
+        return;
+      }
+      if (!result || !Array.isArray(result.items)) return;
+      const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
+      await setLocal(rawKey(source), raw);
       await recordReadStat({
         source,
         at: new Date().toISOString(),
         kind: "observe",
         path: statPath(payload.url),
-        error: String((err && err.message) || err),
+        scope: result.scope,
+        items: result.items.length,
       });
-      return;
+      // The adapter's private state moves forward on every observe too, so its
+      // next diff/compares start from this read; the visible status fields move
+      // only per nextSourceState's rules.
+      await mutateKey("sourceState", (cur) => ({
+        ...(cur || {}),
+        [adapter.id]: nextSourceState(
+          (cur || {})[adapter.id],
+          result,
+          new Date(),
+          "observe",
+          (raw.items || []).length
+        ),
+      }));
+      await recomputeAll(new Date(), resultUpdates(result));
+    } catch (e) {
+      // Anything outside the parse — storage reads, folds, the recompute —
+      // must still leave a trace: a swallowed error looks exactly like a
+      // missing observe in the user's storage.
+      await failObserve(source, payload, e);
     }
-    if (!result || !Array.isArray(result.items)) return;
-    const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
-    await setLocal(rawKey(source), raw);
+  });
+}
+
+/** Log + readStat for a failed observe, each best-effort so a dead store can't rethrow. */
+async function failObserve(source, payload, e) {
+  const err = /** @type {any} */ (e);
+  const msg = String((err && err.message) || err);
+  try {
+    await appendLog(source, `observe failed: ${msg}`);
+  } catch {}
+  try {
     await recordReadStat({
       source,
       at: new Date().toISOString(),
       kind: "observe",
-      path: statPath(payload.url),
-      scope: result.scope,
-      items: result.items.length,
+      path: statPath(payload && payload.url),
+      error: msg,
     });
-    // The adapter's private state moves forward on every observe too, so its
-    // next diff/compares start from this read; the visible status fields move
-    // only per nextSourceState's rules.
-    await mutateKey("sourceState", (cur) => ({
-      ...(cur || {}),
-      [adapter.id]: nextSourceState(
-        (cur || {})[adapter.id],
-        result,
-        new Date(),
-        "observe",
-        (raw.items || []).length
-      ),
-    }));
-    bumpStateVersion(adapter.id);
-    await recomputeAll(new Date(), resultUpdates(result));
-  });
+  } catch {}
 }
 
 /**
- * Run `fn` over a source's stored adapter state inside its ingest queue, then
- * save. Bumps the state version so an in-flight sync re-runs on the result.
+ * Run `fn` over a source's stored adapter state inside its ingest queue,
+ * then save.
  * @param {string} sourceId
  * @param {(state: any) => any} fn returns the next adapter state
  */
@@ -460,7 +514,6 @@ export async function mutateSourceState(sourceId, fn) {
       const prev = (cur || {})[id] || {};
       return { ...(cur || {}), [id]: { ...prev, state: fn(prev.state || {}) } };
     });
-    bumpStateVersion(id);
   });
 }
 
@@ -675,17 +728,20 @@ export async function projectDelete(id) {
 
 /**
  * wa1:clear-source — drop a source's raw data and state, then recompute.
+ * Runs inside the source's ingest queue so a clear can't be undone by an
+ * in-flight sync or observe landing afterwards.
  * @param {string} source
  */
 export async function clearSource(source) {
-  await chrome.storage.local.remove([rawKey(source)]);
-  await mutateKey("sourceState", (cur) => {
-    const all = { ...(cur || {}) };
-    delete all[source];
-    return all;
+  return ingest(source, async () => {
+    await chrome.storage.local.remove([rawKey(source)]);
+    await mutateKey("sourceState", (cur) => {
+      const all = { ...(cur || {}) };
+      delete all[source];
+      return all;
+    });
+    await recomputeAll(new Date());
   });
-  bumpStateVersion(source);
-  await recomputeAll(new Date());
 }
 
 export { patchUserState };

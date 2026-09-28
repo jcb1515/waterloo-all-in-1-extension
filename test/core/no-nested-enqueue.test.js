@@ -152,46 +152,62 @@ for (const f of files) {
 }
 
 // A function "enqueues" when its body calls enqueue() or another function
-// that does. enqueue is the shared write queue's serializer (core/store.js);
-// discovery-store.js has a same-named local on its own queue — flagging a
-// shared-queue arg that calls one of its callers would still be correct.
+// that does — same fixpoint for the per-source ingest queue (scheduler.js).
 // Property calls (foo.bar()) are skipped — `chrome.alarms.create` is not the
 // `create` in some panel handler, and deps objects can't be resolved.
 const callsBare = (/** @type {string} */ text, /** @type {string} */ name) =>
   new RegExp(`(?<!\\.)\\b${name}\\s*\\(`).test(text);
 
-const enqueuing = new Set(["enqueue"]);
-let grew = true;
-while (grew) {
-  grew = false;
-  for (const [name, body] of allDefs) {
-    if (enqueuing.has(name)) continue;
-    for (const e of enqueuing) {
-      if (callsBare(body, e)) {
-        enqueuing.add(name);
-        grew = true;
-        break;
-      }
-    }
-  }
-}
-
-test("no enqueue() argument calls a function that itself enqueues", () => {
-  const violations = [];
-  for (const f of files) {
-    const s = /** @type {string} */ (strippedByFile.get(f));
-    for (const m of s.matchAll(/(?<!\.)\benqueue\s*\(/g)) {
-      const argEnd = matchBalanced(s, m.index + m[0].length - 1);
-      const arg = s.slice(m.index + m[0].length - 1, argEnd);
-      for (const e of enqueuing) {
-        if (callsBare(arg, e)) {
-          const line = s.slice(0, m.index).split("\n").length;
-          violations.push(`${path.relative(SRC, f)}:${line} enqueue(...) calls ${e}()`);
+/** Fixpoint: seed names, then every def whose body bare-calls a set member. */
+function expandSet(seed) {
+  const set = new Set(seed);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [name, body] of allDefs) {
+      if (set.has(name)) continue;
+      for (const e of set) {
+        if (callsBare(body, e)) {
+          set.add(name);
+          grew = true;
+          break;
         }
       }
     }
   }
-  assert.deepEqual(violations, []);
+  return set;
+}
+
+const enqueuing = expandSet(["enqueue"]);
+const ingesting = expandSet(["ingest"]);
+
+/** every bare `call(` site whose argument bare-calls a set member → violation */
+function nestedViolations(callName, set) {
+  const violations = [];
+  for (const f of files) {
+    const s = /** @type {string} */ (strippedByFile.get(f));
+    for (const m of s.matchAll(new RegExp(`(?<!\\.)\\b${callName}\\s*\\(`, "g"))) {
+      const argEnd = matchBalanced(s, m.index + m[0].length - 1);
+      const arg = s.slice(m.index + m[0].length - 1, argEnd);
+      for (const e of set) {
+        if (callsBare(arg, e)) {
+          const line = s.slice(0, m.index).split("\n").length;
+          violations.push(`${path.relative(SRC, f)}:${line} ${callName}(...) calls ${e}()`);
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+test("no enqueue() argument calls a function that itself enqueues", () => {
+  assert.deepEqual(nestedViolations("enqueue", enqueuing), []);
+});
+
+test("no ingest() argument calls a function that itself ingests", () => {
+  // A nested ingest on the same source self-deadlocks exactly like a nested
+  // enqueue — the inner task waits on the outer's queue slot.
+  assert.deepEqual(nestedViolations("ingest", ingesting), []);
 });
 
 test("the enqueuing set found the known writers", () => {
@@ -208,5 +224,21 @@ test("the enqueuing set found the known writers", () => {
     "recordProbeResult",
   ]) {
     assert.ok(enqueuing.has(name), `${name} should be classified as enqueuing`);
+  }
+});
+
+test("the ingesting set found the known ingest callers", () => {
+  for (const name of [
+    "ingest",
+    "mutateSourceState",
+    "ingestResult",
+    "handleObserved",
+    "handleCapture",
+    "manualFold",
+    "projectMutate",
+    "doSync",
+    "clearSource",
+  ]) {
+    assert.ok(ingesting.has(name), `${name} should be classified as ingesting`);
   }
 });

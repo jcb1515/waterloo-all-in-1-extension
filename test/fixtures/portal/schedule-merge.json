@@ -1,0 +1,31 @@
+{
+  "meta": { "datetime": "2026-09-27T03:10:00Z", "errors": null, "message": null, "status": 200, "type": "success" },
+  "data": [
+    {
+      "subjectCode": "ECE",
+      "catalog": "150",
+      "componentCode": "TST",
+      "sectionCode": "101",
+      "courseTitle": "Fundamentals of Engineering",
+      "startDate": "2026-10-22T14:30:00",
+      "endDate": "2026-10-22T16:20:00",
+      "roomDescription": "RCH 301",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    },
+    {
+      "subjectCode": "ECE",
+      "catalog": "105",
+      "componentCode": "LEC",
+      "sectionCode": "001",
+      "courseTitle": "Electrical Circuits",
+      "startDate": "0001-01-01T00:00:00",
+      "endDate": "0001-01-01T00:00:00",
+      "roomDescription": "STC 0020",
+      "instructorFirstname": null,
+      "instructorLastname": null,
+      "instructorUserid": null
+    }
+  ]
+}
