@@ -17,6 +17,8 @@ const PAST_WINDOW = 60 * DAY; // anchors older than 60 days are dropped
 const DETAILS_LIMIT = 300;
 
 const CLASS_TYPES = new Set(["class", "tutorial", "lab"]);
+/** Task categories that are to-dos (answer/book), not calendar events. */
+const TODO_TASK_CATEGORIES = new Set(["reply", "book-call"]);
 
 const MAX_FACTS = 12;
 const FACT_LABEL_MAX = 40;
@@ -99,6 +101,10 @@ function toEvent(it, us, cal, nowMs) {
   if (CLASS_TYPES.has(it.type) && it.startAt && inc.classes === false) return null;
   if (it.confidence === "tentative" && inc.tentative === false) return null;
   if (it.type === "term-date" && inc.termDates === false) return null;
+  // Reply / book-a-call to-dos (email, Discord) are to-dos, not events: they
+  // reach the feed only when to-dos are opted in (include.todos, which the
+  // publisher sets from settings.todos.includeInCalendar).
+  if (it.type === "task" && TODO_TASK_CATEGORIES.has(it.category) && inc.todos !== true) return null;
 
   const dueMs = it.dueAt ? Date.parse(it.dueAt) : NaN;
   const start0 = it.startAt ? Date.parse(it.startAt) : NaN;

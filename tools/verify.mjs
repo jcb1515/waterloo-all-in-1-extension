@@ -310,6 +310,11 @@ export async function runVerify(opts = {}) {
   // items don't publish, but a pending/exact pair becomes a duplicate the
   // moment the pending item is accepted.
   const duplicates = findSuspectedDuplicates(feedAll.payload.events || []);
+  // Reply / book-a-call to-dos must stay off the feed while to-dos are not
+  // opted in (the default `cal` above has no include.todos).
+  const todoTasksInFeed = (feedAll.payload.events || []).filter((e) =>
+    /:(reply|book):/.test(String(e && e.id)),
+  );
   const invalidDates = findInvalidDates(items, now);
   const throws = [];
   for (const e of byDriver.values()) {
@@ -347,6 +352,7 @@ export async function runVerify(opts = {}) {
     duplicates: duplicates.length,
     invalidDates: invalidDates.length,
     throws: throws.length,
+    todoTasksInFeed: todoTasksInFeed.length,
   };
   const summary = {
     now: now.toISOString(),
@@ -367,6 +373,7 @@ export async function runVerify(opts = {}) {
     duplicates: duplicates.length,
     invalidDates: invalidDates.length,
     throws: throws.length,
+    todoTasksInFeed: todoTasksInFeed.length,
     todos: todos.status === "ok" ? todos.count : todos.status,
   };
 
@@ -463,6 +470,10 @@ export async function runVerify(opts = {}) {
   md.push(
     `- JSON bytes: ${feedJson.length} / ${feedAllJson.length}; trimmed: ${feed.trimmed}`,
   );
+  md.push(
+    `- reply/book-a-call to-dos in the feed (to-dos not opted in): ${todoTasksInFeed.length} (must be 0)`,
+  );
+  for (const e of todoTasksInFeed) md.push(`  - \`${e.id}\` ${e.title}`);
 
   md.push("");
   md.push(`## Adapter throws — ${throws.length}`);
@@ -495,6 +506,7 @@ if (invoked) {
     console.log(`report: ${REPORT_PATH}`);
   }
   console.log(JSON.stringify(summary));
-  const bad = failures.duplicates + failures.invalidDates + failures.throws;
+  const bad =
+    failures.duplicates + failures.invalidDates + failures.throws + failures.todoTasksInFeed;
   process.exit(bad > 0 ? 1 : 0);
 }
