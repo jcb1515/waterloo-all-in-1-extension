@@ -100,15 +100,44 @@ subscribed calendars (including the extension's own published feed). What
 it reads is only ever compared against your items locally; it is never
 published or sent anywhere.
 
+**Google Calendar.** When you turn on the duplicate check, the extension
+downloads your own calendars' export from Google Calendar (the same file as
+Google Calendar's Settings → Export) every 6 hours, using your existing
+Google sign-in. It keeps only event titles and start/end times from about a
+week ago to four months ahead. Descriptions, guests and locations are never
+kept. Subscribed calendars, including this extension's own feed, are never
+used. If the export isn't available you can paste your calendar's secret
+iCal address instead; it is stored only on your computer. What it reads is
+only compared against your items locally, to avoid publishing something
+that's already on your calendar. It is never published or sent anywhere.
+
 **Email** compares your account address against senders to detect your
 own replies — the address itself is never stored or sent.
 
-**Gmail.** While a Gmail tab is open, the extension reads Gmail's own
-unread-mail feed (the same list of unread subjects and previews Gmail shows
-you) at most once every 30 minutes, using the sign-in Gmail already has. It
-reads only the entries, never your account details, and it only adds items:
-reading an email never deletes anything. Outlook is never fetched; it's read
-only while you view it.
+**Email (Gmail and Outlook).** While a Gmail or Outlook tab is open, the
+extension reads your recent mail automatically so you don't have to open
+each message. The first time, it looks back over the last 30 days (you can
+choose 7–90 days in Sources → Email → Setup); after that it only reads
+messages newer than the last read, at most every 30 minutes. It never reads
+more than one full look-back every 6 hours, and never makes more than 20
+requests a minute. Gmail is read inside your Gmail tab: a hidden frame
+shows Gmail's own search results, and Gmail's print view of a conversation
+supplies the text. Outlook is read inside your Outlook tab through
+Outlook's own mail API, using the sign-in token Outlook already keeps in
+that tab. The token is used only as the header of those read requests, only
+for the current round. It is never saved, never copied into the extension's
+storage, never logged and never sent anywhere else, and the extension never
+refreshes your Outlook session. Every request is a read: the extension
+cannot send, move, delete, flag or mark mail, and reading doesn't change
+which messages show as unread. Full message text is fetched only for mail
+that looks relevant: co-op, your courses, senders you allow, or wording
+about interviews, deadlines, invitations, forms or fees. It stays in memory
+only while the dated sentences are found. Only the resulting items are
+stored (title, date, the matching sentence, a link back to the message),
+plus a count of messages checked. Your address is only compared on the page
+to spot your own replies and mail addressed to you; it is never stored.
+Senders you block are never read. Turn either mailbox off, or narrow it to
+course and co-op senders, in Sources → Email → Setup.
 
 **Check readers** (panel → Sources → Check readers) run counts-only
 probes on pages you open and can download a diagnostic report — the
