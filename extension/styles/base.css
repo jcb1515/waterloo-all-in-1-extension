@@ -409,6 +409,92 @@ html[data-theme="dark"] .segmented button[aria-pressed="true"] {
   border: 1px solid var(--gold);
 }
 
+/* ------------------------- shared ui components (src/ui) -------------------- */
+
+/* SourceBadge: coloured source dot + short name + optional "+N" */
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.src-badge .src-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--src, var(--text-3));
+}
+.src-badge .src-more {
+  font-style: normal;
+  color: var(--text-3);
+}
+
+/* DateBlock: "Thu Oct 8 · 7:00 pm"; .key = exam/interview/deadline */
+.date-block {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.date-block.key {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-bold);
+  color: var(--text);
+}
+.date-block.key .date-block-room {
+  font-weight: var(--w-semibold);
+}
+
+/* EmptyState */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+  color: var(--text-2);
+}
+.empty-state-icon {
+  color: var(--text-3);
+}
+.empty-state-title {
+  font-size: var(--fs-md);
+  font-weight: var(--w-semibold);
+  color: var(--text);
+}
+.empty-state-text {
+  font-size: var(--fs-sm);
+  max-width: 34ch;
+}
+
+/* Section */
+.ui-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ui-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.ui-section-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--w-semibold);
+  color: var(--text-2);
+}
+.ui-section-aside {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
 /* ---------------------------------- cards ----------------------------------- */
 
 .card {
