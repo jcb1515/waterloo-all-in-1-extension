@@ -7,6 +7,7 @@ import { useState } from "preact/hooks";
 import { checklistFor } from "../../../sources/probes.js";
 import { adapterForSource, stageForAdapter } from "../../../core/registry.js";
 import { fmtAgo } from "../../model/agenda.js";
+import { sourceSiteUrl } from "../../model/sources.js";
 import { lastGoodRead } from "../../model/onboarding.js";
 import { IS_PREVIEW, send } from "../../data.js";
 import { UI } from "../../../core/messages.js";
@@ -80,6 +81,7 @@ export function Check({ sourceId, state, actions, now }) {
   const readStats = Array.isArray(state.readStats) ? state.readStats : [];
   const adapter = adapterForSource(sourceId);
   const st = adapter ? (state.sourceState || {})[adapter.id] || null : null;
+  const siteUrl = adapter ? sourceSiteUrl(adapter) : null;
 
   // The Outlook segment shows both mailboxes' cards — they share one
   // adapter but have separate checklists, probes and readStats.
@@ -167,11 +169,11 @@ export function Check({ sourceId, state, actions, now }) {
               <RefreshIcon size={13} /> Sync now
             </button>
           ) : null}
-          {adapter.origins && adapter.origins[0] ? (
+          {siteUrl ? (
             <button
               type="button"
               class="btn btn-sm"
-              onClick={() => actions.open(`${adapter.origins[0]}/`)}
+              onClick={() => actions.open(siteUrl)}
             >
               <ExternalLinkIcon size={13} /> Open site
             </button>

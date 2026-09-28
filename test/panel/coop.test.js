@@ -10,6 +10,8 @@ import {
   appLastAt,
   coopEvents,
 } from "../../extension/src/panel/model/coop.js";
+import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
+import { buildFeedPayload } from "../../extension/src/calendar/payload.js";
 
 const NOW = new Date("2026-10-05T16:00:00.000Z");
 
@@ -218,6 +220,45 @@ test("coopEvents splits pending vs registered, hides dismissed/cancelled/past", 
     registered.map((i) => i.id),
     ["registeredBadge", "accepted"],
     "registered badge + user-accepted sort by start"
+  );
+});
+
+test("a pending WW event reaches Upcoming + the feed only after acceptance", () => {
+  const ev = {
+    id: "waterlooworks:event:4705",
+    type: "event",
+    title: "Fixture Employer Info Session",
+    status: "open",
+    review: "pending",
+    source: "waterlooworks",
+    startAt: "2026-10-08T15:00:00Z",
+    endAt: "2026-10-08T16:00:00Z",
+    meta: {},
+  };
+  const items = { [ev.id]: ev };
+  const agendaIds = (userState) =>
+    buildAgenda({ items, userState, settings: {}, now: NOW }).groups.flatMap(
+      (g) => g.rows.map((r) => r.id)
+    );
+  const feedIds = (userState) =>
+    buildFeedPayload(items, userState, {}, NOW).payload.events.map(
+      (e) => e.id
+    );
+
+  // The current rule: review "pending" is invisible to Upcoming's agenda
+  // and to the feed payload (unless review.showPending flips it).
+  assert.ok(!agendaIds({}).includes(ev.id), "pending event not in Upcoming");
+  assert.ok(!feedIds({}).includes(ev.id), "pending event not in the feed");
+
+  // The Review "Add" verdict (userState review=accepted) lands it in both.
+  const accepted = { [ev.id]: { review: "accepted" } };
+  assert.ok(
+    agendaIds(accepted).includes(ev.id),
+    "accepted event appears in Upcoming"
+  );
+  assert.ok(
+    feedIds(accepted).includes(ev.id),
+    "accepted event appears in the feed payload"
   );
 });
 

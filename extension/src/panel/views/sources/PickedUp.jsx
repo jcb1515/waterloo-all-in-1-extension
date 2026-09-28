@@ -5,6 +5,7 @@
 
 import { useMemo } from "preact/hooks";
 import { pickedUpGroups } from "../../model/pickedUp.js";
+import { sourceSiteUrl } from "../../model/sources.js";
 import { adapterForSource } from "../../../core/registry.js";
 import { ItemRow } from "../../../ui/ItemRow.jsx";
 import { Section } from "../../../ui/Section.jsx";
@@ -20,13 +21,22 @@ export function PickedUp({ sourceId, state, actions, now }) {
     [state.items, sourceId, now]
   );
 
+  // Effective pending: the item is review-pending and the user's verdict
+  // (Add/Dismiss in Review or Co-op Events) hasn't overridden it.
+  /** @param {any} item */
+  const isPending = (item) =>
+    item.review === "pending" &&
+    !["accepted", "dismissed"].includes(
+      ((state.userState || {})[item.id] || {}).review
+    );
+
   /** @param {any[]} list */
   const rows = (list) =>
     list.map((item) => (
       <div key={item.id}>
-        {item.review === "pending" ? (
+        {isPending(item) ? (
           <p class="help">
-            <span class="badge badge-warn">In review</span>
+            <span class="badge badge-warn">Not added</span>
           </p>
         ) : null}
         <ItemRow item={item} now={now} actions={actions} projects={state.projects} />
@@ -46,7 +56,7 @@ export function PickedUp({ sourceId, state, actions, now }) {
 
   if (!groups.length) {
     const adapter = adapterForSource(sourceId);
-    const site = adapter && adapter.origins && adapter.origins[0];
+    const site = adapter ? sourceSiteUrl(adapter) : null;
     return (
       <EmptyState
         icon={SearchIcon}
@@ -54,7 +64,7 @@ export function PickedUp({ sourceId, state, actions, now }) {
         text="Items this source finds show up here — open the site to let it read."
       >
         {site ? (
-          <button type="button" class="btn btn-sm" onClick={() => actions.open(`${site}/`)}>
+          <button type="button" class="btn btn-sm" onClick={() => actions.open(site)}>
             <ExternalLinkIcon size={13} /> Open site
           </button>
         ) : null}

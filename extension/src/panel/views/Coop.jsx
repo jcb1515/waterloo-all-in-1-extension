@@ -109,11 +109,26 @@ function PrepCard({ item, state, actions, now, open, onToggle }) {
 
 /* --------------------------------- events --------------------------------- */
 
-/** A WaterlooWorks dashboard event — pending rows take the Review verdicts. */
+/** A WaterlooWorks dashboard event — the body opens the shared item sheet;
+ * pending rows take the Review verdicts (Add/Dismiss don't open it). */
 function EventRow({ item, state, actions, pending }) {
+  const openItem = () => {
+    if (actions && actions.openItem) actions.openItem(item);
+  };
   return (
     <div class="event-row">
-      <div class="event-main">
+      <div
+        class="event-main linked"
+        role="link"
+        tabIndex={0}
+        onClick={openItem}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openItem();
+          }
+        }}
+      >
         <strong>{item.title}</strong>
         <span class="event-sub tabular">
           {item.startAt ? fmtDay(item.startAt) : ""}
@@ -126,17 +141,24 @@ function EventRow({ item, state, actions, pending }) {
       ) : null}
       {pending ? (
         <span class="event-acts">
+          <span class="badge badge-warn">Not added</span>
           <button
             type="button"
             class="btn btn-sm"
-            onClick={() => actions.setUserState(item.id, { review: "accepted" })}
+            onClick={(e) => {
+              e.stopPropagation();
+              actions.setUserState(item.id, { review: "accepted" });
+            }}
           >
             Add
           </button>
           <button
             type="button"
             class="btn btn-sm btn-ghost"
-            onClick={() => actions.setUserState(item.id, { review: "dismissed" })}
+            onClick={(e) => {
+              e.stopPropagation();
+              actions.setUserState(item.id, { review: "dismissed" });
+            }}
           >
             Dismiss
           </button>
