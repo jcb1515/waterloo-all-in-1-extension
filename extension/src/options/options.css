@@ -165,17 +165,19 @@ html[data-theme="dark"] .opt-nav-links a.active {
 
 @media (max-width: 720px) {
   .opt-page {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-4);
     padding: var(--sp-4);
   }
   .opt-nav {
     position: static;
     gap: var(--sp-3);
+    min-width: 0;
   }
   .opt-nav-links {
     flex-direction: row;
     overflow-x: auto;
+    min-width: 0;
     padding-bottom: var(--sp-1);
     scrollbar-width: none;
   }

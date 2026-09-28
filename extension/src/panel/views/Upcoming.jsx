@@ -1,5 +1,6 @@
-// Agenda view: summary card, filter chips + org picker, grouped item list,
-// and the empty / first-run / loading states.
+// Upcoming view: summary card, type chips + course/source filters, and the
+// grouped item list with sticky full-date day headers. Every row carries a
+// SourceBadge and a DateBlock — rows under a day header may show just a time.
 
 import { useMemo, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
@@ -7,28 +8,33 @@ import { fmtEstimate } from "../model/itemsheet.js";
 import { attentionSource } from "../model/sources.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
-import { ItemRow } from "../components/ItemRow.jsx";
+import { ItemRow } from "../../ui/ItemRow.jsx";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { normCourseCode } from "../../core/contract.js";
 import { orgStyle } from "../../ui/colors.js";
+import { itemSourceIds, sourceLabel } from "../../ui/sourceLabel.js";
 import { SearchIcon, ExternalLinkIcon, AlertTriangleIcon } from "../../ui/icons.jsx";
 
 const FILTERS = [
   ["all", "All"],
+  ["exams", "Exams"],
   ["deadlines", "Deadlines"],
   ["classes", "Classes"],
-  ["exams", "Exams"],
   ["meetings", "Meetings"],
   ["coop", "Co-op"],
 ];
+
+// Group ids that are day headers — rows under them may show a bare time.
+const DAY_GROUP = /^(today|tomorrow|classes-today|day:)/;
 
 /**
  * @param {{state: any, actions: any, now: Date, onGoSources: () => void,
  *   onGoCalendar?: () => void}} props
  */
-export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
+export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
   const [filter, setFilter] = useState(query0("filter") || "all");
   const [org, setOrg] = useState(null);
+  const [source, setSource] = useState(() => query0("src") || null);
   const [q, setQ] = useState("");
   const [collapsed, setCollapsed] = useState(() => ({}));
 
@@ -41,6 +47,15 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
     return [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [state.items]);
 
+  // Sources that actually produced items, in badge order.
+  const sources = useMemo(() => {
+    const seen = new Set();
+    for (const it of Object.values(state.items)) {
+      for (const s of itemSourceIds(it)) seen.add(s);
+    }
+    return [...seen].filter((id) => id !== "manual");
+  }, [state.items]);
+
   const agenda = useMemo(
     () =>
       buildAgenda({
@@ -50,10 +65,11 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
         now,
         filter,
         org,
+        source,
         q,
         projects: state.projects,
       }),
-    [state.items, state.userState, state.settings, state.projects, filter, org, q]
+    [state.items, state.userState, state.settings, state.projects, filter, org, source, q]
   );
 
   if (!state.ready) {
@@ -151,11 +167,11 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
           <div class="search-wrap">
             <SearchIcon size={14} />
             <input
-              id="agenda-search"
+              id="upcoming-search"
               class="input search-input"
               type="search"
               placeholder="Search titles, courses, rooms…"
-              aria-label="Search agenda"
+              aria-label="Search upcoming items"
               value={q}
               onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
             />
@@ -176,34 +192,51 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
             </select>
           ) : null}
         </div>
-        <div class="chip-scroll" role="group" aria-label="Type filter">
-          {s.clashCount || filter === "clash" ? (
-            <button
-              type="button"
-              class={`chip filter-chip${filter === "clash" ? " active" : ""}`}
-              aria-pressed={filter === "clash"}
-              onClick={() => setFilter(filter === "clash" ? "all" : "clash")}
+        <div class="filter-row">
+          <div class="chip-scroll" role="group" aria-label="Type filter">
+            {s.clashCount || filter === "clash" ? (
+              <button
+                type="button"
+                class={`chip filter-chip${filter === "clash" ? " active" : ""}`}
+                aria-pressed={filter === "clash"}
+                onClick={() => setFilter(filter === "clash" ? "all" : "clash")}
+              >
+                Clashes
+              </button>
+            ) : null}
+            {FILTERS.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                class={`chip filter-chip${filter === id ? " active" : ""}`}
+                aria-pressed={filter === id}
+                onClick={() => setFilter(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {sources.length ? (
+            <select
+              class="select source-select"
+              aria-label="From: filter by source"
+              value={source || ""}
+              onChange={(e) => setSource(/** @type {any} */ (e.target).value || null)}
             >
-              Clashes
-            </button>
+              <option value="">From: All sources</option>
+              {sources.map((id) => (
+                <option key={id} value={id}>
+                  {sourceLabel(id, null)}
+                </option>
+              ))}
+            </select>
           ) : null}
-          {FILTERS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              class={`chip filter-chip${filter === id ? " active" : ""}`}
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-            >
-              {label}
-            </button>
-          ))}
         </div>
       </div>
 
       {!hasItems && !learnSynced ? <FirstRun actions={actions} onGoSources={onGoSources} /> : null}
       {hasItems && agenda.groups.length === 0 ? (
-        <EmptyState filter={filter} />
+        <EmptyRows filter={filter} />
       ) : null}
 
       {agenda.groups.map((g) => (
@@ -229,6 +262,7 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
                   key={item.id}
                   item={item}
                   now={now}
+                  inDayGroup={DAY_GROUP.test(g.id)}
                   actions={actions}
                   done={g.done}
                   clashes={agenda.clashById.get(item.id)}
@@ -281,7 +315,7 @@ function FirstRun({ actions, onGoSources }) {
 }
 
 /** @param {{filter: string}} p */
-function EmptyState({ filter }) {
+function EmptyRows({ filter }) {
   return (
     <div class="card empty-card">
       <SearchIcon size={20} />
