@@ -594,11 +594,13 @@ export function mapEvents(rows, { scope, at, examIndex } = {}) {
     if (!startAt) continue;
 
     const isTerm = TERM_RE.test(title);
-    // Learn rows carry no per-row key — the feed key is just "learn" — so the
-    // id hashes title+startDate and stays unique within a day.
+    // row.key is the FEED key ("importantDate", "learn"), not unique per row —
+    // ids hash the title (+ startDate for Learn) so same-day rows can't
+    // collide. Learn rows hash startDate too because identical titles can
+    // recur at different times on a day.
     const key = isLearn
       ? `learn:${hashString(`${title}|${row.startDate}`)}:${startDay}`
-      : `event:${row.key || hashString(`${title}|${row.startDate}`)}:${startDay}`;
+      : `event:${row.key || "cal"}:${hashString(title)}:${startDay}`;
 
     if (isLearn && !isTerm) {
       // Learn's calendar export appends " due" (or leads with "Due:") on rows

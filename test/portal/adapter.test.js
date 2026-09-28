@@ -751,6 +751,53 @@ test("merge: a Learn-mirror exam starting within the hour is still suppressed", 
   assert.equal(other.items.length, 2);
 });
 
+test("DailyEventsV2: same-day Important Dates rows get distinct ids and both feed terms", async () => {
+  // Live bug: row.key is the feed key ("importantDate"), so "Classes begin"
+  // and a second term row on 2027-01-11 collided on one id and the later
+  // row was silently lost.
+  const row = (/** @type {string} */ summary) => ({
+    summary,
+    name: "Important dates",
+    key: "importantDate",
+    allDay: true,
+    startDate: "2027-01-11T00:00:00",
+    endDate: "2027-01-11T23:59:00",
+    isEventCancelled: false,
+  });
+  const res = await eventsParse([
+    row("Classes begin"),
+    row("Co-operative work term begins"),
+    row("Final examinations end"),
+  ]);
+  assert.equal(res.items.length, 3);
+  const ids = res.items.map((i) => i.id);
+  assert.equal(new Set(ids).size, 3);
+  for (const id of ids) {
+    assert.ok(id.startsWith("portal:event:importantDate:"));
+    assert.ok(id.endsWith(":2027-01-11"));
+  }
+  const term = res.terms.find((t) => t.start === "2027-01-11");
+  assert.ok(term, "the 'Classes begin' row reached collectTerm");
+  assert.equal(term.examPeriod && term.examPeriod.end, "2027-01-11"); // 'examinations end' row too
+});
+
+test("DailyEventsV2: the same row read twice keeps the same id", async () => {
+  const rows = [{
+    summary: "Bomber Karaoke Night",
+    name: "WUSA Events",
+    key: "wusa-events",
+    allDay: false,
+    startDate: "2026-09-18T21:00:00",
+    endDate: "2026-09-18T23:00:00",
+    isEventCancelled: false,
+  }];
+  const a = await eventsParse(rows);
+  const b = await eventsParse(rows);
+  assert.equal(a.items.length, 1);
+  assert.equal(a.items[0].id, b.items[0].id);
+  assert.match(a.items[0].id, /^portal:event:wusa-events:[0-9a-f]+:2026-09-18$/);
+});
+
 test("an exact reading-week title wins over a vaguer break row", async () => {
   const row = (/** @type {string} */ summary, /** @type {string} */ startDate, /** @type {string} */ endDate) => ({
     summary,
