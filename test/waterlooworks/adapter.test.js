@@ -150,6 +150,54 @@ test("unknown status preserves the previous status", async () => {
   assert.equal(second.updates.length, 0);
 });
 
+test("same-id dashboard schedule + interviews-list items merge, keeping endAt", async () => {
+  // The dashboard schedule carries start+end; the interviews list carries
+  // location+method but no end. Under the id map the later item won
+  // wholesale — now they merge field by field, and facts union by label.
+  const sharedId = "waterlooworks:interview:488135";
+  const scheduleItem = {
+    id: sharedId,
+    source: "waterlooworks",
+    type: "interview",
+    title: "Interview: Globex",
+    startAt: "2026-10-02T20:00:00.000Z",
+    endAt: "2026-10-02T20:30:00.000Z",
+    status: "open",
+    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: AT }],
+    meta: { jobId: "488135", facts: [{ label: "Type", value: "In-Person" }] },
+  };
+  const listItem = {
+    id: sharedId,
+    source: "waterlooworks",
+    type: "interview",
+    title: "Interview: Globex",
+    startAt: "2026-10-02T20:00:00.000Z",
+    location: "TC 2218",
+    status: "open",
+    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: AT }],
+    meta: { jobId: "488135", facts: [{ label: "Where", value: "TC 2218" }] },
+  };
+  const state = {
+    lastGood: {
+      schedule: { items: [scheduleItem] },
+      interviews: { items: [listItem] },
+    },
+  };
+  // The JSON-body path returns the cached union without a parse.
+  const res = await adapter.observe.parse(
+    rawPayload("{}", `${WW}/interviews.htm`, "dom"),
+    makeCtx(state)
+  );
+  const merged = res.items.find((i) => i.id === sharedId);
+  assert.equal(res.items.filter((i) => i.id === sharedId).length, 1);
+  assert.equal(merged.endAt, "2026-10-02T20:30:00.000Z");
+  assert.equal(merged.location, "TC 2218");
+  assert.deepEqual(
+    merged.meta.facts.map((f) => `${f.label}=${f.value}`).sort(),
+    ["Type=In-Person", "Where=TC 2218"]
+  );
+});
+
 test("applications accumulate across paginated reads; absent apps are kept", async () => {
   const ctx = makeCtx();
   const page1 = await adapter.observe.parse(

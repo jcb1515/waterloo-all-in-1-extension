@@ -183,8 +183,9 @@ export const COOP_WORK_TERM_LINE_RE =
 /** First time phrase: "9 a.m." | "2:30 p.m." | "12 p.m." | "noon" | "midnight". */
 export const COOP_TIME_RE =
   /(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?|\bnoon\b|\bmidnight\b/i;
-/** Trailing zone noise "(ET)" / "ET" stripped when building titles. */
-export const COOP_ZONE_RE = /\s*\(?(?:ET|EST|EDT)\)?\s*/gi;
+/** Trailing zone noise "(ET)" / "ET" stripped when building titles.
+ * Word boundaries matter: without them "requEST" loses its "est". */
+export const COOP_ZONE_RE = /\s*\(?(?:\b(?:ET|EST|EDT)\b)\)?\s*/gi;
 
 /** A calendar line is co-op content when its text or cycle label matches. */
 export const COOP_KEEP_RE =
@@ -196,7 +197,9 @@ export const COOP_CATEGORIES = Object.freeze([
   Object.freeze([/job\s+postings?\s+close|postings close/i, "postings-close"]),
   Object.freeze([/interviews?/i, "interviews"]),
   Object.freeze([/employer rankings?/i, "rankings-open"]),
-  Object.freeze([/student rankings?|rankings?\s+(due|close)/i, "rankings-due"]),
+  // "Student ranking consults" are advising sessions, not deadlines —
+  // only rankings + due/close/deadline wording is a deadline.
+  Object.freeze([/rankings?\s+(?:due|deadline|close[sd]?)\b/i, "rankings-due"]),
   Object.freeze([/match results/i, "match-results"]),
   Object.freeze([/direct offers/i, "direct-offers"]),
   Object.freeze([/work term/i, "work-term"]),

@@ -22,7 +22,7 @@ import {
  * frozen contract — WaterlooWorks reports both "App Status" (the student's
  * state) and "Job Status" (the posting's stage), and the latter is useful
  * context the contract has no field for.
- * @typedef {Application & {jobStatus?: string}} WWApplication
+ * @typedef {Application & {jobStatus?: string, submittedOn?: string}} WWApplication
  */
 
 const SOURCE = "waterlooworks";
@@ -87,6 +87,7 @@ export function toApplications(rows) {
       jobId: row.jobId,
       cycle: row.term,
       jobStatus: row.jobStatusText || undefined,
+      submittedOn: row.submittedOn || undefined,
       status: normalizeStatus(row.appStatusText),
       history: [],
       itemIds: [],
@@ -704,11 +705,15 @@ function coopWorkTerm(e) {
 /** Event text minus the time phrase / "(ET)" / "by end of day" — for titles. */
 function coopTextWithoutTime(text) {
   let t = String(text || "").replace(COOP_END_OF_DAY_RE, "");
-  const tm = COOP_TIME_RE.exec(t);
-  if (tm) t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  for (let i = 0; i < 4; i++) {
+    const tm = COOP_TIME_RE.exec(t);
+    if (!tm) break;
+    t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  }
   t = t.replace(COOP_ZONE_RE, " ");
   return t
     .replace(/\s*(?:at|by)\s*$/i, "")
+    .replace(/\s*\d{1,2}\s*-\s*$/, "") // a range's orphaned lower bound ("… 2 -")
     .replace(/[\s,;:–—-]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -900,6 +905,39 @@ export function mergeInterviewScopes(listItems, detailItems) {
     };
   });
   return [...merged, ...detailById.values()];
+}
+
+/**
+ * Merge two same-id items from different scopes (dashboard schedule vs
+ * interviews list, etc): `later` wins field by field, `earlier` fills
+ * whatever `later` lacks — a schedule item's endAt survives a list item
+ * that arrives after it. meta.facts is the union by label with `later`'s
+ * values winning shared labels.
+ * @param {Item} earlier
+ * @param {Item} later
+ * @returns {Item}
+ */
+export function mergeItemById(earlier, later) {
+  const merged = {
+    ...earlier,
+    ...later,
+    title: later.title ?? earlier.title,
+    org: later.org ?? earlier.org,
+    startAt: later.startAt ?? earlier.startAt,
+    endAt: later.endAt ?? earlier.endAt,
+    dueAt: later.dueAt ?? earlier.dueAt,
+    location: later.location ?? earlier.location,
+    status: later.status ?? earlier.status,
+    details: mergeDetails(later.details, earlier.details),
+    seenIn: dedupeSeenIn(later.seenIn, earlier.seenIn),
+  };
+  const meta = { ...earlier?.meta, ...later?.meta };
+  const facts = mergeFacts(later?.meta?.facts, earlier?.meta?.facts);
+  if (facts) meta.facts = facts;
+  const prep = { ...earlier?.meta?.prep, ...later?.meta?.prep };
+  if (Object.keys(prep).length) meta.prep = prep;
+  if (Object.keys(meta).length) merged.meta = meta;
+  return merged;
 }
 
 /**

@@ -23,6 +23,7 @@ import {
   postingItems,
   linkItems,
   mergeInterviewScopes,
+  mergeItemById,
   messageDateItems,
   messageKey,
   coopDateItems,
@@ -90,7 +91,11 @@ function cachedItems(state) {
     ...dashEvents,
     ...rest,
   ]) {
-    if (item && item.id) byId.set(item.id, item);
+    if (!item || !item.id) continue;
+    const earlier = byId.get(item.id);
+    // Later item wins per field; the earlier one fills what it lacks —
+    // a dashboard schedule's endAt survives the interviews-list row.
+    byId.set(item.id, earlier ? mergeItemById(earlier, item) : item);
   }
   const restEventKeys = new Set(rest.map(eventDupKey).filter(Boolean));
   const out = [];
