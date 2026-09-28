@@ -7,10 +7,17 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { itemsFromMessage, taskItems } from "../../extension/src/sources/email/extract.js";
+import {
+  dedupeMailItems,
+  itemsFromMessage,
+  taskItems,
+} from "../../extension/src/sources/email/extract.js";
 import { zonedParts } from "../../extension/src/lib/textdates/index.js";
 
 const AT = "2026-09-28T14:00:00.000Z"; // Mon Sep 28 2026, 10:00 EDT
+// Observation time — the moment the page was read. Relative dates resolve
+// against a message's receivedAt, but stale hits die against NOW.
+const OBSERVED_NOW = new Date(AT);
 const pad = (n) => String(n).padStart(2, "0");
 const dayOf = (iso) => {
   const p = zonedParts(new Date(iso));
@@ -691,6 +698,56 @@ const ALL = [
     receivedAt: AT,
     expect: "none",
   },
+  {
+    // "RSVP by <date>" from a bulk sender: deadline cue + explicit date.
+    from: "no-reply@rsvp.example.com",
+    subject: "RSVP by September 30, 11:59PM to secure your spot",
+    body: "Please RSVP by September 30, 11:59PM to secure your spot at the showcase.",
+    receivedAt: "2026-09-27T14:00:00.000Z",
+    expect: { type: "deadline", dateToronto: "2026-09-30", time: "23:59", allDay: false },
+    list: true,
+  },
+  {
+    // A second thread about the same RSVP deadline — merged in the dedupe
+    // regression test below.
+    from: "no-reply@rsvp.example.com",
+    subject: "Last call — RSVP by Sep 30!",
+    body: "Final reminder: RSVP for the showcase by September 30 at 11:59PM.",
+    receivedAt: "2026-09-28T12:00:00.000Z",
+    expect: { type: "deadline", dateToronto: "2026-09-30", time: "23:59", allDay: false },
+    list: true,
+  },
+  /* ===== live-bug regressions (invented text) ===== */
+  {
+    // Reply text + quoted header inside one preview: only "Tuesday at 1pm"
+    // counts; the quoted "Sent: Thursday, September 24…" line is cut.
+    from: "Ana Peer <ana@example.org>",
+    subject: "Dinner Tuesday",
+    body: "Great! Sent you an invite for Tuesday at 1pm.\nBest, Ana\n\nFrom: Ana <ana@example.org>\nSent: Thursday, September 24, 2026 3:53 PM\nTo: Sam Peer <sam@example.org>\nSubject: Dinner Tuesday",
+    receivedAt: "2026-09-25T14:00:00.000Z", // Fri Sep 25; observed Sep 28
+    expect: { type: "meeting", dateToronto: "2026-09-29", time: "13:00", allDay: false },
+    count: 1,
+    list: true,
+  },
+  {
+    // A reply quote header on its own carries no new date.
+    from: "Sam Peer <sam@example.org>",
+    subject: "Re: Project sync",
+    body: "On Wed, Sep 23, 2026 at 8:49 PM Ana Peer <ana@example.org> wrote:\n> See you at the workshop on October 5!",
+    receivedAt: "2026-09-24T14:00:00.000Z",
+    expect: "none",
+    list: true,
+  },
+  {
+    // A message received before the event: the date is already over at
+    // observation time even though receivedAt makes it look fresh.
+    from: "Club News <news@club.example.org>",
+    subject: "Thanks for coming",
+    body: "The info session on September 20 was great — slides inside.",
+    receivedAt: "2026-09-21T14:00:00.000Z",
+    expect: "none",
+    list: true,
+  },
 ];
 
 /** Every item a message can yield (mail items + tasks), as an opened message. */
@@ -699,7 +756,7 @@ const runCase = (c, { asList = false } = {}) => {
   /** @type {any} */
   const m = {
     key: `corpus-${ALL.indexOf(c)}`,
-    url: "https://mail.google.com/mail/u/0/#inbox/corpus",
+    url: `https://mail.google.com/mail/u/0/#inbox/corpus-${ALL.indexOf(c)}`,
     from: name,
     fromEmail: email,
     subject: c.subject,
@@ -708,14 +765,13 @@ const runCase = (c, { asList = false } = {}) => {
     links: [],
   };
   if (!asList) m.body = c.body;
-  const now = new Date(c.receivedAt);
   const opts = {
     provider: "gmail",
-    now,
+    now: OBSERVED_NOW,
     courses: [],
     settings: {},
     applications: [],
-    at: c.receivedAt,
+    at: OBSERVED_NOW.toISOString(),
   };
   const mailItems = itemsFromMessage(m, opts);
   // List rows run the important-mail extraction only — tasks need the body.
@@ -734,6 +790,9 @@ const checkCase = (c, items, label) => {
   if (c.expect === "none") {
     assert.equal(items.length, 0, `${label}: expected no items, got ${JSON.stringify(items.map((i) => [i.type, i.title]))}`);
     return;
+  }
+  if (c.count != null) {
+    assert.equal(items.length, c.count, `${label}: expected ${c.count} items, got ${JSON.stringify(items.map((i) => [i.type, i.title]))}`);
   }
   const e = c.expect;
   const hit = items.find(
@@ -795,4 +854,90 @@ test("email corpus: list-row runs (subject + preview only)", async (t) => {
       checkCase(c, runCase(c, { asList: true }), `list ${c.subject}`);
     });
   }
+});
+
+/* ===== dedupe / title regressions (invented) ============================= */
+
+const fakeMsg = (over = {}) => ({
+  key: "k1",
+  url: "https://mail.google.com/mail/u/0/#inbox/k1",
+  from: "",
+  fromEmail: "x@example.org",
+  subject: "",
+  body: "",
+  links: [],
+  receivedAt: AT,
+  ...over,
+});
+const opts = () => ({
+  provider: "gmail",
+  now: OBSERVED_NOW,
+  courses: [],
+  settings: {},
+  applications: [],
+  at: OBSERVED_NOW.toISOString(),
+});
+
+test("dedupe: an exact invite item suppresses a tentative mail item within ±15 min", () => {
+  const invite = {
+    id: "gmail:invite:sync:2026-10-08T17:00:00.000Z",
+    type: "meeting",
+    title: "Project Sync",
+    startAt: "2026-10-08T17:00:00.000Z",
+    confidence: "exact",
+    source: "gmail",
+    evidence: { url: "u-inv" },
+    meta: {},
+  };
+  const mail = itemsFromMessage(
+    fakeMsg({
+      key: "t2",
+      url: "u-mail",
+      subject: "Meeting link",
+      body: "Meeting link sent for October 8th at 1pm.",
+    }),
+    opts(),
+  );
+  assert.equal(mail.length, 1); // the mail item exists on its own…
+  const out = dedupeMailItems([invite, ...mail]);
+  assert.equal(out.length, 1); // …but the invite covers it
+  assert.equal(out[0], invite);
+});
+
+test("dedupe: two threads about the same deadline merge into one item", () => {
+  const ca = ALL.find((c) => c.subject === "RSVP by September 30, 11:59PM to secure your spot");
+  const cb = ALL.find((c) => c.subject === "Last call — RSVP by Sep 30!");
+  const a = runCase(/** @type {any} */ (ca));
+  const b = runCase(/** @type {any} */ (cb));
+  assert.equal(a.length, 1);
+  assert.equal(b.length, 1);
+  const out = dedupeMailItems([...a, ...b]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].type, "deadline");
+  const threads = (out[0].meta && out[0].meta.threads) || [];
+  assert.equal(threads.length, 2); // both threads' urls kept
+});
+
+test("titles: a generic subject falls back to the dated sentence", () => {
+  const items = itemsFromMessage(
+    fakeMsg({
+      subject: "Reminder",
+      body: "RSVP for the showcase by October 20.",
+    }),
+    opts(),
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, "RSVP for the showcase by October 20");
+});
+
+test("titles: a real subject stays the title", () => {
+  const items = itemsFromMessage(
+    fakeMsg({
+      subject: "Employer info session next week",
+      body: "Info session with our engineers on October 6 at 6pm.",
+    }),
+    opts(),
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, "Employer info session next week");
 });

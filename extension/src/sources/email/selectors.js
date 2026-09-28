@@ -24,6 +24,10 @@ export const OUTLOOK = {
   heading: '[role="heading"]',
   body: '[aria-label="Message body"]',
   sender: 'span[title*="@"]',
+  // Message header: the sender's display name is the aria-label "From: <name>"
+  // and the address lives in a descendant's "Name<addr>" text — the header
+  // has no span[title*="@"].
+  senderFrom: '[aria-label^="From:"]',
   sentTime: '[data-testid="SentReceivedSavedTime"]',
   selected: '[data-convid][aria-selected="true"]',
 };

@@ -41,10 +41,12 @@ test("toApplications normalizes statuses into the contract shape", () => {
     jobTitle: "Analog/Mixed-Signal Engineering Co-op",
     jobId: "488135",
     cycle: "2027 - Winter",
+    jobStatus: "Interview Selections Complete",
     status: "applied",
     history: [],
     itemIds: [],
   });
+  assert.equal(apps[1].jobStatus, "Interview Complete");
   assert.equal(apps[1].status, "not-selected");
   assert.equal(apps[2].status, "selected-for-interview");
 });
