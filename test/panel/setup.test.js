@@ -1,8 +1,14 @@
 // @ts-check
 // Panel setup model: Discord channel picker rows + the whole-map patch
-// builders (channelTargets, outline urls, sections, groups).
+// builders (channelTargets, outline urls, sections, groups) — plus the
+// SETUP registry smoke test (JSX bundled at test time with esbuild).
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
+import { parseHTML } from "linkedom";
+import { resolveSettings } from "../../extension/src/core/store.js";
 import {
   channelPicker,
   toggleChannelPatch,
@@ -193,4 +199,145 @@ test("termLabel renders UW term codes", () => {
   assert.equal(termLabel(1269), "Fall 2026 (1269)");
   assert.equal(termLabel(1271), "Winter 2027 (1271)");
   assert.equal(termLabel("x"), "x");
+});
+
+/* ---------- SETUP registry: bundle the JSX and smoke-render ---------- */
+
+const SETUP_INDEX = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../extension/src/panel/components/setup/index.js"
+);
+
+// pdfjs only runs inside pdfToText — the smoke render never extracts a PDF,
+// so swap the heavy worker bundle for a stub instead of inlining ~1 MB.
+const pdfjsStub = {
+  name: "pdfjs-stub",
+  /** @param {any} b */
+  setup(b) {
+    b.onResolve({ filter: /^pdfjs-dist\// }, () => ({
+      path: "pdfjs-stub",
+      namespace: "pdfjs-stub",
+    }));
+    b.onLoad({ filter: /.*/, namespace: "pdfjs-stub" }, () => ({
+      contents: "export const GlobalWorkerOptions = {}; export function getDocument() { throw new Error('pdfjs stub'); }",
+    }));
+  },
+};
+
+/**
+ * Bundle a virtual entry re-exporting SETUP + preact's render from the
+ * bundled copy — components' hooks read the bundled preact's internals, so
+ * render() must come from the same module instance.
+ */
+async function setupModule() {
+  const res = await build({
+    stdin: {
+      contents: `export { SETUP } from "./index.js"; export { render } from "preact";`,
+      resolveDir: path.dirname(SETUP_INDEX),
+      sourcefile: "setup-test-entry.js",
+      loader: "js",
+    },
+    bundle: true,
+    format: "esm",
+    write: false,
+    jsx: "automatic",
+    jsxImportSource: "preact",
+    platform: "neutral",
+    plugins: [pdfjsStub],
+    logLevel: "silent",
+  });
+  // panel/data.js reads location.search at import; no chrome -> preview mode.
+  globalThis.location = { search: "" };
+  const code = res.outputFiles[0].text;
+  return import(
+    "data:text/javascript;base64," + Buffer.from(code).toString("base64")
+  );
+}
+
+test("SETUP registry: exact key set, all functions, email/gmail alias outlook", async () => {
+  const mod = await setupModule();
+  const keys = Object.keys(mod.SETUP).sort();
+  assert.deepEqual(keys, [
+    "discord",
+    "email",
+    "gcal",
+    "gmail",
+    "learn",
+    "outline",
+    "outlook",
+    "portal",
+    "waterlooworks",
+  ]);
+  for (const k of keys) assert.equal(typeof mod.SETUP[k], "function", k);
+  assert.equal(mod.SETUP.email, mod.SETUP.outlook);
+  assert.equal(mod.SETUP.gmail, mod.SETUP.outlook);
+});
+
+test("SETUP pages smoke-render: what-we-read text, children gated on enabled", async () => {
+  const { SETUP, render } = await setupModule();
+  const { document, window } = parseHTML(
+    "<html><body><div id='root'></div></body></html>"
+  );
+  globalThis.document = document;
+  globalThis.window = window;
+
+  const state = {
+    settings: resolveSettings(null),
+    sourceState: {},
+    courses: {},
+    items: {},
+    userState: {},
+    outlineFiles: [],
+    projects: {},
+  };
+  const actions = {
+    saveSettings: () => Promise.resolve(null),
+    sync: () => Promise.resolve(null),
+    open: () => {},
+  };
+
+  // Every page explains itself: the what-we-read paragraph is present.
+  const READ_MARK = {
+    learn: "courses, assignments",
+    outline: "outline pages",
+    portal: "class schedule",
+    outlook: "calendar invites",
+    waterlooworks: "applications, interviews",
+    discord: "servers and channels",
+    gcal: "Google calendars",
+    email: "calendar invites",
+    gmail: "calendar invites",
+  };
+  for (const key of Object.keys(SETUP)) {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    render(SETUP[key]({ state, actions }), root);
+    assert.ok(
+      root.textContent.includes(READ_MARK[key]),
+      `${key}: no what-we-read text`
+    );
+  }
+
+  // Enabled source -> its setup blocks render (Discord's watched editor).
+  let root = document.createElement("div");
+  render(SETUP.discord({ state, actions }), root);
+  assert.ok(root.textContent.includes("Watched servers"));
+
+  // Disabled source -> children hidden; the paragraph still shows.
+  const offState = {
+    ...state,
+    settings: {
+      ...state.settings,
+      sources: { ...(state.settings.sources || {}), discord: { enabled: false } },
+    },
+  };
+  root = document.createElement("div");
+  render(SETUP.discord({ state: offState, actions }), root);
+  assert.ok(!root.textContent.includes("Watched servers"));
+  assert.ok(root.textContent.includes("servers and channels"));
+
+  // gcal is off by default -> no children, paragraph still shows.
+  root = document.createElement("div");
+  render(SETUP.gcal({ state, actions }), root);
+  assert.ok(root.textContent.includes("Google calendars"));
 });

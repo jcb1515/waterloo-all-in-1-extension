@@ -74,6 +74,30 @@ const dateFor = (monText, day, { now, termCode } = /** @type {{now?: Date, termC
 
 const SKIP_LINE = /reading week|midterm week|no class|no lectures/i;
 const REVIEW_FOR = /\breview (?:session )?for\b/i;
+
+/** Grading-review sentences (regrade/remark/appeal/pick-up) are never exams. */
+const REGRADE_RE =
+  /\bre-?grad(?:e|ed|es|ing)\b|\bre-?mark(?:ed|ing|s)?\b|\bappeal(?:ed|ing|s)?\b|\breconsider(?:ation|ed|ing)?\b|request(?:ed|ing|s)?\s+a\s+(?:re-?)?review|pick\s+up\s+(?:your|the)\s+(?:midterm|exam|test|paper)/i;
+/** "<noun> regrade request deadline" — the exam noun when the sentence has one. */
+const regradeTitle = (s) =>
+  /\bmid-?terms?\b|mid-?term\b/i.test(s)
+    ? "Midterm regrade request deadline"
+    : /\bfinals?\b|final exam/i.test(s)
+      ? "Final exam regrade request deadline"
+      : "Exam regrade request deadline";
+/** "Tutorials will begin on Sep 16" — a start note, not a deadline. */
+const BEGIN_RE = /\b(begin|begins|beginning|starts?|starting|commences?|resumes?|kicks?\s*off)\b/i;
+/**
+ * Sentences inside a line: boundaries at ". X", "!) X", ".) X" and
+ * run-together ".X" (no space). "Oct. 9" and "e.g.," don't split.
+ */
+const SENT_BOUND = /(?<=[.!?][)\]]?)\s+(?=[A-Z(])|(?<=[.!?])(?=[A-Z])/;
+/**
+ * A leading "Due Date:" / "Final Exam:" / "Missed Assessments:" header —
+ * Title-Case words plus small connectives only, so "Assignment #1:" and
+ * "If you have concerns:" don't count.
+ */
+const LABEL_RE = /^[A-Z][A-Za-z-]*(?:\s+(?:[A-Z][A-Za-z-]*|or|and|of|the|a|an|to|for|in|on|at|by|vs)){0,4}\s*:\s+/;
 export const OFFICE_RE =
   /(mon|tues|wednes|thurs|fri)days?\s+(\d{1,2}(?::\d{2})?\s*[ap]m)\s*-\s*(\d{1,2}(?::\d{2})?\s*[ap]m)\s+in\s+([A-Z]{2,4}\s*-?\s*\d{3,4}[A-Z]?)/gi;
 const OFFICE_DAY = { mon: 1, tues: 2, wednes: 3, thurs: 4, fri: 5 };
@@ -538,50 +562,69 @@ export function buildOutline(data, opts = {}) {
   }
   for (const raw of proseLines) {
     const line = String(raw).trim();
-    if (!line || /^week\s+\d+/i.test(line) || SKIP_LINE.test(line) || !TRIGGER_RE.test(line)) continue;
-    for (const hit of textDates(line, { now, termCode })) {
-      if (hit.confidence < 0.5) continue;
-      const cls = classify({ title: line });
-      const isReview = REVIEW_FOR.test(line);
-      const cat = isReview ? "review-session" : cls.category;
-      const day = torontoDate(hit.startAt);
-      if (cat && day && isCovered(cat, day)) continue;
-      let title;
-      if (!isReview && cls.type === "exam" && cls.category === "midterm") title = "Midterm";
-      else if (!isReview && cls.type === "exam" && cls.category === "final") title = "Final exam";
-      else {
-        const head = line.slice(0, hit.index).replace(/(?:\b(?:due|on|by|is)|[:-])\s*$/i, "").trim();
-        const tail = line.slice(hit.index + hit.text.length).trim();
-        title = (head.match(/[a-z]/gi) || []).length >= 3 ? head : tail;
-        title = title.replace(/^[-–—:,.()\s]+|[-–—:,.()\s]+$/g, "").slice(0, 80) || "Untitled";
+    if (!line || /^week\s+\d+/i.test(line) || SKIP_LINE.test(line)) continue;
+    // A line is a paragraph: classify and title each date hit from the
+    // sentence it sits in, so a "Label:" heading can't type a later one.
+    for (const piece of line.split(SENT_BOUND)) {
+      const sent = piece.trim();
+      if (!sent) continue;
+      const regrade = REGRADE_RE.test(sent);
+      if (!regrade && !TRIGGER_RE.test(sent)) continue;
+      for (const hit of textDates(sent, { now, termCode })) {
+        if (hit.confidence < 0.5) continue;
+        const cls = classify({ title: sent });
+        const isReview = !regrade && REVIEW_FOR.test(sent);
+        // "…will begin on Sep 16" with no due wording is a start note.
+        if (!regrade && cls.type === "deadline" && BEGIN_RE.test(sent) && !isDueish(sent)) continue;
+        const cat = regrade ? "admin" : isReview ? "review-session" : cls.category;
+        const day = torontoDate(hit.startAt);
+        if (cat && day && isCovered(cat, day)) continue;
+        let title;
+        if (regrade) title = regradeTitle(sent);
+        else if (!isReview && cls.type === "exam" && cls.category === "midterm") title = "Midterm";
+        else if (!isReview && cls.type === "exam" && cls.category === "final") title = "Final exam";
+        else {
+          const label = sent.match(LABEL_RE);
+          const body = label ? sent.slice(label[0].length) : sent;
+          const hidx = Math.max(0, hit.index - (sent.length - body.length));
+          const head = body
+            .slice(0, hidx)
+            .replace(/(?:\b(?:due|on|by|is)|[:-])\s*$/i, "")
+            .trim();
+          const tail = body.slice(hidx + hit.text.length).trim();
+          title = (head.match(/[a-z]/gi) || []).length >= 3 ? head : tail;
+          title = title.replace(/^[-–—:,.()\s]+|[-–—:,.()\s]+$/g, "").slice(0, 80);
+          if (!title && label) title = label[0].replace(/:\s*$/, "").slice(0, 80);
+          title = title || "Untitled";
+        }
+        const dueish = regrade || (!isReview && isDueish(sent));
+        const id = uid(`outline:${CODE}:text:${slug(title)}`);
+        /** @type {Item} */
+        const item = {
+          id,
+          source: "outline",
+          type: regrade ? "deadline" : isReview ? "event" : /** @type {Item["type"]} */ (cls.type),
+          category: cat || undefined,
+          title,
+          org: code,
+          status: "open",
+          confidence: "tentative",
+          review: "pending",
+          seenIn: seen(id.replace(/^outline:/, "")),
+          evidence: { snippet: sent.slice(0, 300), url, method: "text" },
+          meta: hit.weekdayMismatch ? { weekdayMismatch: true } : undefined,
+        };
+        if (dueish) {
+          item.dueAt = hit.allDay ? dueEndOfDay(hit.startAt) : hit.startAt;
+          if (hit.allDay) item.allDay = true;
+        } else {
+          item.startAt = hit.startAt;
+          if (hit.endAt) item.endAt = hit.endAt;
+          if (hit.allDay) item.allDay = true;
+        }
+        items.push(item);
+        break; // one item per sentence
       }
-      const dueish = !isReview && isDueish(line);
-      const id = uid(`outline:${CODE}:text:${slug(title)}`);
-      /** @type {Item} */
-      const item = {
-        id,
-        source: "outline",
-        type: isReview ? "event" : /** @type {Item["type"]} */ (cls.type),
-        category: cat || undefined,
-        title,
-        org: code,
-        status: "open",
-        confidence: "tentative",
-        review: "pending",
-        seenIn: seen(id.replace(/^outline:/, "")),
-        evidence: { snippet: line.slice(0, 300), url, method: "text" },
-        meta: hit.weekdayMismatch ? { weekdayMismatch: true } : undefined,
-      };
-      if (dueish) {
-        item.dueAt = hit.allDay ? dueEndOfDay(hit.startAt) : hit.startAt;
-        if (hit.allDay) item.allDay = true;
-      } else {
-        item.startAt = hit.startAt;
-        if (hit.endAt) item.endAt = hit.endAt;
-        if (hit.allDay) item.allDay = true;
-      }
-      items.push(item);
-      break; // one item per line
     }
   }
 
@@ -644,7 +687,7 @@ export function buildOutline(data, opts = {}) {
 
   /* ---- exam coverage details ---- */
   const coverLines = String((data.text && data.text.assessments) || "")
-    .split(/\n|(?<=[.!?])\s+/)
+    .split(/\n|(?<=[.!?][)\]]?)\s+|(?<=[.!?])(?=[A-Z])/)
     .filter((s) => /cover(s|ed)?\b|\bmaterial\b/i.test(s));
   for (const item of items) {
     if (item.type !== "exam" || (item.category !== "midterm" && item.category !== "final")) continue;

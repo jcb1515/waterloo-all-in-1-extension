@@ -51,15 +51,21 @@ test("probe: page kind, ok and kind counts match the extract", () => {
 test("probe: exact counts on the week fixture", () => {
   const r = probe(docOf("gcal-week"), GC + "week/2026/9/29");
   assert.deepEqual(r.counts, {
-    eventChips: 5,
-    labeled: 4,
+    eventChips: 6,
+    labeled: 5,
     decodedIds: 4,
     own: 1,
-    subscribed: 2,
+    subscribed: 3,
     unknown: 1,
     detailPopup: 1,
     account: 1,
   });
+});
+
+test("probe: a bare /r URL still reads the view from the DOM", () => {
+  const r = probe(docOf("gcal-week"), GC);
+  assert.equal(r.page, "gcal-week");
+  assert.equal(r.ok, true);
 });
 
 test("probe: detailPopup only where a dialog reads", () => {

@@ -10,7 +10,7 @@
 
 import { normCourseCode } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
-import { termCodeFor, zonedIso } from "../../lib/textdates/index.js";
+import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { factsOf } from "../learn/classify.js";
 import { KIND_TITLE, addDays, dow, slug, torontoDate } from "../outline/expand.js";
 
@@ -25,21 +25,29 @@ export const EVIDENCE_CALENDAR = { method: /** @type {const} */ ("api"), url: "h
 const OFFSET = /(?:z|[+-]\d{2}:?\d{2})$/i;
 const WALL = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/;
 
+/** Only plausible academic years — .NET MinValue "0001-01-01" is not a date. */
+const saneYear = (y) => y >= 2000 && y <= 2100;
+
 /**
  * A Portal timestamp -> ISO instant. Z/offset strings are parsed literally;
- * anything else in YYYY-MM-DDTHH:mm(:ss) form is Toronto wall time.
+ * anything else in YYYY-MM-DDTHH:mm(:ss) form is Toronto wall time. Results
+ * outside 2000-2100 (MinValue and friends) read as "no date".
  * @param {string} s @returns {string|null}
  */
 export function portalInstant(s) {
   const str = String(s ?? "").trim();
   if (!str) return null;
+  /** @type {string|null} */
+  let iso;
   if (OFFSET.test(str)) {
     const t = Date.parse(str);
-    return Number.isNaN(t) ? null : new Date(t).toISOString();
+    iso = Number.isNaN(t) ? null : new Date(t).toISOString();
+  } else {
+    const m = str.match(WALL);
+    if (!m) return null;
+    iso = zonedIso(Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]), TZ);
   }
-  const m = str.match(WALL);
-  if (!m) return null;
-  return zonedIso(Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]), TZ);
+  return iso && saneYear(Number(iso.slice(0, 4))) ? iso : null;
 }
 
 /**
@@ -50,7 +58,7 @@ export function torontoDay(s) {
   const str = String(s ?? "");
   if (!/T|\d{2}:\d{2}/.test(str)) {
     const d = str.match(/\d{4}-\d{2}-\d{2}/);
-    return d ? d[0] : null;
+    return d && saneYear(Number(d[0].slice(0, 4))) ? d[0] : null;
   }
   const iso = portalInstant(str);
   return iso ? torontoDate(iso) : null;
@@ -67,18 +75,48 @@ const seenIn = (key, scope, at) => [{ source: /** @type {const} */ ("portal"), k
 /** @type {Record<string, import("../../core/contract.js").ItemType>} */
 const COMP_TYPE = { TUT: "tutorial", LAB: "lab", TST: "exam" };
 
+/** Two Toronto intervals overlap (adjacent ends don't count). */
+const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
+
 /**
  * CourseSchedule rows -> meeting items + course patches. `instructors` is the
  * accumulated {"CODE|section": [{name, email}]} map from enrollments: an
  * Instructor fact only appears when enrollments were observed first.
+ *
+ * TST rows are the booked midterm slots. They share the exam item id family
+ * (`portal:exam:<CODE>:midterm`) with ExamSchedule midterms so whichever side
+ * reads last writes the merged item — one item either way. `examIndex`
+ * (emitted exams from an earlier ExamSchedule read) rebuilds the merged item
+ * here when the exam is already known; floating TST items are recorded in
+ * `tstIndex` for the other direction.
  * @param {any[]} rows
- * @param {{scope?: string, at?: string, instructors?: Record<string, InstructorName[]>}} [ctx]
- * @returns {{items: Item[], patches: {code: string, name?: string, term?: number, sections: string[]}[]}}
+ * @param {{scope?: string, at?: string, instructors?: Record<string, InstructorName[]>,
+ *   examIndex?: Record<string, any[]>}} [ctx]
+ * @returns {{items: Item[], patches: {code: string, name?: string, term?: number, sections: string[]}[],
+ *   tstIndex: Record<string, any[]>}}
  */
-export function mapSchedule(rows, { scope = "", at = "", instructors } = {}) {
+export function mapSchedule(rows, { scope = "", at = "", instructors, examIndex } = {}) {
   /** @type {Item[]} */
   const items = [];
   const patches = new Map();
+  /** @type {Record<string, any[]>} */
+  const tstIndex = {};
+  /** @type {Map<string, number>} */
+  const tstUsed = new Map();
+  /** Ids already emitted this call (a matched exam's id counts as used). */
+  const usedIds = new Set();
+  const examIdFor = (code) => {
+    const base = `portal:exam:${code.replace(/\s+/g, "")}:midterm`;
+    let n = tstUsed.get(code) || 0;
+    let id;
+    do {
+      n += 1;
+      id = n > 1 ? `${base}:${n}` : base;
+    } while (usedIds.has(id));
+    tstUsed.set(code, n);
+    usedIds.add(id);
+    return id;
+  };
   for (const row of rows || []) {
     const code = normCourseCode(`${row.subjectCode || ""} ${row.catalog || ""}`.trim());
     const comp = String(row.componentCode || "").toUpperCase();
@@ -86,43 +124,134 @@ export function mapSchedule(rows, { scope = "", at = "", instructors } = {}) {
     const section = `${comp} ${sect}`.trim();
     const startAt = portalInstant(row.startDate);
     if (!code || !startAt) continue;
-    const key = `sched:${code.replace(/\s+/g, "")}:${comp}${sect}:${startAt}`;
     const isTst = comp === "TST";
-    const names = ((instructors && instructors[`${code}|${section}`]) || [])
-      .map((i) => i.name)
-      .join(", ");
-    const facts = factsOf([
-      ["Instructor", names],
-      ["Room", row.roomDescription],
-      ["Section", section],
-    ]);
-    items.push(
-      /** @type {Item} */ ({
-        id: `portal:${key}`,
-        source: "portal",
-        org: code,
-        type: isTst ? "exam" : COMP_TYPE[comp] || "class",
-        category: isTst ? "midterm" : undefined,
-        title: isTst ? "Midterm" : /** @type {Record<string, string>} */ (KIND_TITLE)[comp] || "Class",
-        startAt,
-        endAt: portalInstant(row.endDate) || undefined,
-        location: row.roomDescription || undefined,
-        section: section || undefined,
-        status: "open",
-        confidence: "exact",
-        review: "auto",
-        meta: facts ? { facts } : undefined,
-        seenIn: seenIn(key, scope, at),
-        evidence: { ...EVIDENCE_ACADEMICS },
-      }),
-    );
+    const endAt = portalInstant(row.endDate) || undefined;
+
+    if (isTst) {
+      const day = torontoDate(startAt);
+      const exams = (examIndex && examIndex[code]) || [];
+      // Same course + same Toronto day + overlapping times: this slot is the
+      // booked room for an ExamSchedule midterm — emit it merged.
+      const hit = exams.find(
+        (e) => e && e.day === day && overlaps(e.start, e.end, startAt, endAt || startAt)
+      );
+      const names = ((instructors && instructors[`${code}|${section}`]) || [])
+        .map((i) => i.name)
+        .join(", ");
+      if (hit) {
+        usedIds.add(hit.id);
+        const location = hit.location || row.roomDescription || undefined;
+        const facts = factsOf([
+          ["Instructor", names],
+          ["Room", location],
+          ["Seat", hit.seat],
+          ["Seat instructions", hit.seatInstructions],
+          ["Duration", hit.end !== hit.start && durationText(hit.start, hit.end)],
+          ["Section", section],
+          [
+            "Test slot",
+            hit.start !== startAt || hit.end !== (endAt || startAt)
+              ? slotRange(startAt, endAt || startAt)
+              : null,
+          ],
+        ]);
+        const key = String(hit.id).replace(/^portal:/, "");
+        items.push(
+          /** @type {Item} */ ({
+            id: hit.id,
+            source: "portal",
+            org: code,
+            type: "exam",
+            category: hit.category || "midterm",
+            title: hit.category === "final" ? "Final exam" : "Midterm",
+            startAt: hit.start,
+            endAt: hit.end !== hit.start ? hit.end : undefined,
+            location:
+              [location, hit.seat && `Seat ${hit.seat}`].filter(Boolean).join(" · ") || undefined,
+            details: hit.seatInstructions || undefined,
+            status: "open",
+            confidence: "exact",
+            review: "auto",
+            meta: facts ? { facts } : undefined,
+            seenIn: seenIn(key, scope, at),
+            evidence: { ...EVIDENCE_ACADEMICS },
+          }),
+        );
+      } else {
+        const id = examIdFor(code);
+        const key = String(id).replace(/^portal:/, "");
+        const facts = factsOf([
+          ["Instructor", names],
+          ["Room", row.roomDescription],
+          ["Section", section],
+        ]);
+        items.push(
+          /** @type {Item} */ ({
+            id,
+            source: "portal",
+            org: code,
+            type: "exam",
+            category: "midterm",
+            title: "Midterm",
+            startAt,
+            endAt,
+            location: row.roomDescription || undefined,
+            section: section || undefined,
+            status: "open",
+            confidence: "exact",
+            review: "auto",
+            meta: facts ? { facts } : undefined,
+            seenIn: seenIn(key, scope, at),
+            evidence: { ...EVIDENCE_ACADEMICS },
+          }),
+        );
+        (tstIndex[code] = tstIndex[code] || []).push({
+          id,
+          day,
+          start: startAt,
+          end: endAt || startAt,
+          room: row.roomDescription || undefined,
+          section: section || undefined,
+        });
+      }
+    } else {
+      const key = `sched:${code.replace(/\s+/g, "")}:${comp}${sect}:${startAt}`;
+      const names = ((instructors && instructors[`${code}|${section}`]) || [])
+        .map((i) => i.name)
+        .join(", ");
+      const facts = factsOf([
+        ["Instructor", names],
+        ["Room", row.roomDescription],
+        ["Section", section],
+      ]);
+      items.push(
+        /** @type {Item} */ ({
+          id: `portal:${key}`,
+          source: "portal",
+          org: code,
+          type: COMP_TYPE[comp] || "class",
+          title: /** @type {Record<string, string>} */ (KIND_TITLE)[comp] || "Class",
+          startAt,
+          endAt,
+          location: row.roomDescription || undefined,
+          section: section || undefined,
+          status: "open",
+          confidence: "exact",
+          review: "auto",
+          meta: facts ? { facts } : undefined,
+          seenIn: seenIn(key, scope, at),
+          evidence: { ...EVIDENCE_ACADEMICS },
+        }),
+      );
+    }
+
     const p = patches.get(code) || { code, sections: /** @type {string[]} */ ([]) };
     if (section) p.sections.push(section);
     if (row.courseTitle) p.name = row.courseTitle;
     if (p.term == null) p.term = termCodeFor(new Date(startAt));
     patches.set(code, p);
   }
-  return { items, patches: [...patches.values()] };
+  return { items, patches: [...patches.values()], tstIndex };
 }
 
 const MIDTERM = /\b(midterm|mid-term|term test)\b/i;
@@ -144,32 +273,156 @@ function durationText(startAt, endAt) {
   return `${m} min`;
 }
 
-export function mapExams(rows, { scope, at }) {
+/** "2:30–4:20 PM" / "11:00 AM–12:30 PM" Toronto wall clock for the slot fact. */
+function slotRange(startIso, endIso) {
+  const clock = (iso) => {
+    const p = zonedParts(new Date(iso));
+    return { t: `${p.h % 12 || 12}:${String(p.mi).padStart(2, "0")}`, ap: p.h < 12 ? "AM" : "PM" };
+  };
+  const a = clock(startIso);
+  const b = clock(endIso);
+  return a.ap === b.ap ? `${a.t}–${b.t} ${b.ap}` : `${a.t} ${a.ap}–${b.t} ${b.ap}`;
+}
+
+/**
+ * The term's exam period {start, end} (inclusive days) for a course: its own
+ * term's window first, else the only bounded exam period in the term map.
+ * @returns {{start: string, end: string}|null}
+ */
+function examWindow(code, terms, courses) {
+  const term = courses && courses[code] && courses[code].term;
+  const own = term != null && terms && terms[term] && terms[term].examPeriod;
+  if (own && own.start && own.end) return own;
+  const cands = Object.values(terms || {}).filter(
+    (t) => t && t.examPeriod && t.examPeriod.start && t.examPeriod.end
+  );
+  return cands.length === 1 ? cands[0].examPeriod : null;
+}
+
+/**
+ * ExamSchedule rows -> exam items. Ids carry no date so a moved exam keeps
+ * its id; true duplicates within one payload get :2, :3.
+ *
+ * `tstIndex` (emitted TST items from earlier CourseSchedule reads) merges a
+ * booked slot into the midterm item: same course + Toronto day + overlapping
+ * times -> the item takes the TST item's id (which lives in the
+ * `portal:exam:<CODE>:midterm` family), the exam's times, and the slot's
+ * room/section as facts. `examIndex` is returned so the next CourseSchedule
+ * read can suppress the same slot in the other direction.
+ * @param {any[]} rows
+ * @param {{scope?: string, at?: string, terms?: Record<string, any>,
+ *   courses?: Record<string, any>, tstIndex?: Record<string, any[]>}} ctx
+ * @returns {{items: Item[], examIndex: Record<string, {day: string, start: string, end: string}[]>}}
+ */
+export function mapExams(rows, { scope, at, terms, courses, tstIndex } = {}) {
   /** @type {Item[]} */
   const items = [];
-  const used = new Map();
+  /** @type {Record<string, {day: string, start: string, end: string}[]>} */
+  const examIndex = {};
+  // TST items still floating: the matched exam takes the TST item's id, an
+  // unmatched one must not collide with it.
+  /** @type {Map<string, any[]>} */
+  const floats = new Map();
+  const usedIds = new Set();
+  for (const [code, list] of Object.entries(tstIndex || {})) {
+    const c = normCourseCode(code) || code;
+    const cur = floats.get(c) || [];
+    for (const t of list || []) {
+      if (!t || !t.id) continue;
+      cur.push({ ...t });
+      usedIds.add(t.id);
+    }
+    floats.set(c, cur);
+  }
+  const alloc = (base) => {
+    let n = 1;
+    let id = base;
+    while (usedIds.has(id)) id = `${base}:${++n}`;
+    usedIds.add(id);
+    return id;
+  };
+
   for (const row of rows || []) {
-    if (!row.startDate) continue;
-    const startAt = portalInstant(row.startDate);
-    if (!startAt) continue;
-    const endAt = portalInstant(row.endDate) || undefined;
     const rawTitle = String(row.title || "").trim();
     const cm = rawTitle.match(CODE_START);
     const org = cm ? normCourseCode(`${cm[1]} ${cm[2]}`) : undefined;
     const category = MIDTERM.test(rawTitle) ? "midterm" : "final";
-    const base = `portal:exam:${org ? org.replace(/\s+/g, "") : slug(rawTitle)}:${category}`;
-    const n = (used.get(base) || 0) + 1;
-    used.set(base, n);
-    const key = `${base.replace(/^portal:/, "")}${n > 1 ? `:${n}` : ""}`;
+    const startAt = row.startDate ? portalInstant(row.startDate) : null;
+    if (!startAt) {
+      // MinValue/blank: never an exact item. A final becomes a tentative
+      // all-day window over the term's exam period when it's known.
+      if (category === "final" && org) {
+        const win = examWindow(org, terms, courses);
+        if (win) {
+          const key = `exam:${org.replace(/\s+/g, "")}:final`;
+          usedIds.add(`portal:${key}`);
+          const facts = factsOf([
+            ["Room", row.location],
+            ["Seat", row.seatCode],
+            ["Seat instructions", row.seatInstructions],
+          ]);
+          items.push(
+            /** @type {Item} */ ({
+              id: `portal:${key}`,
+              source: "portal",
+              org,
+              type: "exam",
+              category: "final",
+              title: "Final exam (date TBA)",
+              startAt: midnight(win.start),
+              endAt: midnight(nextDay(win.end)),
+              allDay: true,
+              status: "open",
+              confidence: "tentative",
+              review: "auto",
+              meta: facts ? { rawTitle, facts } : { rawTitle },
+              seenIn: seenIn(key, scope, at),
+              evidence: { ...EVIDENCE_ACADEMICS },
+            }),
+          );
+        }
+      }
+      continue;
+    }
+    const endAt = portalInstant(row.endDate) || undefined;
+    const day = torontoDate(startAt);
+
+    // Same course + same Toronto day + overlapping times: fold the booked
+    // TST slot into this exam. The item keeps the TST item's id (already in
+    // the exam family), so it upgrades in place.
+    const list = (org && floats.get(org)) || [];
+    const hit = list.find(
+      (t) => !t.claimed && t.day === day && overlaps(t.start, t.end, startAt, endAt || startAt)
+    );
+    let id;
+    let key;
+    if (hit) {
+      hit.claimed = true;
+      id = hit.id;
+      usedIds.add(id);
+      key = String(id).replace(/^portal:/, "");
+    } else {
+      const base = `portal:exam:${org ? org.replace(/\s+/g, "") : slug(rawTitle)}:${category}`;
+      id = alloc(base);
+      key = String(id).replace(/^portal:/, "");
+    }
+    const location = row.location || (hit && hit.room) || undefined;
     const facts = factsOf([
-      ["Room", row.location],
+      ["Room", location],
       ["Seat", row.seatCode],
       ["Seat instructions", row.seatInstructions],
       ["Duration", endAt && durationText(startAt, endAt)],
+      ["Section", hit && hit.section],
+      [
+        "Test slot",
+        hit && (hit.start !== startAt || hit.end !== (endAt || startAt))
+          ? slotRange(hit.start, hit.end)
+          : null,
+      ],
     ]);
     items.push(
       /** @type {Item} */ ({
-        id: `portal:${key}`,
+        id,
         source: "portal",
         org,
         type: "exam",
@@ -177,7 +430,9 @@ export function mapExams(rows, { scope, at }) {
         title: category === "midterm" ? "Midterm" : "Final exam",
         startAt,
         endAt,
-        location: [row.location, row.seatCode && `Seat ${row.seatCode}`].filter(Boolean).join(" · ") || undefined,
+        location:
+          [location, row.seatCode && `Seat ${row.seatCode}`].filter(Boolean).join(" · ") ||
+          undefined,
         details: row.seatInstructions || undefined,
         status: "open",
         confidence: "exact",
@@ -187,8 +442,20 @@ export function mapExams(rows, { scope, at }) {
         evidence: { ...EVIDENCE_ACADEMICS },
       }),
     );
+    if (org) {
+      (examIndex[org] = examIndex[org] || []).push({
+        id,
+        day,
+        start: startAt,
+        end: endAt || startAt,
+        location: location || undefined,
+        seat: row.seatCode || undefined,
+        seatInstructions: row.seatInstructions || undefined,
+        category,
+      });
+    }
   }
-  return items;
+  return { items, examIndex };
 }
 
 /**

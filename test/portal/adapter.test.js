@@ -33,18 +33,29 @@ const payload = (url, body, extra = {}) => ({
   ...extra,
 });
 
-const ctx = (state = {}) => ({
+const ctx = (state = {}, terms = []) => ({
   now: NOW,
   settings: {},
   state,
   courses: [],
-  terms: [],
+  terms,
   log: () => {},
   textDates: () => [],
   fetch: async () => ({ status: 0 }),
   relay: async () => ({ status: 0 }),
   parseHtml: async () => null,
 });
+
+/** No item anywhere may carry a pre-2000 (or post-2100) start/end. */
+const assertSaneDates = (items) => {
+  for (const i of items) {
+    for (const at of [i.startAt, i.endAt, i.dueAt]) {
+      if (!at) continue;
+      const y = Number(String(at).slice(0, 4));
+      assert.ok(y >= 2000 && y <= 2100, `${i.id} has ${at}`);
+    }
+  }
+};
 
 test("portalInstant reads bare strings as Toronto wall time", () => {
   assert.equal(portalInstant("2026-09-10T13:00:00"), "2026-09-10T17:00:00.000Z"); // EDT
@@ -54,6 +65,15 @@ test("portalInstant reads bare strings as Toronto wall time", () => {
   assert.equal(portalInstant("2026-09-10T13:00:00-0400"), "2026-09-10T17:00:00.000Z");
   assert.equal(torontoDay("2026-12-18T19:30:00"), "2026-12-18");
   assert.equal(torontoDay("2026-12-19T01:00:00Z"), "2026-12-18"); // offset -> Toronto day
+});
+
+test("portalInstant rejects implausible years (.NET MinValue)", () => {
+  assert.equal(portalInstant("0001-01-01T00:00:00"), null);
+  assert.equal(portalInstant("0001-01-01T00:00:00Z"), null);
+  assert.equal(portalInstant("2101-01-01T00:00:00"), null);
+  assert.equal(portalInstant("1999-06-15T12:00:00"), null);
+  assert.equal(torontoDay("0001-01-01"), null);
+  assert.equal(torontoDay("0001-01-01T00:00:00"), null);
 });
 
 test("CourseSchedule -> meeting items, TST midterm, course sections", async () => {
@@ -114,6 +134,7 @@ test("ExamSchedule -> exam items with seat info, ids survive a moved date", asyn
   assert.equal(math.title, "Final exam");
   assert.equal(math.startAt, "2026-12-19T00:30:00.000Z"); // 19:30 EST
   assert.equal(math.location, undefined);
+  assertSaneDates(res.items);
 
   // Move ECE 150 a day: the id (no date) is stable.
   const moved = JSON.parse(json("exams"));
@@ -178,6 +199,152 @@ test("exam items carry room, seat and duration facts", async () => {
   ]);
   const math = res.items.find((i) => i.org === "MATH 117");
   assert.deepEqual(math.meta.facts, [{ label: "Duration", value: "2 h 30 min" }]);
+});
+
+test("MinValue finals become a tentative exam-period window when known", async () => {
+  // DailyEventsV2 carries the term's exam period (Dec 10-23).
+  const r1 = await adapter.observe.parse(payload(URLS.events, json("events")), ctx());
+  const res = await adapter.observe.parse(
+    payload(URLS.exams, json("exams-merge")),
+    ctx(r1.state),
+  );
+
+  const tba = res.items.filter((i) => i.title === "Final exam (date TBA)");
+  assert.equal(tba.length, 2); // MATH 135 + ECE 105, both MinValue
+  const m135 = tba.find((i) => i.org === "MATH 135");
+  assert.equal(m135.id, "portal:exam:MATH135:final"); // same id the exact final would get
+  assert.equal(m135.type, "exam");
+  assert.equal(m135.category, "final");
+  assert.equal(m135.allDay, true);
+  assert.equal(m135.confidence, "tentative");
+  assert.equal(m135.review, "auto");
+  assert.equal(m135.startAt, "2026-12-10T05:00:00.000Z"); // Toronto midnight Dec 10 (EST)
+  assert.equal(m135.endAt, "2026-12-24T05:00:00.000Z"); // inclusive Dec 23 -> exclusive
+  assertSaneDates(res.items);
+
+  // Once the same final is scheduled, the item upgrades in place.
+  const scheduled = JSON.parse(json("exams-merge"));
+  scheduled.data[2].startDate = "2026-12-15T12:30:00";
+  scheduled.data[2].endDate = "2026-12-15T15:00:00";
+  const res2 = await adapter.observe.parse(
+    payload(URLS.exams, JSON.stringify(scheduled)),
+    ctx(r1.state),
+  );
+  const exact = res2.items.find((i) => i.org === "MATH 135");
+  assert.equal(exact.id, "portal:exam:MATH135:final");
+  assert.equal(exact.title, "Final exam");
+  assert.equal(exact.confidence, "exact");
+  assert.equal(exact.startAt, "2026-12-15T17:30:00.000Z");
+});
+
+test("MinValue finals without a known exam period emit nothing", async () => {
+  const res = await adapter.observe.parse(payload(URLS.exams, json("exams-merge")), ctx());
+  assert.ok(!res.items.some((i) => i.org === "MATH 135"));
+  assert.ok(!res.items.some((i) => i.org === "ECE 105"));
+  assertSaneDates(res.items);
+});
+
+test("the exam period can also come from ctx.terms", async () => {
+  const terms = [
+    {
+      termCode: 1269,
+      start: "2026-09-09",
+      end: "2026-12-07",
+      examPeriod: { start: "2026-12-10", end: "2026-12-23" },
+    },
+  ];
+  const res = await adapter.observe.parse(payload(URLS.exams, json("exams-merge")), ctx({}, terms));
+  const m135 = res.items.find((i) => i.org === "MATH 135");
+  assert.equal(m135.title, "Final exam (date TBA)");
+  assert.equal(m135.startAt, "2026-12-10T05:00:00.000Z");
+  assert.equal(m135.endAt, "2026-12-24T05:00:00.000Z");
+});
+
+test("ExamSchedule + CourseSchedule TST merge, schedule read first", async () => {
+  const r1 = await adapter.observe.parse(payload(URLS.schedule, json("schedule-merge")), ctx());
+  // Before exams are read the TST slot stands on its own (booked times/room).
+  const tst = r1.items.find((i) => i.org === "ECE 150");
+  assert.equal(tst.id, "portal:exam:ECE150:midterm");
+  assert.equal(tst.type, "exam");
+  assert.equal(tst.category, "midterm");
+  assert.equal(tst.title, "Midterm");
+  assert.equal(tst.section, "TST 101");
+  assert.equal(tst.startAt, "2026-10-22T18:30:00.000Z"); // 14:30 EDT
+  assert.equal(tst.endAt, "2026-10-22T20:20:00.000Z");
+  assert.equal(tst.location, "RCH 301");
+  // The MinValue LEC row yields no item.
+  assert.ok(!r1.items.some((i) => i.org === "ECE 105"));
+  assertSaneDates(r1.items);
+
+  const r2 = await adapter.observe.parse(
+    payload(URLS.exams, json("exams-merge")),
+    ctx(r1.state),
+  );
+  const mid = r2.items.find((i) => i.org === "ECE 150");
+  assert.equal(mid.id, "portal:exam:ECE150:midterm"); // replaced in place
+  assert.equal(mid.startAt, "2026-10-22T19:00:00.000Z"); // ExamSchedule wins: 15:00-16:00 EDT
+  assert.equal(mid.endAt, "2026-10-22T20:00:00.000Z");
+  // Exam location was "": the TST room is used, seat/seat-instructions carried.
+  assert.equal(mid.location, "RCH 301 · Seat B07");
+  assert.equal(mid.details, "Use odd-numbered seats");
+  assert.equal(mid.section, undefined);
+  assert.deepEqual(mid.meta.facts, [
+    { label: "Room", value: "RCH 301" },
+    { label: "Seat", value: "B07" },
+    { label: "Seat instructions", value: "Use odd-numbered seats" },
+    { label: "Duration", value: "1 h" },
+    { label: "Section", value: "TST 101" },
+    { label: "Test slot", value: "2:30–4:20 PM" },
+  ]);
+  assertSaneDates(r2.items);
+});
+
+test("ExamSchedule + CourseSchedule TST merge, exams read first", async () => {
+  const r1 = await adapter.observe.parse(payload(URLS.exams, json("exams-merge")), ctx());
+  const exam = r1.items.find((i) => i.org === "ECE 150");
+  assert.equal(exam.id, "portal:exam:ECE150:midterm");
+  assert.equal(exam.startAt, "2026-10-22T19:00:00.000Z");
+  assert.equal(exam.location, "Seat B07"); // no room known yet, seat only
+
+  const r2 = await adapter.observe.parse(
+    payload(URLS.schedule, json("schedule-merge")),
+    ctx(r1.state),
+  );
+  // The TST row folds into the exam item instead of adding a second one.
+  const eceItems = r2.items.filter((i) => i.org === "ECE 150" && i.category === "midterm");
+  assert.equal(eceItems.length, 1);
+  const mid = eceItems[0];
+  assert.equal(mid.id, "portal:exam:ECE150:midterm");
+  assert.equal(mid.startAt, "2026-10-22T19:00:00.000Z"); // exam writing time, not the slot
+  assert.equal(mid.endAt, "2026-10-22T20:00:00.000Z");
+  assert.equal(mid.location, "RCH 301 · Seat B07");
+  assert.equal(mid.details, "Use odd-numbered seats");
+  assert.deepEqual(mid.meta.facts, [
+    { label: "Room", value: "RCH 301" },
+    { label: "Seat", value: "B07" },
+    { label: "Seat instructions", value: "Use odd-numbered seats" },
+    { label: "Duration", value: "1 h" },
+    { label: "Section", value: "TST 101" },
+    { label: "Test slot", value: "2:30–4:20 PM" },
+  ]);
+  assertSaneDates(r2.items);
+});
+
+test("exam-only midterm and TST-only midterm stay separate items", async () => {
+  // PHYS 121 has no TST row; MATH 117's TST (schedule.json) has no exam.
+  const r1 = await adapter.observe.parse(payload(URLS.exams, json("exams-merge")), ctx());
+  const phys = r1.items.find((i) => i.org === "PHYS 121");
+  assert.equal(phys.id, "portal:exam:PHYS121:midterm");
+  assert.equal(phys.title, "Midterm");
+  assert.equal(phys.location, "PHY 145");
+  assert.equal(phys.startAt, "2026-10-23T23:00:00.000Z"); // 19:00 EDT
+
+  const r2 = await adapter.observe.parse(payload(URLS.schedule, json("schedule")), ctx());
+  const math = r2.items.find((i) => i.org === "MATH 117");
+  assert.equal(math.id, "portal:exam:MATH117:midterm");
+  assert.equal(math.section, "TST 101");
+  assert.equal(math.location, "MC 4020");
+  assertSaneDates([...r1.items, ...r2.items]);
 });
 
 test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => {

@@ -61,7 +61,7 @@ test("gcal week view: chips, kinds, range and the merged detail popup", () => {
     start: "2026-09-27T04:00:00.000Z",
     end: "2026-10-04T04:00:00.000Z",
   });
-  assert.equal(ex.events.length, 4); // popup merged into its chip
+  assert.equal(ex.events.length, 5); // popup merged into its chip
 
   const chat = find(ex.events, "Chat about robotics");
   assert.equal(chat.calendarKind, "own");
@@ -69,6 +69,7 @@ test("gcal week view: chips, kinds, range and the merged detail popup", () => {
   assert.equal(chat.endAt, "2026-09-29T17:30:00.000Z");
   assert.equal(chat.allDay, false);
 
+  // No aria-label: the hidden leaf span carries the description.
   const lec = find(ex.events, "ECE 105 · Lecture");
   assert.equal(lec.calendarKind, "subscribed");
   assert.equal(lec.startAt, "2026-09-30T18:30:00.000Z");
@@ -79,6 +80,14 @@ test("gcal week view: chips, kinds, range and the merged detail popup", () => {
   assert.equal(tday.allDay, true);
   assert.equal(tday.startAt, "2026-10-12T04:00:00.000Z");
   assert.equal(tday.endAt, undefined); // single all-day: no range end
+
+  // "… at 12am to … at 12am" reads as all-day; the "Calendar:" segment
+  // makes it subscribed even with an undecodable event id.
+  const rw = find(ex.events, "Reading week opens");
+  assert.equal(rw.calendarKind, "subscribed");
+  assert.equal(rw.allDay, true);
+  assert.equal(rw.startAt, "2026-09-27T04:00:00.000Z");
+  assert.equal(rw.endAt, "2026-09-28T04:00:00.000Z");
 
   const mystery = find(ex.events, "Mystery");
   assert.equal(mystery.calendarKind, "unknown");
@@ -155,6 +164,36 @@ test("gcal label/date/id units", () => {
   const r = parseChipLabel("All day, Reading week, September 28 – October 2, 2026");
   assert.equal(r.startAt, "2026-09-28T04:00:00.000Z");
   assert.equal(r.endAt, "2026-10-03T04:00:00.000Z");
+  // Long-span head with its own dates.
+  const long = parseChipLabel(
+    "September 8, 2026 at 8am to December 23, 2026 at 11:59pm, Long thing, Jane Student, Accepted, No location",
+  );
+  assert.equal(long.title, "Long thing");
+  assert.equal(long.startAt, "2026-09-08T12:00:00.000Z"); // 8am EDT
+  assert.equal(long.endAt, "2026-12-24T04:59:00.000Z"); // 11:59pm EST
+  assert.equal(long.allDay, false);
+  // Midnight-to-midnight span is all-day.
+  const mid = parseChipLabel(
+    "September 27, 2026 at 12am to September 28, 2026 at 12am, Day thing, Calendar: Waterloo All-in-1, No location",
+  );
+  assert.equal(mid.allDay, true);
+  assert.equal(mid.startAt, "2026-09-27T04:00:00.000Z");
+  assert.equal(mid.endAt, "2026-09-28T04:00:00.000Z");
+  assert.equal(mid.calendar, "Waterloo All-in-1");
+  // Single-date head is a point event.
+  const pt = parseChipLabel(
+    "September 27, 2026 at 12:59am, Point thing, Calendar: Waterloo All-in-1, No location",
+  );
+  assert.equal(pt.title, "Point thing");
+  assert.equal(pt.startAt, "2026-09-27T04:59:00.000Z");
+  assert.equal(pt.endAt, undefined);
+  // Span with a time-only second leg stays on its day.
+  const same = parseChipLabel(
+    "September 27, 2026 at 10pm to 11pm, Evening thing, Jane Student, Accepted, No location",
+  );
+  assert.equal(same.startAt, "2026-09-28T02:00:00.000Z"); // 10pm EDT
+  assert.equal(same.endAt, "2026-09-28T03:00:00.000Z");
+
   // Unparseable prefixes are skipped.
   assert.equal(parseChipLabel("Focus time"), null);
   assert.equal(parseChipLabel("1pm, No range, October 1, 2026"), null);
