@@ -273,7 +273,7 @@ test("SETUP registry: exact key set, all functions, email/gmail alias outlook", 
   assert.equal(mod.SETUP.gmail, mod.SETUP.outlook);
 });
 
-test("SETUP pages smoke-render: toggle present, gcal shows no children", async () => {
+test("SETUP pages smoke-render: what-we-read text, children gated on enabled", async () => {
   const { SETUP, render } = await setupModule();
   const { document, window } = parseHTML(
     "<html><body><div id='root'></div></body></html>"
@@ -296,23 +296,48 @@ test("SETUP pages smoke-render: toggle present, gcal shows no children", async (
     open: () => {},
   };
 
+  // Every page explains itself: the what-we-read paragraph is present.
+  const READ_MARK = {
+    learn: "courses, assignments",
+    outline: "outline pages",
+    portal: "class schedule",
+    outlook: "calendar invites",
+    waterlooworks: "applications, interviews",
+    discord: "servers and channels",
+    gcal: "Google calendars",
+    email: "calendar invites",
+    gmail: "calendar invites",
+  };
   for (const key of Object.keys(SETUP)) {
     const root = document.createElement("div");
     document.body.appendChild(root);
     render(SETUP[key]({ state, actions }), root);
-    // Every page starts with the SourceBasics Enabled toggle.
-    const toggle = root.querySelector(".switch input[type='checkbox']");
-    assert.ok(toggle, `${key}: no Enabled toggle`);
     assert.ok(
-      root.textContent.includes("Enabled"),
-      `${key}: no Enabled label`
+      root.textContent.includes(READ_MARK[key]),
+      `${key}: no what-we-read text`
     );
   }
 
-  // gcal is off by default -> only the toggle + the what-we-read text.
-  const root = document.createElement("div");
+  // Enabled source -> its setup blocks render (Discord's watched editor).
+  let root = document.createElement("div");
+  render(SETUP.discord({ state, actions }), root);
+  assert.ok(root.textContent.includes("Watched servers"));
+
+  // Disabled source -> children hidden; the paragraph still shows.
+  const offState = {
+    ...state,
+    settings: {
+      ...state.settings,
+      sources: { ...(state.settings.sources || {}), discord: { enabled: false } },
+    },
+  };
+  root = document.createElement("div");
+  render(SETUP.discord({ state: offState, actions }), root);
+  assert.ok(!root.textContent.includes("Watched servers"));
+  assert.ok(root.textContent.includes("servers and channels"));
+
+  // gcal is off by default -> no children, paragraph still shows.
+  root = document.createElement("div");
   render(SETUP.gcal({ state, actions }), root);
-  assert.equal(root.querySelectorAll("button").length, 0);
-  assert.equal(root.querySelector(".source-actions"), null);
   assert.ok(root.textContent.includes("Google calendars"));
 });

@@ -4,11 +4,7 @@
 // Profile's sections/groups editing lives on the Portal page (v2).
 
 import { SourceBasics } from "./SourceBasics.jsx";
-import {
-  EmailProviders,
-  MailScan,
-  EmailScanControls,
-} from "../EmailSetup.jsx";
+import { EmailProviders, MailScan } from "../EmailSetup.jsx";
 import { DiscordWatched, DiscordChannels } from "../DiscordSetup.jsx";
 import { OutlineManager } from "../OutlineSetup.jsx";
 import { sectionsPatch, groupPatch } from "../../model/setup.js";
@@ -132,14 +128,12 @@ export function EmailSetupPage(p) {
       p.state.settings.sources &&
       p.state.settings.sources.outlook) ||
     {};
-  const st = p.state.sourceState && p.state.sourceState.outlook;
   const save = (patch) =>
     p.actions.saveSettings({ sources: { outlook: { ...src, ...patch } } });
   return (
     <SourceBasics sourceId="outlook" {...p}>
       <EmailProviders src={src} save={save} />
       <MailScan src={src} />
-      <EmailScanControls st={st} />
     </SourceBasics>
   );
 }
