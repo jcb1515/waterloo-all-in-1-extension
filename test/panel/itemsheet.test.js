@@ -8,6 +8,8 @@ import {
   primaryLink,
   hiddenSnoozed,
   sourceLabel,
+  calendarState,
+  calendarReasonText,
 } from "../../extension/src/panel/model/itemsheet.js";
 import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
 
@@ -117,4 +119,76 @@ test("hiddenSnoozed lists hidden and future-snoozed items", () => {
   assert.deepEqual(out.map((e) => e.item.id), ["b", "a"]);
   assert.equal(out[0].snoozedUntil !== null, true);
   assert.equal(out[1].hidden, true);
+});
+
+/* --------------------------- calendar state ------------------------------ */
+
+const CAL_ON = {
+  enabled: true,
+  include: { classes: true, tentative: true, completed: true, termDates: true },
+};
+const CAL_STATE = { settings: { calendar: CAL_ON, review: {} }, projects: [] };
+const CAL_NOW = new Date("2026-10-01T16:00:00.000Z");
+const calItem = (id, over = {}) => ({
+  id,
+  source: "gmail",
+  type: "deadline",
+  title: id,
+  status: "open",
+  confidence: "exact",
+  review: "auto",
+  dueAt: new Date(CAL_NOW.getTime() + 86400000).toISOString(),
+  ...over,
+});
+
+test("calendarState: publishable -> on + canRemove", () => {
+  const s = calendarState(calItem("x"), {}, CAL_STATE, CAL_NOW);
+  assert.deepEqual(s, { kind: "on", reason: null, canAdd: false, canRemove: true });
+});
+
+test("calendarState: meta.onCalendar -> google, no actions", () => {
+  const s = calendarState(calItem("x", { meta: { onCalendar: true } }), {}, CAL_STATE, CAL_NOW);
+  assert.equal(s.kind, "google");
+  assert.equal(s.reason, "on-google");
+  assert.equal(s.canAdd, false);
+  assert.equal(s.canRemove, false);
+});
+
+test("calendarState: pending / dismissed / removed are addable, others not", () => {
+  const pending = calItem("p", { review: "pending" });
+  assert.deepEqual(
+    calendarState(pending, {}, CAL_STATE, CAL_NOW),
+    { kind: "off", reason: "pending", canAdd: true, canRemove: false },
+  );
+  // showPending treats pending as accepted — the item is publishable "on".
+  const showAll = {
+    settings: { calendar: CAL_ON, review: { showPending: true } },
+    projects: [],
+  };
+  assert.equal(calendarState(pending, {}, showAll, CAL_NOW).kind, "on");
+
+  assert.deepEqual(
+    calendarState(calItem("d"), { review: "dismissed" }, CAL_STATE, CAL_NOW),
+    { kind: "off", reason: "dismissed", canAdd: true, canRemove: false },
+  );
+  assert.deepEqual(
+    calendarState(calItem("r"), { calendar: false }, CAL_STATE, CAL_NOW),
+    { kind: "off", reason: "removed", canAdd: true, canRemove: false },
+  );
+  assert.deepEqual(
+    calendarState(calItem("nd", { dueAt: undefined }), {}, CAL_STATE, CAL_NOW),
+    { kind: "off", reason: "no-date", canAdd: false, canRemove: false },
+  );
+  assert.equal(
+    calendarState(calItem("h"), { hidden: true }, CAL_STATE, CAL_NOW).reason,
+    "hidden",
+  );
+  assert.equal(calendarState(null, {}, CAL_STATE, CAL_NOW).kind, "off");
+});
+
+test("calendarReasonText covers the non-addable reasons", () => {
+  assert.match(calendarReasonText("classes-off"), /turned off in Calendar settings/);
+  assert.match(calendarReasonText("no-date"), /No date to put on a calendar/);
+  assert.match(calendarReasonText("opted-out", { meta: { projectId: "p" } }), /project/);
+  assert.match(calendarReasonText("undated"), /guess/);
 });

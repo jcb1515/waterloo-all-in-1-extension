@@ -85,43 +85,75 @@ const TYPE_ALARMS = {
 };
 
 /**
- * @param {any} it merged canonical item
+ * The publish decision for one effective item: null when the event would
+ * reach the feed, else a reason string naming why not. This is the single
+ * source of truth for feed exclusion — toEvent() calls it, and the item
+ * sheet's calendar row reports the same verdict to the user.
+ *
+ * Reasons:
+ *   "pending" | "dismissed"   review gate (acceptPending already applied)
+ *   "hidden"                  userState hidden
+ *   "cancelled"               status cancelled
+ *   "on-google"               meta.onCalendar — already on the user's Google
+ *                             Calendar; publishing would duplicate it
+ *   "opted-out"               meta.calendar === false, or its project keeps
+ *                             it off the feed
+ *   "removed"                 us.calendar === false — user removed it from
+ *                             the calendar in the item sheet
+ *   "completed-off"           done/submitted while include.completed is off
+ *   "classes-off"             classish item while include.classes is off
+ *   "tentative-off"           tentative while include.tentative is off
+ *   "term-dates-off"          term-date while include.termDates is off
+ *   "todo-only"               a to-do seam (reply/book-call categories or
+ *                             the submit-rankings action) while
+ *                             include.todos is off
+ *   "undated"                 meta.undated — the date is a guess, not real
+ *   "no-date"                 no dueAt/startAt/endAt at all
+ *   "past"                    anchor older than the 60-day window
+ *   "window"                  classish item outside the rolling publish
+ *                             window (a week back, classWeeks ahead)
+ * @param {any} it effective item (post-effectiveItem)
  * @param {any} us userState[it.id] (may be undefined)
  * @param {any} cal settings.calendar
  * @param {number} nowMs
  * @param {Set<string>} [excludedProjects]  project ids kept off the feed
- * @returns {any|null} the event to publish, or null to exclude
+ * @returns {string|null} exclusion reason, or null when it would publish
  */
-function toEvent(it, us, cal, nowMs, excludedProjects) {
-  if (!it || !it.id) return null;
-  if (it.review === "pending" || it.review === "dismissed") return null;
-  if (us && us.hidden) return null;
-  if (it.status === "cancelled") return null;
+export function feedExclusion(it, us, cal, nowMs, excludedProjects) {
+  if (!it || !it.id) return "no-date";
+  if (it.review === "pending") return "pending";
+  if (it.review === "dismissed") return "dismissed";
+  if (us && us.hidden) return "hidden";
+  if (it.status === "cancelled") return "cancelled";
   // Gmail invitations are already on the user's Google Calendar — publishing
   // them again would duplicate the event. The panel still shows them.
-  if (it.meta && it.meta.onCalendar) return null;
+  if (it.meta && it.meta.onCalendar) return "on-google";
   // Per-item and per-project calendar opt-outs.
-  if (it.meta && it.meta.calendar === false) return null;
+  if (it.meta && it.meta.calendar === false) return "opted-out";
   if (it.meta && it.meta.projectId && excludedProjects && excludedProjects.has(it.meta.projectId)) {
-    return null;
+    return "opted-out";
   }
+  // The user took it off the calendar from the item sheet.
+  if (us && us.calendar === false) return "removed";
 
   const done = it.status === "done" || it.status === "submitted" || !!(us && us.done);
   const inc = (cal && cal.include) || {};
-  if (done && inc.completed === false) return null;
-  if (CLASS_TYPES.has(it.type) && it.startAt && inc.classes === false) return null;
-  if (it.confidence === "tentative" && inc.tentative === false) return null;
-  if (it.type === "term-date" && inc.termDates === false) return null;
+  if (done && inc.completed === false) return "completed-off";
+  if (CLASS_TYPES.has(it.type) && it.startAt && inc.classes === false) return "classes-off";
+  if (it.confidence === "tentative" && inc.tentative === false) return "tentative-off";
+  if (it.type === "term-date" && inc.termDates === false) return "term-dates-off";
   // Reply / book-a-call to-dos (email, Discord) are to-dos, not events: they
   // reach the feed only when to-dos are opted in (include.todos, which the
   // publisher sets from settings.todos.includeInCalendar).
-  if (it.type === "task" && TODO_TASK_CATEGORIES.has(it.category) && inc.todos !== true) return null;
+  if (it.type === "task" && TODO_TASK_CATEGORIES.has(it.category) && inc.todos !== true) {
+    return "todo-only";
+  }
   // A submit-rankings to-do shares its deadline with the co-op cycle date —
   // it is a to-do, not a second calendar event, unless to-dos are opted in.
-  if (it.meta && it.meta.action === "submit-rankings" && inc.todos !== true) return null;
+  if (it.meta && it.meta.action === "submit-rankings" && inc.todos !== true) return "todo-only";
   // meta.undated tasks carry a suggested dueAt (received + 2d) for the to-do
   // bucket — it is not a real date and must not reach the feed.
-  if (it.meta && it.meta.undated === true) return null;
+  if (it.meta && it.meta.undated === true) return "undated";
 
   const dueMs = it.dueAt ? Date.parse(it.dueAt) : NaN;
   const start0 = it.startAt ? Date.parse(it.startAt) : NaN;
@@ -131,8 +163,8 @@ function toEvent(it, us, cal, nowMs, excludedProjects) {
     Number.isNaN(anchorMs) ? -Infinity : anchorMs,
     Number.isNaN(endMs) ? -Infinity : endMs
   );
-  if (anchor === -Infinity) return null; // no dueAt/startAt at all
-  if (anchor < nowMs - PAST_WINDOW) return null;
+  if (anchor === -Infinity) return "no-date"; // no dueAt/startAt at all
+  if (anchor < nowMs - PAST_WINDOW) return "past";
 
   // Classes publish only inside a rolling window: a week back, classWeeks
   // ahead. This keeps a full course load publishable within the feed
@@ -141,9 +173,40 @@ function toEvent(it, us, cal, nowMs, excludedProjects) {
   if (CLASS_TYPES.has(it.type) && !Number.isNaN(start0)) {
     const w = Number(inc.classWeeks);
     const ahead = (Number.isFinite(w) && w > 0 ? w : 8) * 7 * DAY;
-    if (start0 < nowMs - 7 * DAY || start0 > nowMs + ahead) return null;
+    if (start0 < nowMs - 7 * DAY || start0 > nowMs + ahead) return "window";
   }
+  return null;
+}
 
+/**
+ * The project ids kept off the feed (calendar:false or archived). Shared
+ * with the item sheet's calendarState so the two agree.
+ * @param {any[]|undefined} projects
+ * @returns {Set<string>}
+ */
+export function excludedProjectIds(projects) {
+  /** @type {Set<string>} */
+  const excluded = new Set();
+  for (const p of Array.isArray(projects) ? projects : []) {
+    if (p && p.id && (p.calendar === false || p.status === "archived")) {
+      excluded.add(p.id);
+    }
+  }
+  return excluded;
+}
+
+/**
+ * @param {any} it merged canonical item
+ * @param {any} us userState[it.id] (may be undefined)
+ * @param {any} cal settings.calendar
+ * @param {number} nowMs
+ * @param {Set<string>} [excludedProjects]  project ids kept off the feed
+ * @returns {any|null} the event to publish, or null to exclude
+ */
+function toEvent(it, us, cal, nowMs, excludedProjects) {
+  if (!it || !it.id) return null;
+  if (feedExclusion(it, us, cal, nowMs, excludedProjects)) return null;
+  const done = it.status === "done" || it.status === "submitted" || !!(us && us.done);
   const ev = {
     id: String(it.id),
     type: it.type,
@@ -298,13 +361,7 @@ export function buildFeedPayload(items, userState, calSettings, now = new Date()
   const cal = calSettings || {};
   const effOpts = { acceptPending: !!opts.acceptPending };
 
-  /** @type {Set<string>} */
-  const excludedProjects = new Set();
-  for (const p of Array.isArray(opts.projects) ? opts.projects : []) {
-    if (p && p.id && (p.calendar === false || p.status === "archived")) {
-      excludedProjects.add(p.id);
-    }
-  }
+  const excludedProjects = excludedProjectIds(opts.projects);
 
   /** @type {{ev: any, it: any, anchor: number}[]} */
   const pickedRaw = [];

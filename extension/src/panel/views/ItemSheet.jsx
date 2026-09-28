@@ -12,9 +12,12 @@ import {
   primaryLink,
   sourceLabel,
   sourceOpenLink,
+  calendarState,
+  calendarReasonText,
 } from "../model/itemsheet.js";
 import { ADAPTERS } from "../../core/registry.js";
 import { Checklist } from "../components/Checklist.jsx";
+import { ItemEditForm } from "../../ui/ItemEditForm.jsx";
 import { typeLabelFor } from "../components/ItemRow.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import {
@@ -66,6 +69,7 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
   const raw = state.items[itemId] || (state.todos || {})[itemId];
   const us = (state.userState || {})[itemId] || {};
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editAdd, setEditAdd] = useState(false);
   const [notes, setNotes] = useState(us.notes || "");
   const notesTimer = useRef(/** @type {any} */ (null));
 
@@ -81,6 +85,12 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
   const item = effectiveItem(raw, us);
   const Icon = typeIcon(item.type);
   const link = primaryLink(item);
+  const cal = calendarState(raw, us, state, now);
+  const calSyncOff = !(
+    state.settings &&
+    state.settings.calendar &&
+    state.settings.calendar.enabled === true
+  );
   // A derived to-do points at the source row it replaces (meta.linkedItemId).
   const linkedSrc =
     item.meta && item.meta.linkedItemId ? state.items[item.meta.linkedItemId] || null : null;
@@ -121,6 +131,33 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
     }
     actions.manualDelete(item.id);
     onClose();
+  };
+
+  const addToCalendar = (override) => {
+    const prev = us;
+    actions.setUserState(item.id, {
+      review: "accepted",
+      calendar: null,
+      ...(override ? { override } : {}),
+    });
+    setEditAdd(false);
+    actions.toast("Added to your calendar", {
+      label: "Undo",
+      run: () =>
+        actions.setUserState(item.id, {
+          review: prev.review ?? null,
+          calendar: prev.calendar ?? null,
+          ...(override ? { override: prev.override ?? null } : {}),
+        }),
+    });
+  };
+
+  const removeFromCalendar = () => {
+    actions.setUserState(item.id, { calendar: false });
+    actions.toast("Removed from your calendar", {
+      label: "Undo",
+      run: () => actions.setUserState(item.id, { calendar: null }),
+    });
   };
 
   return (
@@ -179,7 +216,7 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
           {item.meta && item.meta.onCalendar ? (
             <>
               <dt>Calendar</dt>
-              <dd>On your Google Calendar — the feed skips it to avoid a duplicate</dd>
+              <dd>Already on your Google Calendar</dd>
             </>
           ) : project ? (
             <>
@@ -201,8 +238,51 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
                 </label>
               </dd>
             </>
-          ) : null}
+          ) : (
+            <>
+              <dt>Calendar</dt>
+              <dd class="sheet-cal">
+                {cal.kind === "on" ? (
+                  <button type="button" class="btn btn-sm" onClick={removeFromCalendar}>
+                    Remove from calendar
+                  </button>
+                ) : cal.canAdd ? (
+                  <span class="sheet-cal-acts">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-primary"
+                      onClick={() => addToCalendar()}
+                    >
+                      Add to calendar
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      onClick={() => setEditAdd(true)}
+                    >
+                      Edit &amp; add
+                    </button>
+                  </span>
+                ) : (
+                  <span class="help">{calendarReasonText(cal.reason, item)}</span>
+                )}
+                {calSyncOff ? (
+                  <span class="help sheet-cal-hint">
+                    Calendar sync is off — it'll show in Upcoming now and on Google
+                    Calendar once you turn sync on.
+                  </span>
+                ) : null}
+              </dd>
+            </>
+          )}
         </dl>
+        {editAdd ? (
+          <ItemEditForm
+            item={item}
+            onSave={(override) => addToCalendar(override)}
+            onCancel={() => setEditAdd(false)}
+          />
+        ) : null}
         {linkedSrc ? (
           <p class="help sheet-linked-src">
             From {sourceLabel(linkedSrc.source)}:{" "}

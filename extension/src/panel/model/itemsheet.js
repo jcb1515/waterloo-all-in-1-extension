@@ -7,6 +7,8 @@
 */
 
 import { zonedParts, zonedIso } from "../../lib/textdates/index.js";
+import { effectiveItem } from "../../core/effective.js";
+import { feedExclusion, excludedProjectIds } from "../../calendar/payload.js";
 
 const TZ = "America/Toronto";
 const HOUR = 3600000;
@@ -159,4 +161,84 @@ export function hiddenSnoozed(items, userState = {}, now = new Date()) {
   }
   out.sort((a, b) => String(a.item.title || "").localeCompare(String(b.item.title || "")));
   return out;
+}
+
+/* ---------------------- calendar / to-do state ---------------------- */
+
+const ms = (/** @type {any} */ now) =>
+  now instanceof Date ? now.getTime() : Number(now);
+
+/**
+ * The item sheet's Calendar row: whether this item reaches the calendar
+ * feed, and which Add/Remove affordance applies. Uses the same
+ * feedExclusion the publisher runs, so the row can never disagree with the
+ * feed. acceptPending follows the review.showPending setting — a pending
+ * item counts as addable either way.
+ * @param {any} raw    merged item (or derived to-do row)
+ * @param {any} us     userState[raw.id]
+ * @param {any} state  merged panel state ({settings, projects})
+ * @param {Date|number} now
+ * @returns {{kind: "google"|"on"|"off", reason: string|null,
+ *   canAdd: boolean, canRemove: boolean}}
+ */
+export function calendarState(raw, us, state, now) {
+  const settings = (state && state.settings) || {};
+  const acceptPending = !!(settings.review && settings.review.showPending);
+  const eff = effectiveItem(raw, us, { acceptPending });
+  const reason = eff
+    ? feedExclusion(
+        eff,
+        us,
+        settings.calendar,
+        ms(now),
+        excludedProjectIds(state && state.projects),
+      )
+    : "no-date";
+  if (reason === "on-google") {
+    return { kind: "google", reason, canAdd: false, canRemove: false };
+  }
+  if (reason === null) {
+    return { kind: "on", reason: null, canAdd: false, canRemove: true };
+  }
+  const canAdd = reason === "pending" || reason === "dismissed" || reason === "removed";
+  return { kind: "off", reason, canAdd, canRemove: false };
+}
+
+/**
+ * One-line explanation for an off-calendar item the user can't add from
+ * here (the "Calendar" dd when there is no button).
+ * @param {string|null} reason  feedExclusion reason
+ * @param {any} [item]
+ */
+export function calendarReasonText(reason, item) {
+  switch (reason) {
+    case "hidden":
+      return "Hidden — unhide it to add it";
+    case "cancelled":
+      return "Cancelled — it stays off the calendar";
+    case "opted-out":
+      return item && item.meta && item.meta.projectId
+        ? "Its project keeps it off the calendar"
+        : "Excluded from the calendar feed";
+    case "completed-off":
+      return "Done items are turned off in Calendar settings";
+    case "classes-off":
+      return "Classes are turned off in Calendar settings";
+    case "tentative-off":
+      return "Tentative dates are turned off in Calendar settings";
+    case "term-dates-off":
+      return "Term dates are turned off in Calendar settings";
+    case "todo-only":
+      return "Listed as a to-do — calendar to-dos are off in Calendar settings";
+    case "undated":
+      return "No real date — the date shown is a guess";
+    case "no-date":
+      return "No date to put on a calendar";
+    case "past":
+      return "Too far in the past to add";
+    case "window":
+      return "Classes reach the feed inside a rolling window around today";
+    default:
+      return "Not on the calendar feed";
+  }
 }

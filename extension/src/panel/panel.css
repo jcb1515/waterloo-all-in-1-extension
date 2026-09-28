@@ -944,6 +944,9 @@ html[data-density="compact"] .item-title {
   gap: var(--sp-2);
   cursor: pointer;
 }
+.sheet-cal { display: flex; flex-direction: column; gap: var(--sp-1); }
+.sheet-cal-acts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.sheet-cal-hint { font-size: var(--fs-xs); }
 .sheet-linked-src {
   margin-top: var(--sp-2);
 }

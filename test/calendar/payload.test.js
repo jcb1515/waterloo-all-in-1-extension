@@ -1,7 +1,12 @@
 // @ts-check
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildFeedPayload, stableHash } from "../../extension/src/calendar/payload.js";
+import {
+  buildFeedPayload,
+  feedExclusion,
+  excludedProjectIds,
+  stableHash,
+} from "../../extension/src/calendar/payload.js";
 
 const NOW = new Date("2026-10-01T16:00:00.000Z");
 const DAY = 86400000;
@@ -381,6 +386,93 @@ test("meta.undated tasks never reach the feed, even with a suggested dueAt", () 
   );
   assert.equal(count, 1, "the undated suggestion and the anchorless task stay off the feed");
   assert.deepEqual(payload.events.map((e) => e.id), ["learn:d"]);
+});
+
+/* -------------------------- feedExclusion reasons -------------------------- */
+
+test("feedExclusion: null for a publishable item, every reason named", () => {
+  const t = NOW.getTime();
+  const calOn = CAL;
+  const off = (k) => ({ ...CAL, include: { ...CAL.include, [k]: false } });
+  const excl = (it, us = {}, cal = calOn, proj) =>
+    feedExclusion(it, us, cal, t, proj || new Set());
+
+  // Publishable.
+  assert.equal(excl(mk("ok")), null);
+
+  // Review / user-state gates.
+  assert.equal(excl(mk("p", { review: "pending" })), "pending");
+  assert.equal(excl(mk("d", { review: "dismissed" })), "dismissed");
+  assert.equal(excl(mk("h"), { hidden: true }), "hidden");
+  assert.equal(excl(mk("c", { status: "cancelled" })), "cancelled");
+
+  // Google + opt-outs + the new userState.calendar removal.
+  assert.equal(excl(mk("g", { meta: { onCalendar: true } })), "on-google");
+  assert.equal(excl(mk("o", { meta: { calendar: false } })), "opted-out");
+  assert.equal(
+    excl(
+      mk("po", { meta: { projectId: "p1" } }),
+      {},
+      calOn,
+      excludedProjectIds([{ id: "p1", calendar: false }]),
+    ),
+    "opted-out",
+  );
+  assert.equal(excl(mk("r"), { calendar: false }), "removed");
+  // us.calendar === false actually keeps it out of the built payload too.
+  assert.equal(
+    build({ r: mk("r") }, { r: { calendar: false } }).count,
+    0,
+    "removed item does not publish",
+  );
+  // ... and "calendar: null" re-adds it.
+  assert.equal(excl(mk("r"), { calendar: null }), null);
+
+  // Include toggles.
+  assert.equal(excl(mk("done", { status: "done" }), {}, off("completed")), "completed-off");
+  assert.equal(
+    excl(
+      mk("cls", { type: "class", startAt: iso(t + 3600e3), dueAt: undefined }),
+      {},
+      off("classes"),
+    ),
+    "classes-off",
+  );
+  assert.equal(excl(mk("tent", { confidence: "tentative" }), {}, off("tentative")), "tentative-off");
+  assert.equal(
+    excl(
+      mk("td", { type: "term-date", startAt: iso(t + DAY), dueAt: undefined, allDay: true }),
+      {},
+      off("termDates"),
+    ),
+    "term-dates-off",
+  );
+
+  // To-do seams (reply/book-call categories, submit-rankings action).
+  const todosOff = { ...CAL, include: { ...CAL.include, todos: false } };
+  const todosOn = { ...CAL, include: { ...CAL.include, todos: true } };
+  assert.equal(
+    excl(mk("rep", { type: "task", category: "reply" }), {}, todosOff),
+    "todo-only",
+  );
+  assert.equal(excl(mk("rep", { type: "task", category: "reply" }), {}, todosOn), null);
+  assert.equal(
+    excl(mk("sr", { meta: { action: "submit-rankings" } }), {}, todosOff),
+    "todo-only",
+  );
+
+  // Dates.
+  assert.equal(excl(mk("u", { meta: { undated: true } })), "undated");
+  assert.equal(excl(mk("nd", { dueAt: undefined, startAt: undefined })), "no-date");
+  assert.equal(excl(mk("old", { dueAt: iso(t - 61 * DAY) })), "past");
+  assert.equal(
+    excl(mk("far-cls", { type: "class", startAt: iso(t + 60 * DAY), dueAt: undefined })),
+    "window",
+  );
+  assert.equal(
+    excl(mk("old-cls", { type: "class", startAt: iso(t - 8 * DAY), dueAt: undefined })),
+    "window",
+  );
 });
 
 test("submit-rankings to-do publishes only when to-dos are opted in", () => {
