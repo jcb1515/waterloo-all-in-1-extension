@@ -13,6 +13,7 @@ import {
   zonedIso,
   zonedParts,
 } from "../../lib/textdates/index.js";
+import { titleSimilarity } from "../../core/merge.js";
 import { classify, factsOf, isDueish, TRIGGER_RE } from "../learn/classify.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -548,6 +549,23 @@ export function buildOutline(data, opts = {}) {
     covered.push({ cat: i.category, a, b });
   }
   const isCovered = (cat, day) => covered.some((c) => c.cat === cat && c.a <= day && day < c.b);
+  // Structured deadline rows (:assess: table rows, :due: deadline-chart rows)
+  // cover their anchor day — the dueAt day, else startAt; an all-day window
+  // covers its whole [startAt, endAt) span. A prose hit with a similar title
+  // on a covered day restates the row, so it folds into that item instead of
+  // becoming a duplicate text item (the same-source rule would block a core
+  // merge and the pair would publish twice).
+  /** @type {{item: Item, a: string, b: string}[]} */
+  const structured = [];
+  for (const i of items) {
+    if (!i.id.includes(":assess:") && !i.id.includes(":due:")) continue;
+    const a = i.dueAt ? torontoDate(i.dueAt) : i.startAt ? torontoDate(i.startAt) : null;
+    if (!a) continue;
+    const b = i.allDay && i.endAt ? torontoDate(i.endAt) : addDays(a, 1);
+    structured.push({ item: i, a, b });
+  }
+  const structuredOn = (day, title) =>
+    structured.find((s) => s.a <= day && day < s.b && titleSimilarity(title, code, s.item.title, code) >= 0.6);
   /** @type {string[]} */
   const proseLines = [];
   for (const line of String(data.text && data.text.plan || "").split("\n")) proseLines.push(line);
@@ -621,6 +639,18 @@ export function buildOutline(data, opts = {}) {
           item.startAt = hit.startAt;
           if (hit.endAt) item.endAt = hit.endAt;
           if (hit.allDay) item.allDay = true;
+        }
+        const anchor = item.dueAt ? torontoDate(item.dueAt) : item.startAt ? torontoDate(item.startAt) : null;
+        const dup = anchor ? structuredOn(anchor, title) : undefined;
+        if (dup) {
+          const cur = String(dup.item.details || "");
+          if (!cur.includes(sent)) dup.item.details = [cur, sent].filter(Boolean).join(" ").slice(0, 500);
+          if (!dup.item.evidence) {
+            dup.item.evidence = item.evidence;
+          } else if (!dup.item.evidence.snippet) {
+            dup.item.evidence = { ...dup.item.evidence, snippet: sent.slice(0, 300) };
+          }
+          break;
         }
         items.push(item);
         break; // one item per sentence

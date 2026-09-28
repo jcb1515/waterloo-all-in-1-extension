@@ -179,7 +179,7 @@ const adapter = {
         const start = query && query.get("start");
         const end = query && query.get("end");
         scope = start || end ? `portal:events:${start || ""}..${end || ""}` : "portal:events";
-        const r = mapEvents(body.data || [], { scope, at });
+        const r = mapEvents(body.data || [], { scope, at, examIndex: state.examIndex });
         items = r.items;
         for (const t of r.terms) mergeTerm(state.terms, t);
       } else {
