@@ -138,7 +138,6 @@ function installDiscord({
       delete globalThis.chrome;
       if (realCustomEvent === undefined) delete globalThis.CustomEvent;
       else globalThis.CustomEvent = realCustomEvent;
-      delete /** @type {any} */ (globalThis).__wa1DiscordContent;
     },
   };
 }
@@ -282,30 +281,36 @@ test("double injection registers one listener and one observer while alive", asy
     assert.equal(w.observers.length, 1, "no second observer");
     assert.equal(w.listeners[0], firstListener, "the owner kept its seat");
 
-    // Orphan the first instance: its own context's runtime.id now throws,
-    // so its ping listener stays silent while the re-injection arrives
-    // with a fresh, valid chrome binding — the new copy supersedes it.
+    // Orphan the first instance: its context is dead. The shared guard's
+    // ping listener reads the world's chrome binding — while the
+    // newcomer's ping is in flight it resolves a dead runtime (id
+    // undefined), so the orphan stays silent; the supersede then evicts
+    // it and the new copy proceeds on its own live binding.
     const oldChrome = /** @type {any} */ (globalThis.chrome);
-    Object.defineProperty(oldChrome.runtime, "id", {
-      configurable: true,
-      get() {
-        throw new Error("Extension context invalidated");
-      },
-    });
-    globalThis.chrome = {
-      runtime: {
-        id: "wa1-test-2",
-        sendMessage: (m) => w.sent.push(m),
-        onMessage: {
-          addListener: (fn) => w.listeners.push(fn),
-          removeListener: (fn) => {
-            const i = w.listeners.indexOf(fn);
-            if (i >= 0) w.listeners.splice(i, 1);
-          },
+    oldChrome.runtime.id = undefined;
+    const liveRuntime = {
+      id: "wa1-test-2",
+      sendMessage: (m) => w.sent.push(m),
+      onMessage: {
+        addListener: (fn) => w.listeners.push(fn),
+        removeListener: (fn) => {
+          const i = w.listeners.indexOf(fn);
+          if (i >= 0) w.listeners.splice(i, 1);
         },
+      },
+    };
+    let orphanWindow = true;
+    globalThis.chrome = {
+      get runtime() {
+        return orphanWindow ? { id: undefined } : liveRuntime;
       },
       storage: oldChrome.storage,
     };
+    // Registered AFTER the orphan's ping listener, so the flip lands only
+    // once the orphan had its (silent) say inside the ping dispatch.
+    globalThis.document.addEventListener("wa1:ping", () => {
+      orphanWindow = false;
+    });
     await import(`${CONTENT}?t=dinj${Date.now()}c`);
     // The orphan removed its listener in teardown, then the new copy
     // registered — still exactly one, and it is not the old one.

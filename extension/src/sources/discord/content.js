@@ -20,7 +20,7 @@ import {
   eventsModalExtract,
 } from "./dom.js";
 import { hashString } from "../../capture/redact.js";
-import { guardInstance } from "../waterlooworks/guard.js";
+import { guardInstance } from "../../capture/guard.js";
 
 // Same literal as core/store.js SETTINGS_KEY — the content bundle stays free
 // of core imports.

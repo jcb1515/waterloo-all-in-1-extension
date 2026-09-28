@@ -4,7 +4,7 @@
 // per-source actions and the check-report download.
 
 import { useState } from "preact/hooks";
-import { checklistFor } from "../../../sources/probes.js";
+import { checklistFor, CHECK_SOURCES } from "../../../sources/probes.js";
 import { adapterForSource, stageForAdapter } from "../../../core/registry.js";
 import { fmtAgo } from "../../model/agenda.js";
 import { sourceSiteUrl } from "../../model/sources.js";
@@ -18,6 +18,7 @@ import {
   downloadCheckReport,
 } from "./checkCards.jsx";
 import { Section } from "../../../ui/Section.jsx";
+import { CheckNowButton } from "../../../ui/CheckNowButton.jsx";
 import {
   ClipboardCheckIcon,
   RefreshIcon,
@@ -82,6 +83,9 @@ export function Check({ sourceId, state, actions, now }) {
   const adapter = adapterForSource(sourceId);
   const st = adapter ? (state.sourceState || {})[adapter.id] || null : null;
   const siteUrl = adapter ? sourceSiteUrl(adapter) : null;
+  // The checkable SourceIds this segment covers — the email segment runs
+  // both mailboxes' checks (named buttons, like the Sources tiles).
+  const checkIds = sourceIdsFor(sourceId).filter((s) => CHECK_SOURCES[s]);
 
   // The Outlook segment shows both mailboxes' cards — they share one
   // adapter but have separate checklists, probes and readStats.
@@ -113,6 +117,21 @@ export function Check({ sourceId, state, actions, now }) {
 
   return (
     <div class="sources-list check-readers">
+      {checkIds.length ? (
+        <div class="src-page-check">
+          {checkIds.map((sid) => (
+            <CheckNowButton
+              key={sid}
+              source={sid}
+              state={state}
+              actions={actions}
+              now={now}
+              named={checkIds.length > 1}
+            />
+          ))}
+        </div>
+      ) : null}
+
       {metas.map((m) => (
         <SourceCheck
           key={m.id}
@@ -173,7 +192,7 @@ export function Check({ sourceId, state, actions, now }) {
             <button
               type="button"
               class="btn btn-sm"
-              onClick={() => actions.open(siteUrl)}
+              onClick={() => actions.open(siteUrl, { newTab: true })}
             >
               <ExternalLinkIcon size={13} /> Open site
             </button>

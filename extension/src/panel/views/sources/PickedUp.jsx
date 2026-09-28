@@ -7,6 +7,8 @@ import { useMemo } from "preact/hooks";
 import { pickedUpGroups } from "../../model/pickedUp.js";
 import { sourceSiteUrl } from "../../model/sources.js";
 import { adapterForSource } from "../../../core/registry.js";
+import { CHECK_SOURCES } from "../../../sources/probes.js";
+import { CheckNowButton } from "../../../ui/CheckNowButton.jsx";
 import { ItemRow } from "../../../ui/ItemRow.jsx";
 import { Section } from "../../../ui/Section.jsx";
 import { EmptyState } from "../../../ui/EmptyState.jsx";
@@ -63,8 +65,20 @@ export function PickedUp({ sourceId, state, actions, now }) {
         title="Nothing picked up yet"
         text="Items this source finds show up here — open the site to let it read."
       >
+        {CHECK_SOURCES[sourceId] ? (
+          <CheckNowButton
+            source={sourceId}
+            state={state}
+            actions={actions}
+            now={now}
+          />
+        ) : null}
         {site ? (
-          <button type="button" class="btn btn-sm" onClick={() => actions.open(site)}>
+          <button
+            type="button"
+            class="btn btn-sm"
+            onClick={() => actions.open(site, { newTab: true })}
+          >
             <ExternalLinkIcon size={13} /> Open site
           </button>
         ) : null}
