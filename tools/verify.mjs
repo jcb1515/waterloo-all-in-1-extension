@@ -33,7 +33,7 @@ import discordDriver from "./verify/drivers/discord.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_DIR = path.join(ROOT, "test", "fixtures");
-const REPORT_PATH = path.join(ROOT, "captures", "verify-report.md");
+const REPORT_PATH = path.join(ROOT, "..", "captures", "verify-report.md");
 
 export const DEFAULT_NOW = new Date("2026-09-27T16:00:00.000Z");
 export const DRIVERS = [
