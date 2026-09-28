@@ -282,7 +282,7 @@ test("parseDashboard reads schedule, events, counts and the rankings notice", ()
     assert.equal(res.schedule.rows[1].jobId, undefined);
     // "Upcoming Events / Workshops": the day is each table's colspan'd th.
     assert.equal(res.events.tables, 2);
-    assert.equal(res.events.rows.length, 5);
+    assert.equal(res.events.rows.length, 6);
     assert.deepEqual(res.events.rows[0], {
       dayText: "Monday, September 28, 2026",
       date: "2026-09-28",
@@ -295,6 +295,12 @@ test("parseDashboard reads schedule, events, counts and the rankings notice", ()
     });
     assert.equal(res.events.rows[4].startAt, "2026-09-29T20:00:00.000Z");
     assert.equal(res.events.rows[4].location, undefined);
+    // The synthetic "Registered" row — the only dashboard event the calendar
+    // should keep (map.js filters the public listing).
+    assert.equal(res.events.rows[5].name, "Mock Interview Workshop");
+    assert.equal(res.events.rows[5].registration, "Registered");
+    assert.equal(res.events.rows[5].startAt, "2026-09-29T22:00:00.000Z");
+    assert.equal(res.events.rows[5].endAt, "2026-09-29T23:30:00.000Z");
     assert.equal(res.newMessages, 2);
     assert.equal(res.webcamAppointments, 0);
     assert.deepEqual(res.rankings, {

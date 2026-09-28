@@ -268,9 +268,11 @@ test("the live dashboard folds schedule + upcoming events + volatile counts", as
   );
   assert.equal(result.scope, "waterlooworks");
   assert.deepEqual(result.state.lastReadOk, ["dashboard"]);
+  // Schedule interview + appointment + the one Registered dashboard event —
+  // the public "Registration Required" listing never reaches the calendar.
   assert.deepEqual(
     result.items.map((it) => it.type).sort(),
-    ["event", "event", "event", "event", "event", "event", "interview"]
+    ["event", "event", "interview"]
   );
   const interview = result.items.find((it) => it.type === "interview");
   assert.equal(interview.id, "waterlooworks:interview:488135");
@@ -279,7 +281,9 @@ test("the live dashboard folds schedule + upcoming events + volatile counts", as
   const events = result.items.filter((it) =>
     it.id.startsWith("waterlooworks:event:")
   );
-  assert.equal(events.length, 5);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].title, "Mock Interview Workshop");
+  assert.equal(events[0].meta.registrationStatus, "Registered");
   assert.ok(events.every((it) => it.startAt && it.endAt));
   // The rankings notice persists (same shape as the rankings page read);
   // the volatile module counters never do.

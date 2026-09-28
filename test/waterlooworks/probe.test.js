@@ -107,7 +107,7 @@ test("the live dashboard layout counts every module", () => {
     scheduleTables: 1,
     scheduleRows: 2,
     eventDays: 2,
-    eventRows: 5,
+    eventRows: 6,
     newMessages: 2,
     webcamToday: 0,
     rankingsNotice: 1,
