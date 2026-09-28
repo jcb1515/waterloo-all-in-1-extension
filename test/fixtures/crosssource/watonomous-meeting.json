@@ -1,0 +1,47 @@
+{
+  "_note": "WATonomous weekly sync Wed Oct 21 2026 19:00-20:00 EDT = 23:00-00:00Z. Discord's scheduled event and the channel announcement refer to the same event — the adapter emits one item (seen in both scopes) — and Gmail has the invite. Expect: one canonical item merging discord+gmail.",
+  "raws": {
+    "discord": {
+      "items": [
+        {
+          "id": "discord:evt-42",
+          "source": "discord",
+          "type": "meeting",
+          "title": "WATonomous Weekly Sync",
+          "org": "WATonomous",
+          "startAt": "2026-10-21T23:00:00.000Z",
+          "endAt": "2026-10-22T00:00:00.000Z",
+          "location": "E7 - Ideation Space",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [
+            { "source": "discord", "key": "events:42", "scope": "discord", "at": "2026-10-15T12:00:00.000Z" },
+            { "source": "discord", "key": "ch-standup:msg-71", "scope": "discord", "at": "2026-10-15T12:00:00.000Z" }
+          ]
+        }
+      ]
+    },
+    "gmail": {
+      "items": [
+        {
+          "id": "gmail:msg-7701",
+          "source": "gmail",
+          "type": "meeting",
+          "title": "WATonomous weekly sync — Oct 21",
+          "org": "watonomous",
+          "startAt": "2026-10-21T23:00:00.000Z",
+          "endAt": "2026-10-22T00:00:00.000Z",
+          "location": "https://meet.google.com/xyz-uvwx-yz",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "invite" },
+          "meta": { "onCalendar": "google" },
+          "seenIn": [{ "source": "gmail", "key": "msg-7701", "scope": "email:message", "at": "2026-10-13T15:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}

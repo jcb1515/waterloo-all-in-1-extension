@@ -1,0 +1,43 @@
+{
+  "_note": "Two genuinely different lectures at the same instant, Mon Oct 19 2026 13:30-14:20 EDT = 17:30-18:20Z: a MATH 117 lecture (Portal) and an ECE 105 lecture (Learn). Different course codes are never orgsCompatible, so this real clash must stay two canonical items.",
+  "raws": {
+    "portal": {
+      "items": [
+        {
+          "id": "portal:m117-lec-mon",
+          "source": "portal",
+          "type": "class",
+          "title": "MATH 117 Lecture",
+          "org": "MATH 117",
+          "startAt": "2026-10-19T17:30:00.000Z",
+          "endAt": "2026-10-19T18:20:00.000Z",
+          "location": "MC 4021",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [{ "source": "portal", "key": "schedule", "scope": "portal:schedule", "at": "2026-10-15T12:00:00.000Z" }]
+        }
+      ]
+    },
+    "learn": {
+      "items": [
+        {
+          "id": "learn:e105-lec-mon",
+          "source": "learn",
+          "type": "class",
+          "title": "ECE 105 Lecture",
+          "org": "ECE 105",
+          "startAt": "2026-10-19T17:30:00.000Z",
+          "endAt": "2026-10-19T18:20:00.000Z",
+          "location": "EIT 1015",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [{ "source": "learn", "key": "e105-events", "scope": "learn", "at": "2026-10-15T12:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}

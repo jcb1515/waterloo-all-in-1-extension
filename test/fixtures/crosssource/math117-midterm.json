@@ -1,0 +1,83 @@
+{
+  "_note": "The same MATH 117 midterm (Fri Oct 23 2026, 19:00-21:00 EDT = 23:00-01:00Z, room MC 2034) seen by Learn (exact), the course outline (exact), Portal's exam schedule (exact, with the seating room) and a tentative instructor email (which got the start 30 min wrong). Expect: one canonical exam, exact times win, Portal's room wins for exams.",
+  "raws": {
+    "learn": {
+      "items": [
+        {
+          "id": "learn:m117-midterm",
+          "source": "learn",
+          "type": "exam",
+          "category": "midterm",
+          "title": "MATH 117 Midterm",
+          "org": "MATH 117",
+          "startAt": "2026-10-23T23:00:00.000Z",
+          "endAt": "2026-10-24T01:00:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [{ "source": "learn", "key": "m117-events", "scope": "learn", "at": "2026-10-15T12:00:00.000Z" }]
+        }
+      ]
+    },
+    "outline": {
+      "items": [
+        {
+          "id": "outline:m117-midterm",
+          "source": "outline",
+          "type": "exam",
+          "category": "midterm",
+          "title": "Midterm exam",
+          "org": "MATH 117",
+          "startAt": "2026-10-23T23:00:00.000Z",
+          "endAt": "2026-10-24T01:00:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "weight": 25,
+          "evidence": { "method": "html" },
+          "seenIn": [{ "source": "outline", "key": "math117", "scope": "outline:math117", "at": "2026-10-14T10:00:00.000Z" }]
+        }
+      ]
+    },
+    "portal": {
+      "items": [
+        {
+          "id": "portal:m117-exam",
+          "source": "portal",
+          "type": "exam",
+          "category": "midterm",
+          "title": "MATH 117 Midterm exam",
+          "org": "MATH 117",
+          "startAt": "2026-10-23T23:00:00.000Z",
+          "endAt": "2026-10-24T01:00:00.000Z",
+          "location": "MC 2034",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [{ "source": "portal", "key": "exams", "scope": "portal:exams", "at": "2026-10-15T11:00:00.000Z" }]
+        }
+      ]
+    },
+    "outlook": {
+      "items": [
+        {
+          "id": "outlook:msg-5521",
+          "source": "outlook",
+          "type": "exam",
+          "category": "midterm",
+          "title": "MATH 117 Midterm exam",
+          "org": "MATH 117",
+          "startAt": "2026-10-23T23:30:00.000Z",
+          "endAt": "2026-10-24T01:30:00.000Z",
+          "status": "open",
+          "confidence": "tentative",
+          "review": "pending",
+          "evidence": { "method": "text" },
+          "seenIn": [{ "source": "outlook", "key": "msg-5521", "scope": "email:message", "at": "2026-10-15T13:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}

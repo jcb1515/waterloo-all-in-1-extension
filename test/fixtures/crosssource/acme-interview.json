@@ -1,0 +1,75 @@
+{
+  "_note": "Acme Corp 'Power Systems Intern' interview Tue Oct 20 2026 14:00-14:45 EDT = 18:00-18:45Z. WaterlooWorks saw it on the interviews list and the detail page (the adapter folds both scopes into one item), Gmail has the invite card, and an Outlook mail asks to confirm attendance (a reply task — a separate real item). Expect: 2 canonical items (interview + reply task); the interview merges WW+Gmail and inherits meta.onCalendar so the feed skips it.",
+  "applications": {
+    "app-2384": {
+      "id": "app-2384",
+      "employer": "Acme Corp",
+      "jobTitle": "Power Systems Intern",
+      "jobId": "2384",
+      "status": "interviewing"
+    }
+  },
+  "raws": {
+    "waterlooworks": {
+      "items": [
+        {
+          "id": "waterlooworks:intv-2384",
+          "source": "waterlooworks",
+          "type": "interview",
+          "title": "Interview — Power Systems Intern",
+          "org": "Acme Corp",
+          "startAt": "2026-10-20T18:00:00.000Z",
+          "endAt": "2026-10-20T18:45:00.000Z",
+          "location": "Teams call",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "html" },
+          "meta": { "jobId": "2384" },
+          "seenIn": [
+            { "source": "waterlooworks", "key": "interviews", "scope": "waterlooworks", "at": "2026-10-15T12:00:00.000Z" },
+            { "source": "waterlooworks", "key": "interview:2384", "scope": "waterlooworks", "at": "2026-10-15T12:05:00.000Z" }
+          ]
+        }
+      ]
+    },
+    "gmail": {
+      "items": [
+        {
+          "id": "gmail:msg-8841",
+          "source": "gmail",
+          "type": "interview",
+          "title": "Acme Corp interview: Power Systems Intern",
+          "org": "Acme",
+          "startAt": "2026-10-20T18:00:00.000Z",
+          "endAt": "2026-10-20T18:45:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "invite" },
+          "meta": { "employer": "Acme Corp", "onCalendar": "google" },
+          "seenIn": [{ "source": "gmail", "key": "msg-8841", "scope": "email:message", "at": "2026-10-14T09:00:00.000Z" }]
+        }
+      ]
+    },
+    "outlook": {
+      "items": [
+        {
+          "id": "outlook:msg-9902",
+          "source": "outlook",
+          "type": "task",
+          "category": "reply",
+          "title": "Reply to Acme Corp recruiting",
+          "org": "Acme Corp",
+          "dueAt": "2026-10-19T16:00:00.000Z",
+          "status": "open",
+          "confidence": "tentative",
+          "review": "pending",
+          "evidence": { "method": "text" },
+          "meta": { "employer": "Acme Corp" },
+          "seenIn": [{ "source": "outlook", "key": "msg-9902", "scope": "email:message", "at": "2026-10-15T10:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}

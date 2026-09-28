@@ -1,0 +1,40 @@
+{
+  "_note": "ECE 190 'Deliverable 2 Part 3' due Fri Oct 30 2026 23:59 EDT = Oct 31 03:59Z, seen by Learn and the course outline. Expect: one canonical deadline; the outline's weight survives.",
+  "raws": {
+    "learn": {
+      "items": [
+        {
+          "id": "learn:e190-d2p3",
+          "source": "learn",
+          "type": "deadline",
+          "title": "Deliverable 2 Part 3 due Friday",
+          "org": "ECE 190",
+          "dueAt": "2026-10-31T03:59:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "api" },
+          "seenIn": [{ "source": "learn", "key": "e190-events", "scope": "learn", "at": "2026-10-15T12:00:00.000Z" }]
+        }
+      ]
+    },
+    "outline": {
+      "items": [
+        {
+          "id": "outline:e190-d2p3",
+          "source": "outline",
+          "type": "deadline",
+          "title": "D2P3",
+          "org": "ECE 190",
+          "dueAt": "2026-10-31T03:59:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "weight": 10,
+          "evidence": { "method": "html" },
+          "seenIn": [{ "source": "outline", "key": "ece190", "scope": "outline:ece190", "at": "2026-10-10T09:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}

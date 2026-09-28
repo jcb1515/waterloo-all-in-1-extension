@@ -1,0 +1,53 @@
+{
+  "_note": "Northwind Optics 'Firmware Intern' interview moved: WaterlooWorks shows the new time Thu Oct 22 2026 16:00-16:45 EDT = 20:00-20:45Z; the Outlook mail still quotes the old 14:00 EDT = 18:00Z slot. Two hours apart, so the 15-minute application-link rule does not fire — the generic exact+exact rule merges them (same day, similar titles, compatible orgs) and the higher-rank WaterlooWorks member wins the time fields. Expect: one canonical interview at the moved time.",
+  "applications": {
+    "app-2401": {
+      "id": "app-2401",
+      "employer": "Northwind Optics",
+      "jobTitle": "Firmware Intern",
+      "jobId": "2401",
+      "status": "interviewing"
+    }
+  },
+  "raws": {
+    "waterlooworks": {
+      "items": [
+        {
+          "id": "waterlooworks:intv-2401",
+          "source": "waterlooworks",
+          "type": "interview",
+          "title": "Interview — Firmware Intern",
+          "org": "Northwind Optics",
+          "startAt": "2026-10-22T20:00:00.000Z",
+          "endAt": "2026-10-22T20:45:00.000Z",
+          "location": "WW Interview Centre",
+          "status": "open",
+          "confidence": "exact",
+          "review": "auto",
+          "evidence": { "method": "html" },
+          "meta": { "jobId": "2401" },
+          "seenIn": [{ "source": "waterlooworks", "key": "interviews", "scope": "waterlooworks", "at": "2026-10-15T12:00:00.000Z" }]
+        }
+      ]
+    },
+    "outlook": {
+      "items": [
+        {
+          "id": "outlook:msg-6110",
+          "source": "outlook",
+          "type": "interview",
+          "title": "Interview moved: Firmware Intern",
+          "org": "Northwind Optics",
+          "startAt": "2026-10-22T18:00:00.000Z",
+          "endAt": "2026-10-22T18:45:00.000Z",
+          "status": "open",
+          "confidence": "exact",
+          "review": "pending",
+          "evidence": { "method": "text" },
+          "meta": { "employer": "Northwind Optics" },
+          "seenIn": [{ "source": "outlook", "key": "msg-6110", "scope": "email:message", "at": "2026-10-10T14:00:00.000Z" }]
+        }
+      ]
+    }
+  }
+}
