@@ -103,7 +103,10 @@ test("learn has no probe: rows are satisfied by a recent sync readStat", () => {
   assert.equal(empty[0].status, "unchecked");
 });
 
-test("portal schedule row requires a portal:schedule observe", () => {
+test("the single portal-open row requires a portal:schedule observe", () => {
+  const rows = CHECK_SOURCES.portal.checklist;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "portal-open");
   const ok = checklistFor(
     "portal",
     {},
@@ -118,7 +121,6 @@ test("portal schedule row requires a portal:schedule observe", () => {
     NOW
   );
   assert.equal(wrongScope[0].status, "unchecked");
-  assert.equal(wrongScope[1].status, "ok"); // exams row matched it
 });
 
 test("readStat errors never satisfy a checklist row", () => {
@@ -211,16 +213,15 @@ test("v2 row metadata: learn/portal urls, essential, refreshDays", () => {
   assert.equal(course.url, undefined);
   assert.ok(!course.essential);
 
-  const [sched, exams] = CHECK_SOURCES.portal.checklist;
-  assert.equal(sched.url, "https://portal.uwaterloo.ca/");
-  assert.equal(sched.essential, true);
-  assert.equal(sched.refreshDays, 30);
-  assert.equal(exams.url, "https://portal.uwaterloo.ca/");
-  assert.equal(exams.essential, true);
-  assert.equal(exams.refreshDays, 14);
+  // Portal is a single row now that auto-fetch reads everything from any page.
+  const [open] = CHECK_SOURCES.portal.checklist;
+  assert.equal(open.id, "portal-open");
+  assert.equal(open.url, "https://portal.uwaterloo.ca/");
+  assert.equal(open.essential, true);
+  assert.equal(open.refreshDays, 14);
 });
 
-test("PORTAL_OPEN_ROW: ready for W2's auto-fetch swap", () => {
+test("PORTAL_OPEN_ROW is Portal's live checklist row", () => {
   assert.deepEqual(PORTAL_OPEN_ROW, {
     id: "portal-open",
     label: "Open Portal once",

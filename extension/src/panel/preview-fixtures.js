@@ -733,11 +733,11 @@ export function previewState(nowD = new Date(), variants = {}) {
       complete: true,
       failures: 0,
       itemCount: 24,
-      // Per-scope last-good-read stamps (written by the ingest). Exams read
-      // 20 days ago — older than refreshDays 14 — so it earns a nudge while
-      // still counting "done" on the setup card; the schedule was never
-      // read, so it stays an onboarding row.
-      scopeOkAt: { "portal:exams": iso(now - 20 * DAY) },
+      // Per-scope last-good-read stamps (written by the ingest). The
+      // portal:schedule read is 20 days old — older than the single
+      // portal-open row's refreshDays 14 — so it counts "done" on the
+      // setup card AND earns a "Needs a visit" nudge.
+      scopeOkAt: { "portal:schedule": iso(now - 20 * DAY) },
       state: {},
     },
     gcal: {
