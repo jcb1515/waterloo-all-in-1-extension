@@ -8,9 +8,10 @@ import portal from "../sources/portal/index.js";
 import email from "../sources/email/index.js";
 import waterlooworks from "../sources/waterlooworks/index.js";
 import discord from "../sources/discord/index.js";
+import gcal from "../sources/gcal/index.js";
 
 /** @type {import("./contract.js").Adapter[]} */
-export const ADAPTERS = [learn, outline, portal, email, waterlooworks, discord];
+export const ADAPTERS = [learn, outline, portal, email, waterlooworks, discord, gcal];
 
 /**
  * Whether a source is wired end-to-end. "live" adapters sync now; "soon" ones
@@ -24,6 +25,7 @@ export const SOURCE_STAGE = Object.freeze({
   outlook: "live",
   waterlooworks: "live",
   discord: "live",
+  gcal: "live",
 });
 
 /**

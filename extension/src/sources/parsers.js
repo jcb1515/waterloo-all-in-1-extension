@@ -12,6 +12,7 @@ import * as portal from "./portal/parsers.js";
 import * as email from "./email/parsers.js";
 import * as waterlooworks from "./waterlooworks/parsers.js";
 import * as discord from "./discord/parsers.js";
+import * as gcal from "./gcal/parsers.js";
 
 export const PARSERS = {
   learn,
@@ -20,6 +21,7 @@ export const PARSERS = {
   email,
   waterlooworks,
   discord,
+  gcal,
   outlook: email,
   gmail: email,
 };

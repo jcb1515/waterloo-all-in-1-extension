@@ -28,6 +28,7 @@ import { extractDates } from "../lib/textdates/index.js";
 import { scheduleFeedPublish } from "../calendar/publish.js";
 import { effectiveItem, isVisible } from "./effective.js";
 import { rescheduleReminders } from "./remind.js";
+import { suppressAgainstCalendar, gcalOwnEvents } from "./gcal.js";
 import { appendReadStat } from "../sources/probes.js";
 import { normalizePath } from "../capture/redact.js";
 
@@ -506,6 +507,19 @@ export async function recomputeAll(now = new Date(), extraUpdates = []) {
     // Email items link to WaterlooWorks applications at the view level —
     // adapter-persisted application records stay untouched.
     const linked = linkEmailItems(res.items, applications);
+    // Google Calendar suppression: own-calendar events mark matching items
+    // meta.onCalendar = "google" so the feed skips them. Off by default —
+    // gated on the Sources toggle; recomputed fresh each pass so a deleted
+    // calendar event un-suppresses.
+    const gcalEnabled = !!(
+      settings.sources &&
+      settings.sources.gcal &&
+      settings.sources.gcal.enabled === true
+    );
+    if (gcalEnabled) {
+      const sourceState = (await getLocal("sourceState")) || {};
+      linked.items = suppressAgainstCalendar(linked.items, gcalOwnEvents(sourceState), now);
+    }
     // Derived to-dos live in their own key — they are not merge raws and the
     // Agenda never sees them.
     const todos = deriveTodos({

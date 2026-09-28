@@ -11,6 +11,7 @@ import { probe as emailProbe, CHECKLIST as EMAIL_CHECKLIST } from "./email/probe
 import { probe as outlineProbe, CHECKLIST as OUTLINE_CHECKLIST } from "./outline/probe.js";
 import { probe as wwProbe, CHECKLIST as WW_CHECKLIST } from "./waterlooworks/probe.js";
 import { probe as discordProbe, CHECKLIST as DISCORD_CHECKLIST } from "./discord/probe.js";
+import { probe as gcalProbe, CHECKLIST as GCAL_CHECKLIST } from "./gcal/probe.js";
 
 /**
  * @typedef {{page: string, counts: Record<string, number>, ok: boolean,
@@ -65,6 +66,7 @@ export const CHECK_SOURCES = {
   outline: { probe: outlineProbe, checklist: OUTLINE_CHECKLIST },
   waterlooworks: { probe: wwProbe, checklist: WW_CHECKLIST },
   discord: { probe: discordProbe, checklist: DISCORD_CHECKLIST },
+  gcal: { probe: gcalProbe, checklist: GCAL_CHECKLIST },
   gmail: {
     probe: emailProbe,
     checklist: EMAIL_CHECKLIST.filter((r) => r.id.startsWith("gmail")),
@@ -92,6 +94,9 @@ const PAGE_ALIAS = {
 /** Extra count requirements for aliased rows (row must see this counter > 0). */
 const COUNT_REQ = {
   discord: { timestamp: "messageTimes" },
+  // "One open event" rides the gcal-week probe page; it only passes when a
+  // detail popup was actually open.
+  gcal: { "gcal-event": "detailPopup" },
 };
 
 /**
@@ -166,7 +171,7 @@ export function checklistRowStatus(row, probeByPage = {}, stats = [], now = new 
     const countOk = !reqCount || ((hit.counts || {})[reqCount] || 0) > 0;
     if (hit.ok && countOk) {
       const counts = hit.counts || {};
-      const rowsN = counts.rows ?? counts.listRows ?? counts.messageRows ?? counts.scheduleRows ?? counts.eventCards;
+      const rowsN = counts.rows ?? counts.listRows ?? counts.messageRows ?? counts.scheduleRows ?? counts.eventCards ?? counts.eventChips;
       const parts = ["Read OK"];
       if (typeof rowsN === "number") parts.push(`${rowsN} row${rowsN === 1 ? "" : "s"}`);
       const items = (stat && stat.items) || (recent && recent.items);

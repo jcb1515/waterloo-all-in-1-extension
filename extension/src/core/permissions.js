@@ -27,6 +27,7 @@ export const OPTIONAL_PERMISSION_GROUPS = Object.freeze({
     "https://outlook.live.com/*",
   ],
   gmail: ["https://mail.google.com/*"],
+  gcal: ["https://calendar.google.com/*"],
 });
 
 /** Button label per group. */
@@ -34,6 +35,7 @@ export const GROUP_LABELS = Object.freeze({
   discord: "Discord",
   outlook: "Outlook",
   gmail: "Gmail",
+  gcal: "Google Calendar",
 });
 
 /** The source content script bundled with the recorder per group. */
@@ -41,6 +43,25 @@ const GROUP_SOURCE_SCRIPT = {
   discord: "src/sources/discord/content.js",
   outlook: "src/sources/email/content.js",
   gmail: "src/sources/email/content.js",
+  gcal: "src/sources/gcal/content.js",
+};
+
+/**
+ * Groups that also need the MAIN-world network observer. gcal reads the DOM
+ * only (its content script posts the extract itself), so it gets just the
+ * recorder + source script — and at document_idle, since nothing has to be
+ * in place before page scripts run.
+ */
+const GROUP_MAIN_OBSERVER = {
+  discord: true,
+  outlook: true,
+  gmail: true,
+  gcal: false,
+};
+
+/** runAt for the recorder+source entry; defaults to document_start. */
+const GROUP_REC_RUN_AT = {
+  gcal: "document_idle",
 };
 
 /** Script ids we manage; anything else registered is left alone. */
@@ -60,23 +81,23 @@ export function scriptsForGrants(grantedOrigins) {
   for (const [group, origins] of Object.entries(OPTIONAL_PERMISSION_GROUPS)) {
     const matches = origins.filter((o) => granted.has(o));
     if (!matches.length) continue;
-    out.push(
-      {
+    if (GROUP_MAIN_OBSERVER[group] !== false) {
+      out.push({
         id: `${ID_PREFIX}obs:${group}`,
         js: [OBSERVER],
         matches,
         runAt: "document_start",
         world: "MAIN",
         persistAcrossSessions: true,
-      },
-      {
-        id: `${ID_PREFIX}rec:${group}`,
-        js: [RECORDER, GROUP_SOURCE_SCRIPT[group]],
-        matches,
-        runAt: "document_start",
-        persistAcrossSessions: true,
-      },
-    );
+      });
+    }
+    out.push({
+      id: `${ID_PREFIX}rec:${group}`,
+      js: [RECORDER, GROUP_SOURCE_SCRIPT[group]],
+      matches,
+      runAt: GROUP_REC_RUN_AT[group] || "document_start",
+      persistAcrossSessions: true,
+    });
   }
   return out;
 }
@@ -94,6 +115,7 @@ export function optionalSourceIds() {
 export function adapterGroups(adapterId) {
   if (adapterId === "discord") return ["discord"];
   if (adapterId === "outlook") return ["outlook", "gmail"];
+  if (adapterId === "gcal") return ["gcal"];
   return [];
 }
 
@@ -109,6 +131,10 @@ export function adapterGroups(adapterId) {
 export function neededGroups(adapterId, sourceSettings) {
   const s = sourceSettings || {};
   if (s.enabled === false) return [];
+  // gcal is off by default — the group is only needed once the user turns
+  // the Google Calendar toggle on, unlike every other source where unset
+  // counts as on.
+  if (adapterId === "gcal" && s.enabled !== true) return [];
   return adapterGroups(adapterId).filter((g) => s[g] !== false);
 }
 

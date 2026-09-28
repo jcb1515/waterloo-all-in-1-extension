@@ -95,7 +95,7 @@ export function CheckReaders({ state, actions, now }) {
 
 /**
  * One source's checklist card plus its "Something missed?" capture.
- * @param {{meta: any, rows: any[], actions: any}} p
+ * @param {{meta: any, rows: any[], actions: any, openSaw?: string}} p
  */
 function SourceCheck({ meta, rows, actions, openSaw }) {
   const [note, setNote] = useState("");

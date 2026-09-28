@@ -33,6 +33,7 @@ const IIFE_ENTRIES = [
   "src/sources/waterlooworks/content.js",
   "src/sources/discord/content.js",
   "src/sources/email/content.js",
+  "src/sources/gcal/content.js",
 ];
 
 async function* walk(dir) {

@@ -9,7 +9,7 @@
   publishes the feed. Adapters never write chrome.storage themselves.
 */
 
-/** @typedef {"learn"|"outline"|"portal"|"waterlooworks"|"discord"|"outlook"|"gmail"|"manual"} SourceId */
+/** @typedef {"learn"|"outline"|"portal"|"waterlooworks"|"discord"|"outlook"|"gmail"|"gcal"|"manual"} SourceId */
 
 /**
  * @typedef {"deadline"|"quiz"|"exam"|"presentation"|"class"|"tutorial"|"lab"|"meeting"|"interview"
@@ -235,7 +235,7 @@ export const MSG = Object.freeze({
 /** CustomEvent name the main-world observer dispatches on `document`; detail is a JSON string. */
 export const PAGE_EVENT = "wa1:page-net";
 
-export const SOURCE_IDS = /** @type {const} */ (["learn", "outline", "portal", "waterlooworks", "discord", "outlook", "gmail", "manual"]);
+export const SOURCE_IDS = /** @type {const} */ (["learn", "outline", "portal", "waterlooworks", "discord", "outlook", "gmail", "gcal", "manual"]);
 
 export const ITEM_TYPES = /** @type {const} */ ([
   "deadline", "quiz", "exam", "presentation", "class", "tutorial", "lab", "meeting", "interview",
@@ -256,6 +256,7 @@ export const SITE_BY_HOST = Object.freeze({
   "outlook.cloud.microsoft": "outlook",
   "outlook.live.com": "outlook",
   "mail.google.com": "gmail",
+  "calendar.google.com": "gcal",
 });
 
 /**

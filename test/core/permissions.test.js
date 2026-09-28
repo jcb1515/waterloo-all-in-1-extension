@@ -65,11 +65,27 @@ test("scriptsForGrants: gmail-only grant registers only the gmail group", () => 
 
 test("scriptsForGrants: all grants register both email groups plus discord", () => {
   const list = scriptsForGrants(ALL_OPTIONAL);
-  assert.equal(list.length, 6);
+  assert.equal(list.length, 7);
   for (const g of ["discord", "outlook", "gmail"]) {
     assert.ok(list.some((s) => s.id === `wa1:obs:${g}`), `obs:${g}`);
     assert.ok(list.some((s) => s.id === `wa1:rec:${g}`), `rec:${g}`);
   }
+  assert.ok(list.some((s) => s.id === "wa1:rec:gcal"), "rec:gcal");
+});
+
+test("scriptsForGrants: gcal registers only recorder + source script at document_idle", () => {
+  const list = scriptsForGrants(["https://calendar.google.com/*"]);
+  // No MAIN-world observer: gcal reads the DOM directly, no network payloads.
+  assert.equal(list.length, 1);
+  const rec = list[0];
+  assert.equal(rec.id, "wa1:rec:gcal");
+  assert.deepEqual(rec.js, [
+    "src/capture/recorder.content.js",
+    "src/sources/gcal/content.js",
+  ]);
+  assert.equal(rec.runAt, "document_idle");
+  assert.equal(rec.world, undefined);
+  assert.deepEqual(rec.matches, ["https://calendar.google.com/*"]);
 });
 
 test("neededGroups: discord gates on enabled, email gates per provider", () => {
@@ -80,6 +96,12 @@ test("neededGroups: discord gates on enabled, email gates per provider", () => {
   assert.deepEqual(neededGroups("outlook", { gmail: false }), ["outlook"]);
   assert.deepEqual(neededGroups("outlook", { outlook: false, gmail: false }), []);
   assert.deepEqual(neededGroups("learn", {}), []);
+  // gcal is off by default: unset needs nothing; only enabled === true does.
+  assert.deepEqual(neededGroups("gcal", undefined), []);
+  assert.deepEqual(neededGroups("gcal", {}), []);
+  assert.deepEqual(neededGroups("gcal", { enabled: false }), []);
+  assert.deepEqual(neededGroups("gcal", { enabled: true }), ["gcal"]);
+  assert.deepEqual(neededGroups("gcal", { enabled: true, gcal: false }), []);
 });
 
 test("manifest: optional hosts are not required and not static-matched", () => {
