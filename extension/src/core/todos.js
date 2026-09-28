@@ -8,6 +8,7 @@
 
 import { effectiveItem, isVisible } from "./effective.js";
 import { titleSimilarity, orgsCompatible } from "./merge.js";
+import { projectById } from "./projects.js";
 
 const DAY = 86400000;
 /** A finished study to-do is kept (as done) this long, then dropped. */
@@ -327,11 +328,15 @@ function rankingsOpenMs(items) {
 /**
  * Whether a *source* item (not a derived to-do) belongs on the to-do list,
  * under the settings toggles. Derived to-dos (meta.auto) always qualify.
+ * An explicit pin (eff.todoPin, from userState.todo) wins over every rule:
+ * true lists the item even when nothing below would, false keeps it off.
  * @param {any} item effective item
  * @param {any} settings resolved wa1Settings
  */
 export function todoSourceItem(item, settings = {}) {
   if (!item) return false;
+  if (item.todoPin === true) return true;
+  if (item.todoPin === false) return false;
   const cfg = todosSettings(settings);
   const auto = item.meta && item.meta.auto;
   if (auto === "study") return !(cfg.study && cfg.study.enabled === false);
@@ -346,6 +351,9 @@ export function todoSourceItem(item, settings = {}) {
     if (COOP_ACTIONS.has(action)) return cfg.coop !== false;
     return true;
   }
+  // Everything below is non-action. An undated item's anchor is a guess
+  // (received + 2d), not real work — it never auto-lists.
+  if (item.meta && item.meta.undated === true) return false;
   if (item.type === "task") {
     if (item.category === "reply" || item.category === "book-call") return cfg.replies !== false;
     return true; // manual + future project tasks always list
@@ -360,8 +368,14 @@ export function todoSourceItem(item, settings = {}) {
   if (item.type === "offer-deadline" || item.category === "interview-timeslot") {
     return cfg.coop !== false;
   }
-  // School deadlines: deadlines, quizzes, labs with a due date.
-  if (item.type === "deadline" || item.type === "quiz" || (item.type === "lab" && !!item.dueAt)) {
+  // Deadline-type items from any source: deadlines, quizzes, presentations,
+  // labs with a due date.
+  if (
+    item.type === "deadline" ||
+    item.type === "quiz" ||
+    item.type === "presentation" ||
+    (item.type === "lab" && !!item.dueAt)
+  ) {
     return cfg.deadlines !== false;
   }
   return false;

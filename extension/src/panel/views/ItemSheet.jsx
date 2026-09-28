@@ -14,6 +14,7 @@ import {
   sourceOpenLink,
   calendarState,
   calendarReasonText,
+  todoState,
 } from "../model/itemsheet.js";
 import { ADAPTERS } from "../../core/registry.js";
 import { Checklist } from "../components/Checklist.jsx";
@@ -86,6 +87,7 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
   const Icon = typeIcon(item.type);
   const link = primaryLink(item);
   const cal = calendarState(raw, us, state, now);
+  const todo = todoState(raw, us, state, now);
   const calSyncOff = !(
     state.settings &&
     state.settings.calendar &&
@@ -157,6 +159,23 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
     actions.toast("Removed from your calendar", {
       label: "Undo",
       run: () => actions.setUserState(item.id, { calendar: null }),
+    });
+  };
+
+  const addToTodo = () => {
+    actions.setUserState(item.id, { todo: true });
+    actions.toast("Added to To-do", {
+      label: "Undo",
+      run: () => actions.setUserState(item.id, { todo: null }),
+    });
+  };
+
+  const removeFromTodo = () => {
+    const prev = us.todo;
+    actions.setUserState(item.id, { todo: false });
+    actions.toast("Removed from To-do", {
+      label: "Undo",
+      run: () => actions.setUserState(item.id, { todo: prev ?? null }),
     });
   };
 
@@ -275,6 +294,25 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
               </dd>
             </>
           )}
+          {todo.listed || todo.canAdd ? (
+            <>
+              <dt>To-do</dt>
+              <dd class="sheet-cal">
+                {todo.listed ? (
+                  <span class="sheet-cal-acts">
+                    <span class="help">{todo.auto ? "On your to-do list" : "Pinned to your to-do list"}</span>
+                    <button type="button" class="btn btn-sm" onClick={removeFromTodo}>
+                      Remove from To-do
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" class="btn btn-sm" onClick={addToTodo}>
+                    Add to To-do
+                  </button>
+                )}
+              </dd>
+            </>
+          ) : null}
         </dl>
         {editAdd ? (
           <ItemEditForm

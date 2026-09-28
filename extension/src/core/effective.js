@@ -29,6 +29,9 @@ export function effectiveItem(item, us, opts = {}) {
     if (us.done) eff.status = "done";
     if (us.hidden) eff.hidden = true;
     if (us.snoozedUntil) eff.snoozedUntil = us.snoozedUntil;
+    // An explicit To-do pin travels on the effective item so the to-do rules
+    // can read it without another userState lookup. Not an override field.
+    if (typeof us.todo === "boolean") eff.todoPin = us.todo;
     const o = us.override;
     if (o && typeof o === "object") {
       for (const k of OVERRIDE_FIELDS) {

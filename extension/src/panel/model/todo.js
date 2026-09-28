@@ -8,7 +8,7 @@
 
 import { effectiveItem, isVisible } from "../../core/effective.js";
 import { autoDoneRule, todoSourceItem } from "../../core/todos.js";
-import { orgsCompatible } from "../../core/merge.js";
+import { orgsCompatible, titleSimilarity } from "../../core/merge.js";
 import { normCourseCode } from "../../core/contract.js";
 import { projectById } from "../../core/projects.js";
 import { startOfDay, fmtAgo, fmtDay, fmtTime } from "./agenda.js";
@@ -18,7 +18,9 @@ const DONE_KEEP_MS = 7 * DAY;
 /** Study to-dos opening within this window earn a "Starting soon" line. */
 const SOON_OPEN_MS = 3 * DAY;
 
-const anchorOf = (/** @type {any} */ i) => i.dueAt || i.startAt || null;
+/** A pinned event/meeting anchors on its start time, not a due guess. */
+const anchorOf = (/** @type {any} */ i) =>
+  i && i.todoPin === true && i.startAt ? i.startAt : (i && (i.dueAt || i.startAt)) || null;
 
 const COURSE_CODE_RE = /^[A-Z]{2,8} ?\d{3}[A-Z]{0,2}$/;
 
@@ -68,33 +70,35 @@ function autoTip(/** @type {any} */ item, /** @type {any} */ rule) {
 }
 
 /**
+ * The shared per-item listing decision for the To-do tab — buildTodos and
+ * the item sheet's todoState both run it so they can never disagree.
+ *
+ * Returns a gate object:
+ *   check(raw, isDerived, usOverride?) -> row descriptor or null:
+ *     {eff, us, opensAt}                 a listed row
+ *     {eff, us, opensAt, soon, openMs}   a study to-do that hasn't opened yet
+ *     null                               not on the to-do list
+ *
+ * Gate order: an explicit pin (us.todo === true, carried as eff.todoPin)
+ * bypasses the derived-row suppression and the pending/dismissed
+ * visibility check — hidden and snooze still apply. Then the usual gates:
+ * suppression by a linked derived row or a same-action derived to-do,
+ * archived projects, study opensAt, todoSourceItem, visibility, cancelled.
+ * Last, a listed source row without meta.action is suppressed when a
+ * listed action row covers the same thing — same evidence.url, or anchors
+ * within a day plus a matching title (>= 0.5) or compatible employer/org.
+ * The action row wins; a pin beats suppression.
  * @param {Object} p
- * @param {Record<string, any>} p.items  merged items map (state.items)
- * @param {Record<string, any>} p.todos  derived to-dos map (state.todos)
- * @param {Record<string, any>} p.applications
- * @param {Record<string, any>} p.userState
- * @param {any} p.settings
- * @param {any[]} [p.projects]          user projects (state.projects)
- * @param {Date} p.now
- * @param {string} [p.filter] all|school|coop|teams|projects|replies|mine
- * @returns {{groups: {id: string, label: string, rows: any[], done?: boolean,
- *   collapsedByDefault?: boolean, tone?: string}[],
- *   startingSoon: {id: string, title: string, opensAt: string}[],
- *   counts: Record<string, number>}}
+ * @param {Record<string, any>} [p.items]   merged items map
+ * @param {Record<string, any>} [p.todos]   derived to-dos map
+ * @param {Record<string, any>} [p.userState]
+ * @param {any} [p.settings]
+ * @param {any[]} [p.projects]
+ * @param {Date} [p.now]
  */
-export function buildTodos({ items = {}, todos = {}, applications = {}, userState = {}, settings = {}, projects = [], now = new Date(), filter = "all" }) {
+export function todoRowGate({ items = {}, todos = {}, userState = {}, settings = {}, projects = [], now = new Date() } = {}) {
   const acceptPending = !!(settings.review && settings.review.showPending);
-  const today = startOfDay(now);
-  const tomorrow = today.getTime() + DAY;
-  const weekEnd = today.getTime() + (7 - today.getDay()) * DAY; // Sun, next week
   const nowMs = now.getTime();
-
-  /** @type {any[]} */
-  const rows = [];
-  /** @type {any[]} */
-  const startingSoon = [];
-  /** @type {Record<string, number>} */
-  const counts = {};
 
   /* A derived to-do supersedes the source row it links — e.g. an offer
      to-do already carries the linked offer-deadline's due date, so listing
@@ -139,26 +143,140 @@ export function buildTodos({ items = {}, todos = {}, applications = {}, userStat
     });
   };
 
-  const collect = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
-    if (!raw || !raw.id) return;
-    if (!isDerived && (suppressed.has(raw.id) || suppressedByAction(raw))) return;
-    const project = raw.meta && raw.meta.projectId ? projectById(projects, raw.meta.projectId) : null;
-    if (project && project.status !== "active") return; // done/archived projects hide their items
-    const us = userState[raw.id];
+  /* Phase 1: every gate except the action-row-vs-plain-row seam below.
+     Returns {eff, us, opensAt} | {…, soon: true, openMs} | null. */
+  const phase1 = (/** @type {any} */ raw, /** @type {boolean} */ isDerived, /** @type {any} */ usO = undefined) => {
+    if (!raw || !raw.id) return null;
+    const us = usO !== undefined ? usO : userState[raw.id];
+    const pinned = !!(us && us.todo === true);
+    if (!isDerived && !pinned && (suppressed.has(raw.id) || suppressedByAction(raw))) return null;
+    const project =
+      raw.meta && raw.meta.projectId ? projectById(projects, raw.meta.projectId) : null;
+    if (project && project.status !== "active") return null; // done/archived projects hide their items
     const eff = effectiveItem(raw, us, { acceptPending });
     const auto = eff.meta && eff.meta.auto;
     // Study to-dos stay hidden until their opensAt (user-overridable).
     const opensAt = auto === "study" ? eff.opensAt || raw.opensAt : null;
     const openMs = opensAt ? Date.parse(opensAt) : null;
-    if (openMs && openMs > nowMs) {
-      if (openMs - nowMs <= SOON_OPEN_MS && isVisible(eff, nowMs) && eff.status !== "cancelled") {
+    if (openMs && openMs > nowMs) return { eff, us, opensAt, openMs, soon: true };
+    if (!todoSourceItem(eff, settings)) return null;
+    if (pinned) {
+      // A pin skips the review pending/dismissed gate; hidden and snooze
+      // still apply.
+      if (eff.hidden) return null;
+      const sn = eff.snoozedUntil;
+      if (sn && Date.parse(sn) > nowMs) return null;
+    } else if (!isVisible(eff, nowMs)) {
+      return null;
+    }
+    if (eff.status === "cancelled") return null;
+    return { eff, us, opensAt };
+  };
+
+  /* The action rows that made the list — meta.action seams like an
+     email's "fill in this form" task or a WW apply/book to-do. They shadow
+     a plain sibling row that describes the same thing. */
+  /** @type {any[]} */
+  const actionRows = [];
+  const collectAction = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
+    const r = phase1(raw, isDerived);
+    if (r && !r.soon && r.eff.meta && r.eff.meta.action) actionRows.push(r.eff);
+  };
+  for (const raw of Object.values(items)) collectAction(raw, false);
+  for (const raw of Object.values(todos)) collectAction(raw, true);
+
+  const srcSet = (/** @type {any} */ it) => {
+    const s = new Set();
+    if (it.source) s.add(it.source);
+    for (const e of Array.isArray(it.seenIn) ? it.seenIn : []) {
+      const id = e && typeof e === "object" ? e.source : e;
+      if (id) s.add(id);
+    }
+    return s;
+  };
+
+  /** Does a listed action row cover this non-action row? */
+  const coveredByActionRow = (/** @type {any} */ eff) => {
+    const srcs = srcSet(eff);
+    const evUrl = eff.evidence && eff.evidence.url;
+    const a = anchorOf(eff);
+    const aMs = a ? Date.parse(a) : NaN;
+    const who = (eff.meta && eff.meta.employer) || eff.org || null;
+    return actionRows.some((ar) => {
+      let overlap = false;
+      for (const s of srcSet(ar)) {
+        if (srcs.has(s)) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) return false;
+      const aUrl = ar.evidence && ar.evidence.url;
+      if (evUrl && aUrl && evUrl === aUrl) return true;
+      const b = anchorOf(ar);
+      const bMs = b ? Date.parse(b) : NaN;
+      if (Number.isNaN(aMs) || Number.isNaN(bMs)) return false;
+      if (Math.abs(aMs - bMs) > DAY) return false;
+      const aWho = (ar.meta && ar.meta.employer) || ar.org || null;
+      return (
+        titleSimilarity(eff.title, eff.org, ar.title, ar.org) >= 0.5 ||
+        orgsCompatible(who, aWho)
+      );
+    });
+  };
+
+  const check = (/** @type {any} */ raw, /** @type {boolean} */ isDerived, /** @type {any} */ usO = undefined) => {
+    const r = phase1(raw, isDerived, usO);
+    if (!r || r.soon) return r;
+    const pinned = r.eff.todoPin === true;
+    const hasAction = !!(r.eff.meta && r.eff.meta.action);
+    if (!isDerived && !pinned && !hasAction && coveredByActionRow(r.eff)) return null;
+    return r;
+  };
+  return { check, phase1 };
+}
+
+/**
+ * @param {Object} p
+ * @param {Record<string, any>} p.items  merged items map (state.items)
+ * @param {Record<string, any>} p.todos  derived to-dos map (state.todos)
+ * @param {Record<string, any>} p.applications
+ * @param {Record<string, any>} p.userState
+ * @param {any} p.settings
+ * @param {any[]} [p.projects]          user projects (state.projects)
+ * @param {Date} p.now
+ * @param {string} [p.filter] all|school|coop|teams|projects|replies|mine
+ * @returns {{groups: {id: string, label: string, rows: any[], done?: boolean,
+ *   collapsedByDefault?: boolean, tone?: string}[],
+ *   startingSoon: {id: string, title: string, opensAt: string}[],
+ *   counts: Record<string, number>}}
+ */
+export function buildTodos({ items = {}, todos = {}, applications = {}, userState = {}, settings = {}, projects = [], now = new Date(), filter = "all" }) {
+  const today = startOfDay(now);
+  const tomorrow = today.getTime() + DAY;
+  const weekEnd = today.getTime() + (7 - today.getDay()) * DAY; // Sun, next week
+  const nowMs = now.getTime();
+
+  /** @type {any[]} */
+  const rows = [];
+  /** @type {any[]} */
+  const startingSoon = [];
+  /** @type {Record<string, number>} */
+  const counts = {};
+
+  const gate = todoRowGate({ items, todos, userState, settings, projects, now });
+
+  const collect = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
+    const r = gate.check(raw, isDerived);
+    if (!r) return;
+    const { eff, us, opensAt } = r;
+    if (r.soon) {
+      // A study to-do opening soon still earns a "Starting soon" line.
+      if (r.openMs - nowMs <= SOON_OPEN_MS && isVisible(eff, nowMs) && eff.status !== "cancelled") {
         startingSoon.push({ id: eff.id, title: eff.title, opensAt });
       }
       return;
     }
-    if (!todoSourceItem(eff, settings)) return;
-    if (!isVisible(eff, nowMs)) return;
-    if (eff.status === "cancelled") return;
 
     const rule = autoDoneRule(raw, {
       applications,

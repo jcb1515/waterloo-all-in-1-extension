@@ -9,6 +9,7 @@
 import { zonedParts, zonedIso } from "../../lib/textdates/index.js";
 import { effectiveItem } from "../../core/effective.js";
 import { feedExclusion, excludedProjectIds } from "../../calendar/payload.js";
+import { todoRowGate } from "./todo.js";
 
 const TZ = "America/Toronto";
 const HOUR = 3600000;
@@ -241,4 +242,42 @@ export function calendarReasonText(reason, item) {
     default:
       return "Not on the calendar feed";
   }
+}
+
+/**
+ * The item sheet's To-do row: is this item on the to-do list, and does it
+ * get there by rule or by pin? Uses the same todoRowGate as buildTodos —
+ * the listed flag can never disagree with the tab.
+ * @param {any} raw    merged item (or a derived to-do row)
+ * @param {any} us     userState[raw.id]
+ * @param {any} state  merged panel state ({items, todos, userState,
+ *   settings, projects})
+ * @param {Date|number} now
+ * @returns {{listed: boolean, auto: boolean, canAdd: boolean,
+ *   canRemove: boolean}}
+ */
+export function todoState(raw, us, state, now) {
+  const none = { listed: false, auto: false, canAdd: false, canRemove: false };
+  if (!raw || !raw.id) return none;
+  const settings = (state && state.settings) || {};
+  const acceptPending = !!(settings.review && settings.review.showPending);
+  const gate = todoRowGate({
+    items: (state && state.items) || {},
+    todos: (state && state.todos) || {},
+    userState: (state && state.userState) || {},
+    settings,
+    projects: (state && state.projects) || [],
+    now: now instanceof Date ? now : new Date(now),
+  });
+  const isDerived = !!(state && state.todos && state.todos[raw.id]);
+  const r = gate.check(raw, isDerived, us);
+  const listed = !!(r && !r.soon);
+  const pinned = !!(us && us.todo === true);
+  // Only dated items can be pinned; hidden, cancelled and not-yet-open
+  // study to-dos never can.
+  const eff = effectiveItem(raw, us, { acceptPending });
+  const dated = !!(eff.dueAt || eff.startAt);
+  const canAdd =
+    !listed && !(r && r.soon) && dated && !eff.hidden && eff.status !== "cancelled";
+  return { listed, auto: listed && !pinned, canAdd, canRemove: listed };
 }

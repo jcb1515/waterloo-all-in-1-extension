@@ -10,6 +10,7 @@ import {
   sourceLabel,
   calendarState,
   calendarReasonText,
+  todoState,
 } from "../../extension/src/panel/model/itemsheet.js";
 import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
 
@@ -191,4 +192,71 @@ test("calendarReasonText covers the non-addable reasons", () => {
   assert.match(calendarReasonText("no-date"), /No date to put on a calendar/);
   assert.match(calendarReasonText("opted-out", { meta: { projectId: "p" } }), /project/);
   assert.match(calendarReasonText("undated"), /guess/);
+});
+
+/* ----------------------------- to-do state ------------------------------ */
+
+const TODO_SETTINGS = {
+  todos: { deadlines: true, replies: true, coop: true },
+  review: {},
+};
+const todoStateFor = (items, userState = {}, extra = {}) =>
+  todoState(
+    items.x,
+    userState.x,
+    {
+      items,
+      userState,
+      todos: {},
+      applications: {},
+      settings: TODO_SETTINGS,
+      projects: [],
+      ...extra,
+    },
+    CAL_NOW,
+  );
+const todoItem = (over = {}) => ({
+  x: {
+    id: "x",
+    source: "gmail",
+    type: "deadline",
+    title: "x",
+    status: "open",
+    confidence: "exact",
+    review: "auto",
+    dueAt: new Date(CAL_NOW.getTime() + 86400000).toISOString(),
+    ...over,
+  },
+});
+
+test("todoState: a pending gmail deadline — not listed, addable", () => {
+  const s = todoStateFor(todoItem({ review: "pending" }));
+  assert.deepEqual(s, { listed: false, auto: false, canAdd: true, canRemove: false });
+});
+
+test("todoState: pinned pending lists; accepted auto-lists; todo:false hides", () => {
+  const pending = todoItem({ review: "pending" });
+  assert.deepEqual(todoStateFor(pending, { x: { todo: true } }), {
+    listed: true,
+    auto: false,
+    canAdd: false,
+    canRemove: true,
+  });
+  assert.deepEqual(todoStateFor(pending, { x: { review: "accepted" } }), {
+    listed: true,
+    auto: true,
+    canAdd: false,
+    canRemove: true,
+  });
+  assert.deepEqual(
+    todoStateFor(todoItem(), { x: { todo: false } }),
+    { listed: false, auto: false, canAdd: true, canRemove: false },
+  );
+});
+
+test("todoState: undated non-action — nothing to pin", () => {
+  const s = todoStateFor(
+    todoItem({ source: "outlook", type: "task", meta: { undated: true }, dueAt: undefined }),
+  );
+  assert.deepEqual(s, { listed: false, auto: false, canAdd: false, canRemove: false });
 });

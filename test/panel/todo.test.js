@@ -442,3 +442,150 @@ test("buildTodos: meta.undated keeps its bucket but reads 'No due date · by <da
   assert.ok(row, "the suggested date still lands in This week");
   assert.match(dueLabel(row, NOW), /^No due date · by /);
 });
+
+/* ------------------------- pins + cross-source --------------------------- */
+
+const rowsOf = (out) => out.groups.flatMap((g) => g.rows).map((r) => r.item.id);
+
+test("buildTodos: a pending gmail deadline is unlisted; pin/accept/unpin", () => {
+  const items = {
+    "gmail:d": item("gmail:d", {
+      source: "gmail",
+      type: "deadline",
+      title: "Forms due",
+      review: "pending",
+      dueAt: iso(t0 + 2 * DAY),
+    }),
+  };
+  assert.deepEqual(rowsOf(buildTodos({ items, settings: SETTINGS, now: NOW })), [], "pending not listed");
+
+  const pinned = buildTodos({
+    items,
+    userState: { "gmail:d": { todo: true } },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  assert.deepEqual(rowsOf(pinned), ["gmail:d"], "todo:true lists a pending item");
+
+  const accepted = buildTodos({
+    items,
+    userState: { "gmail:d": { review: "accepted" } },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  assert.deepEqual(rowsOf(accepted), ["gmail:d"], "accepted auto-lists");
+
+  const unpinned = buildTodos({
+    items,
+    userState: { "gmail:d": { review: "accepted", todo: false } },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  assert.deepEqual(rowsOf(unpinned), [], "todo:false hides even an accepted item");
+
+  // showPending: pending counts as accepted, so it auto-lists.
+  const showAll = buildTodos({
+    items,
+    settings: { ...SETTINGS, review: { showPending: true } },
+    now: NOW,
+  });
+  assert.deepEqual(rowsOf(showAll), ["gmail:d"]);
+});
+
+test("buildTodos: a pinned pending WaterlooWorks event lists under its startAt", () => {
+  const start = iso(t0 + 5 * DAY);
+  const items = {
+    "ww:evt": item("ww:evt", {
+      source: "waterlooworks",
+      type: "event",
+      title: "Info session — Acme",
+      review: "pending",
+      startAt: start,
+      dueAt: undefined,
+    }),
+  };
+  const out = buildTodos({
+    items,
+    userState: { "ww:evt": { todo: true } },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  const rows = out.groups.flatMap((g) => g.rows);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].anchorMs, Date.parse(start), "pinned event anchors on startAt");
+});
+
+test("buildTodos: a pin can't beat hidden or a live snooze", () => {
+  const items = {
+    a: item("a", { dueAt: iso(t0 + DAY) }),
+    b: item("b", { dueAt: iso(t0 + DAY) }),
+  };
+  const userState = {
+    a: { todo: true, hidden: true },
+    b: { todo: true, snoozedUntil: iso(t0 + 2 * DAY) },
+  };
+  assert.deepEqual(rowsOf(buildTodos({ items, userState, settings: SETTINGS, now: NOW })), []);
+});
+
+test("buildTodos: an undated non-action item doesn't auto-list", () => {
+  const items = {
+    u: item("u", {
+      source: "outlook",
+      type: "task",
+      title: "Something with a guessed date",
+      dueAt: iso(t0 + 2 * DAY),
+      meta: { undated: true },
+    }),
+  };
+  assert.deepEqual(rowsOf(buildTodos({ items, settings: SETTINGS, now: NOW })), []);
+});
+
+test("buildTodos: an email deadline folds into the same email's action task", () => {
+  const ev = "https://mail.google.com/mail/u/0/#inbox/abc";
+  const items = {
+    "gmail:deadline": item("gmail:deadline", {
+      source: "gmail",
+      type: "deadline",
+      title: "Placement preference form due",
+      dueAt: iso(t0 + 2 * DAY),
+      evidence: { url: ev },
+    }),
+    "gmail:task": item("gmail:task", {
+      source: "gmail",
+      type: "task",
+      title: "Fill in the placement preference form",
+      dueAt: iso(t0 + 2 * DAY),
+      evidence: { url: ev },
+      meta: { action: "submit-form" },
+    }),
+  };
+  const out = buildTodos({ items, settings: SETTINGS, now: NOW });
+  assert.deepEqual(rowsOf(out), ["gmail:task"], "the action row wins; no duplicate");
+
+  // Different url but near date + similar title still coalesces.
+  const fuzzy = buildTodos({
+    items: {
+      "gmail:deadline": { ...items["gmail:deadline"], evidence: { url: "https://other" } },
+      "gmail:task": items["gmail:task"],
+    },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  assert.deepEqual(rowsOf(fuzzy), ["gmail:task"]);
+
+  // An unrelated source's action row does not suppress.
+  const other = buildTodos({
+    items: {
+      "gmail:deadline": items["gmail:deadline"],
+      "gmail:task": { ...items["gmail:task"], source: "learn", evidence: { url: "https://nope" }, title: "Completely different thing" },
+    },
+    settings: SETTINGS,
+    now: NOW,
+  });
+  assert.equal(rowsOf(other).length, 2, "different source + title -> two rows");
+});
+
+test("buildTodos: a Learn deadline still lists", () => {
+  const items = { l: item("l", { source: "learn", type: "deadline", dueAt: iso(t0 + DAY) }) };
+  assert.deepEqual(rowsOf(buildTodos({ items, settings: SETTINGS, now: NOW })), ["l"]);
+});

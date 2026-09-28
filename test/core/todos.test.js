@@ -381,3 +381,55 @@ test("nextReminders: a study to-do fires once at opensAt", () => {
   const sentKey = out[0].key;
   assert.equal(nextReminders(todos, {}, { reminders: {} }, NOW, { [sentKey]: "x" }).length, 0);
 });
+
+/* ------------------------- todo pin + sources --------------------------- */
+
+test("todoSourceItem: an explicit pin wins over every rule", () => {
+  // todoPin === true lists a type that never auto-lists.
+  assert.equal(
+    todoSourceItem(item("ev", { type: "meeting", todoPin: true }), SETTINGS),
+    true,
+  );
+  // todoPin === false hides even a plain deadline.
+  assert.equal(
+    todoSourceItem(item("dl", { type: "deadline", todoPin: false }), SETTINGS),
+    false,
+  );
+  // And a pin still lists when the deadlines toggle is off.
+  assert.equal(
+    todoSourceItem(item("dl2", { type: "deadline", todoPin: true }), { todos: { deadlines: false } }),
+    true,
+  );
+});
+
+test("todoSourceItem: an undated non-action item never auto-lists", () => {
+  const undated = item("u", { type: "task", meta: { undated: true }, dueAt: iso(t0 + 2 * DAY) });
+  assert.equal(todoSourceItem(undated, SETTINGS), false);
+  // An action task with the same flag still follows its own seam rules.
+  const action = item("a", {
+    type: "deadline",
+    meta: { undated: true, action: "submit-form" },
+    dueAt: iso(t0 + 2 * DAY),
+  });
+  assert.equal(todoSourceItem(action, SETTINGS), true, "action seam unaffected");
+});
+
+test("todoSourceItem: deadline-type items list from every source", () => {
+  for (const src of ["learn", "outline", "portal", "gmail", "outlook", "discord", "waterlooworks"]) {
+    assert.equal(
+      todoSourceItem(item(`x:${src}`, { source: src, type: "deadline" }), SETTINGS),
+      true,
+      `${src} deadline lists`,
+    );
+  }
+  assert.equal(
+    todoSourceItem(item("p", { source: "gmail", type: "presentation" }), SETTINGS),
+    true,
+    "presentation lists",
+  );
+  assert.equal(
+    todoSourceItem(item("ad", { source: "waterlooworks", type: "application-deadline" }), SETTINGS),
+    false,
+    "a bare application-deadline stays calendar-only",
+  );
+});
