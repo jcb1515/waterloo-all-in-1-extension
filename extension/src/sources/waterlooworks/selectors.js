@@ -67,6 +67,15 @@ export const HEADER_KEYS = Object.freeze({
     "to": "to",
     "subject": "subject",
   }),
+  // Dashboard "Your Upcoming Schedule" module: day-grouped rows where the
+  // day lives in a <strong> above each table.
+  schedule: Object.freeze({
+    "time": "timeText",
+    "type": "entryType",
+    "name": "nameText",
+    "status": "statusText",
+    "conflicts": "conflictsText",
+  }),
 });
 
 /** A table is of a kind when its cleaned headers include ALL of these labels. */
@@ -75,7 +84,26 @@ export const TABLE_RULES = Object.freeze({
   interviews: Object.freeze(["interview date / time", "job id"]),
   events: Object.freeze(["event date", "registration status"]),
   messages: Object.freeze(["date received", "subject"]),
+  schedule: Object.freeze(["time", "type", "name", "status"]),
 });
+
+/** Dashboard URL: /myAccount root and dashboard.htm are the same page. */
+export const DASHBOARD_PATH_RE = /^\/myAccount\/?$|^\/myAccount\/dashboard(?:\.htm)?\/?$/i;
+
+/** Informational wrapper present only on the dashboard (full DOM, not snapshots). */
+export const DASHBOARD_CONTAINER_SELECTOR = ".user-dashboard";
+
+/** "Rank and Match" module on the dashboard (holds the rankings notice). */
+export const DASH_ACTIONS_SELECTOR = ".orbis-posting-actions";
+/** Its heading: "RANKING (2027 - Winter)" -> term "2027 - Winter". */
+export const DASH_RANKINGS_HEADING_RE = /^rankings?\s*\(([^)]+)\)/i;
+
+/** Schedule name cell: "Interview for Hardware Co-op (400001)". */
+export const SCHEDULE_INTERVIEW_RE = /^interview\s+for\s+(.+?)\s*\((\d{4,})\)\s*$/i;
+
+/** Count-table row labels on the dashboard (value lives in a .value cell). */
+export const NEW_MESSAGES_LABEL_RE = /^new messages$/i;
+export const WEBCAM_LABEL_RE = /webcam appointments/i;
 
 /** Posting h1: "488135 - Analog/Mixed-Signal Engineering Co-op". */
 export const POSTING_H1_RE = /^(\d{4,})\s*-\s*(.+)$/;
@@ -117,7 +145,10 @@ export const LOGGED_OUT_TEXT_RE = /not logged in/i;
  */
 export const OBSERVE_PATTERNS = Object.freeze([
   "^https://waterlooworks\\.uwaterloo\\.ca/myAccount/co-op/full/(applications|interviews|jobs)\\.htm",
-  "^https://waterlooworks\\.uwaterloo\\.ca/myAccount/dashboard\\.htm",
+  // The dashboard (its URL may or may not carry the .htm suffix) and the
+  // /myAccount root, which renders the same page.
+  "^https://waterlooworks\\.uwaterloo\\.ca/myAccount/dashboard(\\.htm)?(\\?|#|/|$)",
+  "^https://waterlooworks\\.uwaterloo\\.ca/myAccount/?(\\?|#|$)",
   // rankings tab, messages inbox/detail and other co-op sub-pages
   "^https://waterlooworks\\.uwaterloo\\.ca/myAccount/co-op/",
   "^https://waterlooworks\\.uwaterloo\\.ca/notLoggedIn\\.htm",

@@ -255,6 +255,59 @@ test("a dashboard fragment can fill several scopes at once", async () => {
   ]);
 });
 
+test("the live dashboard folds schedule + upcoming events + volatile counts", async () => {
+  // The page-load HTML is a full document — "net" kind (a DOM fragment
+  // without data-wa1-complete correctly bails before folding).
+  const result = await adapter.observe.parse(
+    payload(
+      "dashboard-live.html",
+      "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
+      "net"
+    ),
+    makeCtx()
+  );
+  assert.equal(result.scope, "waterlooworks");
+  assert.deepEqual(result.state.lastReadOk, ["dashboard"]);
+  assert.deepEqual(
+    result.items.map((it) => it.type).sort(),
+    ["event", "event", "event", "event", "event", "event", "interview"]
+  );
+  const interview = result.items.find((it) => it.type === "interview");
+  assert.equal(interview.id, "waterlooworks:interview:488135");
+  assert.equal(interview.startAt, "2026-10-02T20:00:00.000Z");
+  assert.equal(interview.endAt, "2026-10-02T20:30:00.000Z");
+  const events = result.items.filter((it) =>
+    it.id.startsWith("waterlooworks:event:")
+  );
+  assert.equal(events.length, 5);
+  assert.ok(events.every((it) => it.startAt && it.endAt));
+  // The rankings notice persists (same shape as the rankings page read);
+  // the volatile module counters never do.
+  assert.deepEqual(result.state.rankings, {
+    term: "2027 - Winter",
+    open: false,
+    note: "Rankings are not open at this time. Visit the calendar to see when rankings will be open.",
+    at: AT,
+  });
+  const stateJson = JSON.stringify(result.state);
+  for (const key of ["newMessages", "webcamAppointments"]) {
+    assert.ok(!stateJson.includes(key), `state persisted ${key}`);
+  }
+  // The flattened content.js snapshot (data-wa1-complete="1") folds the same.
+  const snap = await adapter.observe.parse(
+    payload(
+      "dashboard-snapshot.html",
+      "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
+      "dom"
+    ),
+    makeCtx(result.state)
+  );
+  assert.deepEqual(
+    snap.items.map((it) => it.id).sort(),
+    result.items.map((it) => it.id).sort()
+  );
+});
+
 test("lastGood merges across scopes and survives later reads", async () => {
   const ctx = makeCtx();
   const first = await adapter.observe.parse(

@@ -18,6 +18,8 @@ import {
   interviewItems,
   interviewDetailItems,
   eventItems,
+  scheduleItems,
+  dashboardEventItems,
   postingItems,
   linkItems,
   mergeInterviewScopes,
@@ -48,12 +50,31 @@ const MESSAGE_SCOPE_CAP = 300;
 const COOP_FETCH_MS = DAY_MS;
 
 /**
+ * Dedupe key for event items: a dashboard "upcoming events" row and an
+ * event-registrations row for the same session share title + start time.
+ * @param {any} item
+ */
+const eventDupKey = (item) =>
+  item?.type === "event" && item.startAt && item.title
+    ? `${item.startAt}|${String(item.title)
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim()}`
+    : null;
+
+/**
  * Every cached item from state.lastGood, interview list/detail merged by id.
+ * Dashboard buckets come first: schedule interview items reuse
+ * `interview:<jobId>` ids, and the id dedupe keeps the LATER (richer) entry,
+ * so the sparsest buckets lead. A dashboard event that names the same event
+ * at the same start as a registrations-grid row is dropped — the grid read
+ * carries the registration status.
  * @param {Record<string, any>} state
  */
 function cachedItems(state) {
   const lastGood = obj(state.lastGood);
-  return mergeInterviewScopes(
+  const dashEvents = arr(lastGood["dash-events"]?.items);
+  const rest = mergeInterviewScopes(
     arr(lastGood.interviews?.items),
     arr(lastGood["interview-detail"]?.items)
   ).concat(
@@ -62,6 +83,23 @@ function cachedItems(state) {
     arr(lastGood["message-dates"]?.items),
     arr(lastGood["coop-dates"]?.items)
   );
+  /** @type {Map<string, any>} */
+  const byId = new Map();
+  for (const item of [
+    ...arr(lastGood.schedule?.items),
+    ...dashEvents,
+    ...rest,
+  ]) {
+    if (item && item.id) byId.set(item.id, item);
+  }
+  const restEventKeys = new Set(rest.map(eventDupKey).filter(Boolean));
+  const out = [];
+  for (const item of byId.values()) {
+    const key = eventDupKey(item);
+    if (key && dashEvents.includes(item) && restEventKeys.has(key)) continue;
+    out.push(item);
+  }
+  return out;
 }
 
 /**
@@ -519,6 +557,42 @@ export default {
         };
         readOk.push("rankings");
         delete state.needsUpdate.rankings;
+      }
+      if (parsed.dashboard) {
+        // Multi-module page: each module that was present replaces its own
+        // lastGood bucket; absent modules keep theirs (AJAX fragments and
+        // early snapshots rarely carry the whole page).
+        const dash = obj(parsed.dashboard);
+        if (dash.schedule) {
+          state.lastGood.schedule = {
+            items: scheduleItems(
+              arr(obj(dash.schedule).rows),
+              arr(state.applications),
+              now
+            ).slice(0, LAST_GOOD_CAP),
+            at: payload.at,
+          };
+        }
+        if (dash.events) {
+          state.lastGood["dash-events"] = {
+            items: dashboardEventItems(arr(obj(dash.events).rows), now).slice(
+              0,
+              LAST_GOOD_CAP
+            ),
+            at: payload.at,
+          };
+        }
+        if (dash.rankings) {
+          const rank = obj(dash.rankings);
+          state.rankings = {
+            term: rank.term,
+            open: rank.open !== false,
+            note: rank.note,
+            at: payload.at,
+          };
+        }
+        readOk.push("dashboard");
+        delete state.needsUpdate.dashboard;
       }
 
       // Fail-soft: a URL that should have yielded a section but didn't means
