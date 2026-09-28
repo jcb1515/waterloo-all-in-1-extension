@@ -436,6 +436,21 @@ html[data-density="compact"] .item-title {
   color: var(--ok);
 }
 
+/* key events (exam / interview / deadline): the date block leads, bold */
+.item-row.key-event .item-title {
+  font-weight: var(--w-semibold);
+}
+.item-row.key-event .item-right .date-block {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-bold);
+  color: var(--text);
+}
+.item-right .date-block {
+  max-width: 11em;
+  white-space: normal;
+  text-align: right;
+}
+
 /* empty / first-run */
 .empty-card {
   display: flex;
