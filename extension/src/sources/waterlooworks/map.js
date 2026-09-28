@@ -904,6 +904,39 @@ export function mergeInterviewScopes(listItems, detailItems) {
 }
 
 /**
+ * Merge two same-id items from different scopes (dashboard schedule vs
+ * interviews list, etc): `later` wins field by field, `earlier` fills
+ * whatever `later` lacks — a schedule item's endAt survives a list item
+ * that arrives after it. meta.facts is the union by label with `later`'s
+ * values winning shared labels.
+ * @param {Item} earlier
+ * @param {Item} later
+ * @returns {Item}
+ */
+export function mergeItemById(earlier, later) {
+  const merged = {
+    ...earlier,
+    ...later,
+    title: later.title ?? earlier.title,
+    org: later.org ?? earlier.org,
+    startAt: later.startAt ?? earlier.startAt,
+    endAt: later.endAt ?? earlier.endAt,
+    dueAt: later.dueAt ?? earlier.dueAt,
+    location: later.location ?? earlier.location,
+    status: later.status ?? earlier.status,
+    details: mergeDetails(later.details, earlier.details),
+    seenIn: dedupeSeenIn(later.seenIn, earlier.seenIn),
+  };
+  const meta = { ...earlier?.meta, ...later?.meta };
+  const facts = mergeFacts(later?.meta?.facts, earlier?.meta?.facts);
+  if (facts) meta.facts = facts;
+  const prep = { ...earlier?.meta?.prep, ...later?.meta?.prep };
+  if (Object.keys(prep).length) meta.prep = prep;
+  if (Object.keys(meta).length) merged.meta = meta;
+  return merged;
+}
+
+/**
  * @param {string|undefined} a  list-side details
  * @param {string|undefined} b  detail-side details
  */
