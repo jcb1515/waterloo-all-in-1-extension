@@ -36,6 +36,11 @@ If the port isn't reachable, every command exits with a pointer back here.
   discord.com** — no open, no scroll; the user opens Discord pages. If a
   page isn't on the allowlist, ask the user to open it, or add its `url`
   to a CHECKLIST row first.
+- `reload-ext` and `screenshot` touch **our own extension only**:
+  `reload-ext` evaluates `chrome.runtime.reload()` inside the selected
+  extension's service worker and nothing else; `screenshot` opens a
+  `chrome-extension://<id>/` page the tool itself created in a new tab and
+  closes it afterwards (it never navigates an existing tab).
 - A GET-only `fetch` from the page context is allowed for the feasibility
   checks in w1.md "v2 additions" section 4.
 - One tab at a time for `dump`/`probe` reads.
@@ -62,6 +67,10 @@ npm run live -- storage                     # all storage keys + sizes + sourceS
 npm run live -- storage items --source discord
 npm run live -- storage sourceState         # per-source status/lastOk/lastRun/errors
 npm run live -- watch --source waterlooworks --secs 120
+npm run live -- reload-ext                  # chrome.runtime.reload() in our SW
+npm run live -- reload-ext --ext <id>       # or WA1_EXT_ID=<id>
+npm run live -- screenshot src/panel/panel.html?more=1 --name more-360
+npm run live -- screenshot src/options/options.html --width 400 --height 800
 ```
 
 `open` resolves its argument against the runtime allowlist and prints the
@@ -86,5 +95,18 @@ be loaded side by side), the command lists them and exits — pick one with
 npm run live -- storage --ext maihpiennplbbcopdcklaobaoipbejjb
 set WA1_EXT_ID=maihpiennplbbcopdcklaobaoipbejjb && npm run live -- watch
 ```
+
+`reload-ext` needs an extension id (`--ext` or `WA1_EXT_ID`), finds that
+copy's `chrome-extension://<id>/` service worker, evaluates
+`chrome.runtime.reload()` in it (the socket dropping is success) and prints
+the new worker when it reappears. No page target is touched.
+
+`screenshot` needs an extension page path relative to the extension root
+(`src/panel/panel.html`, `src/options/options.html`, query strings allowed).
+`extPageUrl` rejects absolute URLs, other schemes, other extension ids,
+backslashes, `..` and `%2e` segments — only a relative path under
+`chrome-extension://<id>/` is ever opened, always in a fresh tab that the
+tool closes after capturing. PNGs land in `captures/live/<name>.png`
+(default viewport 360×900, override with `--width`/`--height`).
 
 Nothing about the user's own tabs is ever touched.

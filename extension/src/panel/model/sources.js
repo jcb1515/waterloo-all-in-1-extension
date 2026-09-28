@@ -4,6 +4,8 @@
   plus its sourceState entry into a status pill. No DOM, no chrome.*.
 */
 
+import { sourceFreshness } from "./onboarding.js";
+
 const HOUR = 3600000;
 
 /**
@@ -11,9 +13,12 @@ const HOUR = 3600000;
  * @param {any} st        sourceState[adapter.id] entry (may be undefined)
  * @param {"live"|"soon"} stage
  * @param {Date} now
+ * @param {any} [state]  full panel state; when given, freshness comes from
+ *   sourceFreshness (shared with the onboarding nudges) instead of the
+ *   lastOkAt interval rule.
  * @returns {{key: string, label: string, tone: "ok"|"warn"|"danger"|"muted", detail?: string}}
  */
-export function sourceStatus(adapter, st, stage, now) {
+export function sourceStatus(adapter, st, stage, now, state) {
   if (stage === "soon") return { key: "soon", label: "Coming soon", tone: "muted" };
 
   const err = st && st.error;
@@ -25,6 +30,45 @@ export function sourceStatus(adapter, st, stage, now) {
       return { key: "signed-out", label: "Signed out", tone: "warn", detail: err.message };
     }
     return { key: "error", label: "Error", tone: "danger", detail: String(err.message || err.code || "Sync failed") };
+  }
+  if (state !== undefined) {
+    const fr = sourceFreshness(state, adapter.id, now);
+    if (fr.key === "needs-visit") {
+      return { key: "needs-visit", label: "Needs a visit", tone: "warn" };
+    }
+    if (fr.key === "fresh") {
+      if (st && st.complete === false) {
+        return {
+          key: "connected",
+          label: "Connected",
+          tone: "ok",
+          detail: "Last read was partial — some sections couldn't be read.",
+        };
+      }
+      return { key: "connected", label: "Connected", tone: "ok" };
+    }
+    if (fr.key === "opened-nothing") {
+      return {
+        key: "opened-nothing",
+        label: "Opened, nothing read yet",
+        tone: "warn",
+        detail: "You opened it, but no read landed — open the site again.",
+      };
+    }
+    if (fr.key === "opened-waiting") {
+      return {
+        key: "opened-waiting",
+        label: "Opened · waiting for a read",
+        tone: "muted",
+        detail: "You opened it recently — the read lands once the page finishes loading.",
+      };
+    }
+    return {
+      key: "never",
+      label: "Not read yet · open the site",
+      tone: "warn",
+      detail: "Open the site once so the extension can see it.",
+    };
   }
   // complete:false is NOT staleness — an adapter can report it whenever one
   // piece couldn't be read (e.g. a Learn course with no discussions tool, or

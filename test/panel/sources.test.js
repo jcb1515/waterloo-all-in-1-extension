@@ -181,3 +181,109 @@ test("attentionSource: healthy sources give null; first troubled wins", () => {
   assert.equal(r && r.adapter.id, "outline");
   assert.equal(r && r.text, "first");
 });
+
+/* --------------- sourceStatus(adapter, st, stage, now, state) --------------- */
+
+const panelState = (over = {}) => ({
+  settings: { sources: {} },
+  items: {},
+  probes: {},
+  sourceState: {},
+  userState: {},
+  ...over,
+});
+
+test("state given: a zero-item read still shows Connected (gcal)", () => {
+  const gcal = adapter("gcal", 30);
+  const state = panelState({
+    settings: { sources: { gcal: { enabled: true } } },
+    // A successful sync that found nothing: scopeReadAt + lastOkAt both set,
+    // scopeOkAt absent. The tile must say Connected, never stale.
+    sourceState: {
+      gcal: st({ scopeReadAt: { sync: iso(NOW.getTime() - 60000) }, itemCount: 0 }),
+    },
+  });
+  const s = sourceStatus(gcal, state.sourceState.gcal, "live", NOW, state);
+  assert.equal(s.key, "connected");
+  assert.equal(s.label, "Connected");
+  assert.equal(s.tone, "ok");
+});
+
+test("state given: stale refreshDays row -> 'Needs a visit' warn", () => {
+  const portal = adapter("portal", 0);
+  const state = panelState({
+    sourceState: {
+      portal: { scopeOkAt: { "portal:schedule": iso(NOW.getTime() - 20 * 24 * HOUR) } },
+    },
+  });
+  const s = sourceStatus(portal, state.sourceState.portal, "live", NOW, state);
+  assert.equal(s.key, "needs-visit");
+  assert.equal(s.label, "Needs a visit");
+  assert.equal(s.tone, "warn");
+});
+
+test("state given: snoozed stale still needs-visit; fresh lastOkAt wins", () => {
+  const portal = adapter("portal", 0);
+  const state = panelState({
+    sourceState: {
+      portal: { scopeOkAt: { "portal:schedule": iso(NOW.getTime() - 20 * 24 * HOUR) } },
+    },
+    userState: { nudgeSnooze: { "portal:portal-open": iso(NOW.getTime() + 3 * 24 * HOUR) } },
+  });
+  assert.equal(sourceStatus(portal, state.sourceState.portal, "live", NOW, state).key, "needs-visit");
+
+  const fresh = panelState({
+    sourceState: { portal: { lastOkAt: iso(NOW.getTime() - 60000) } },
+  });
+  assert.equal(sourceStatus(portal, fresh.sourceState.portal, "live", NOW, fresh).key, "connected");
+});
+
+test("state given: opened buckets and never", () => {
+  const portal = adapter("portal", 0);
+
+  const waiting = panelState({
+    sourceState: { portal: st({ lastOkAt: null, lastRunAt: null }) },
+    userState: { onboardingOpened: { "portal:portal-open": iso(NOW.getTime() - 10 * 60000) } },
+  });
+  const w = sourceStatus(portal, waiting.sourceState.portal, "live", NOW, waiting);
+  assert.equal(w.key, "opened-waiting");
+  assert.equal(w.label, "Opened · waiting for a read");
+  assert.equal(w.tone, "muted");
+
+  const nothing = panelState({
+    sourceState: { portal: st({ lastOkAt: null, lastRunAt: null }) },
+    userState: { onboardingOpened: { "portal:portal-open": iso(NOW.getTime() - 40 * 60000) } },
+  });
+  const n = sourceStatus(portal, nothing.sourceState.portal, "live", NOW, nothing);
+  assert.equal(n.key, "opened-nothing");
+  assert.equal(n.label, "Opened, nothing read yet");
+  assert.equal(n.tone, "warn");
+
+  const never = panelState({ sourceState: { portal: null } });
+  const v = sourceStatus(portal, null, "live", NOW, never);
+  assert.equal(v.key, "never");
+  assert.equal(v.label, "Not read yet · open the site");
+  assert.equal(v.tone, "warn");
+});
+
+test("state given: partial read keeps its detail under freshness", () => {
+  const learn = adapter("learn", 30);
+  const state = panelState({
+    sourceState: { learn: st({ complete: false }) },
+  });
+  const s = sourceStatus(learn, state.sourceState.learn, "live", NOW, state);
+  assert.equal(s.key, "connected");
+  assert.equal(s.detail, "Last read was partial — some sections couldn't be read.");
+});
+
+test("state given: error and signed-out still win over freshness", () => {
+  const portal = adapter("portal", 0);
+  const state = panelState({
+    sourceState: { portal: st({ session: "signed-out" }) },
+  });
+  assert.equal(sourceStatus(portal, state.sourceState.portal, "live", NOW, state).key, "signed-out");
+  const errState = panelState({
+    sourceState: { portal: st({ error: { code: "http-500", message: "boom" } }) },
+  });
+  assert.equal(sourceStatus(portal, errState.sourceState.portal, "live", NOW, errState).key, "error");
+});

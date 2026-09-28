@@ -343,3 +343,131 @@ test("scopeOkAt caps at 50 scopes, dropping the oldest timestamps", () => {
   assert.equal(st.scopeOkAt["s0"], undefined, "oldest entry dropped");
   assert.ok(st.scopeOkAt["s49"], "newest prior entry kept");
 });
+
+/* ------------------------- scopeReadAt ------------------------- */
+
+test("scopeReadAt: a successful sync with zero items writes it", () => {
+  const at = new Date(NOW).toISOString();
+  const st = nextSourceState(
+    {},
+    { items: [], complete: true, session: "signed-in" },
+    new Date(NOW),
+    "sync",
+    0,
+    "gcal"
+  );
+  assert.equal(st.scopeReadAt && st.scopeReadAt["sync"], at);
+  assert.equal(st.scopeOkAt, undefined, "zero items -> no scopeOkAt");
+});
+
+test("scopeReadAt: a successful observe with zero items writes scope + readOk", () => {
+  const at = new Date(NOW).toISOString();
+  const st = nextSourceState(
+    {},
+    {
+      items: [],
+      scope: "portal:exams",
+      readOk: ["portal:exams", "portal:schedule"],
+      complete: true,
+    },
+    new Date(NOW),
+    "observe",
+    0,
+    "portal"
+  );
+  assert.equal(st.scopeReadAt["portal:exams"], at);
+  assert.equal(st.scopeReadAt["portal:schedule"], at);
+  assert.equal(st.scopeOkAt, undefined, "zero items -> no scopeOkAt");
+});
+
+test("scopeReadAt: incomplete observe (complete:false, no readOk) does not write it", () => {
+  const st = nextSourceState(
+    {},
+    { items: [], complete: false, scope: "waterlooworks", state: {} },
+    new Date(NOW),
+    "observe",
+    0,
+    "waterlooworks"
+  );
+  assert.equal(st.scopeReadAt, undefined);
+});
+
+test("scopeReadAt: errors and dead sessions never write it; prior entries survive", () => {
+  const prior = { "portal:exams": new Date(NOW - 86400000).toISOString() };
+  const prev = { scopeReadAt: prior, session: "signed-in" };
+
+  const err = nextSourceState(
+    prev,
+    { items: [], scope: "portal:exams", error: { code: "x", message: "m" }, complete: true },
+    new Date(NOW),
+    "observe",
+    0,
+    "portal"
+  );
+  assert.deepEqual(err.scopeReadAt, prior, "error -> unchanged");
+
+  const noTab = nextSourceState(
+    prev,
+    { items: [], complete: true, session: "no-tab", state: {} },
+    new Date(NOW),
+    "observe",
+    0,
+    "portal"
+  );
+  assert.deepEqual(noTab.scopeReadAt, prior, "no-tab -> unchanged");
+
+  const signedOut = nextSourceState(
+    prev,
+    { items: [], complete: false, session: "signed-out", state: {} },
+    new Date(NOW),
+    "observe",
+    0,
+    "portal"
+  );
+  assert.deepEqual(signedOut.scopeReadAt, prior, "signed-out -> unchanged");
+
+  const syncErr = nextSourceState(
+    prev,
+    { items: [], error: { code: "x", message: "m" } },
+    new Date(NOW),
+    "sync",
+    0,
+    "portal"
+  );
+  assert.deepEqual(syncErr.scopeReadAt, prior, "sync error -> kept");
+});
+
+test("scopeReadAt: a no-tab cached sync never stamps it", () => {
+  const prior = { waterlooworks: new Date(NOW - 86400000).toISOString() };
+  const prev = { scopeReadAt: prior };
+  const noTab = nextSourceState(
+    prev,
+    { items: [{ id: "a" }], complete: true, session: "no-tab", state: {} },
+    new Date(NOW),
+    "sync",
+    1,
+    "waterlooworks"
+  );
+  assert.deepEqual(noTab.scopeReadAt, prior, "no-tab sync must not stamp");
+});
+
+test("scopeReadAt caps at 50 scopes, dropping the oldest timestamps", () => {
+  /** @type {Record<string, string>} */
+  const prev = {};
+  for (let i = 0; i < 50; i++) {
+    prev[`s${i}`] = new Date(NOW - (50 - i) * 1000).toISOString();
+  }
+  const st = nextSourceState(
+    { scopeReadAt: prev },
+    { items: [], scope: "new", complete: true },
+    new Date(NOW),
+    "observe",
+    0,
+    "portal"
+  );
+  const keys = Object.keys(st.scopeReadAt);
+  assert.equal(keys.length, 50);
+  assert.equal(st.scopeReadAt["new"], new Date(NOW).toISOString());
+  assert.equal(st.scopeReadAt["s0"], undefined, "oldest entry dropped");
+  assert.ok(st.scopeReadAt["s49"], "newest prior entry kept");
+});

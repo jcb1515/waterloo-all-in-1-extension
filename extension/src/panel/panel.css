@@ -137,68 +137,131 @@
 .panel-tabs .segmented {
   display: flex;
   width: 100%;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  /* The five tabs share the strip — no horizontal scroll at any width. */
+  overflow: visible;
 }
-.panel-tabs .segmented::-webkit-scrollbar {
-  height: 4px;
+.panel-tabs .segmented > button,
+.panel-tabs .segmented > .more-wrap {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .panel-tabs .segmented button {
-  flex: 1 0 auto;
-  min-width: fit-content;
-  padding: 4px 10px;
+  padding: 4px 5px;
   font-size: var(--fs-xs);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* More ▾ dropdown inside the tab strip */
+/* More ▾ button inside the tab strip */
 .more-wrap {
   position: relative;
-  flex: 1 0 auto;
   display: flex;
 }
 .more-wrap .more-btn {
   flex: 1;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 3px;
 }
-.more-menu {
-  position: absolute;
-  top: calc(100% + 6px);
+.more-wrap .more-btn .more-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.more-wrap .more-btn svg {
+  flex: none;
+}
+
+/* More sheet — full-width rows anchored under the tab strip, scrim below. */
+.more-layer {
+  position: fixed;
+  left: 0;
   right: 0;
-  z-index: 20;
-  min-width: 120px;
+  bottom: 0;
+  z-index: 40;
   display: flex;
   flex-direction: column;
-  padding: 4px;
+}
+.more-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow-pop);
 }
-.more-menu button {
+.more-row {
   appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 56px;
+  padding: var(--sp-2) var(--sp-3);
   border: 0;
+  border-radius: var(--r-md);
   background: transparent;
-  font-family: var(--font-sans);
-  font-size: var(--fs-sm);
   color: var(--text-2);
+  font-family: var(--font-sans);
   text-align: left;
-  padding: 7px 10px;
-  border-radius: var(--r-sm);
   cursor: pointer;
-  white-space: nowrap;
 }
-.more-menu button:hover {
+.more-row:hover,
+.more-row:focus-visible {
   background: var(--surface-2);
   color: var(--text);
+  outline: none;
 }
-.more-menu button[aria-selected="true"] {
+.more-row[aria-checked="true"] {
+  background: var(--gold-soft);
   color: var(--text);
+}
+.more-row > svg {
+  flex: none;
+  color: var(--text-3);
+}
+.more-row[aria-checked="true"] > svg {
+  color: var(--gold-ink);
+}
+.more-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.more-row-label {
+  font-size: var(--fs-sm);
   font-weight: var(--w-semibold);
+  color: var(--text);
+}
+.more-row-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.more-row-count {
+  flex: none;
+  min-width: 0;
+  height: auto;
+  padding: 2px 8px;
+}
+.more-scrim {
+  appearance: none;
+  flex: 1;
+  min-height: 48px;
+  border: 0;
+  padding: 0;
+  background: rgb(21 23 28 / 0.26);
+  cursor: default;
+}
+html[data-theme="dark"] .more-scrim {
+  background: rgb(0 0 0 / 0.55);
 }
 
 .panel-body {
@@ -321,7 +384,17 @@
 .onboard-done {
   color: var(--ok);
   display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   flex-shrink: 0;
+}
+.onboard-status {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+}
+.onboard-opened .onboard-status {
+  color: var(--text-3);
+  font-weight: var(--w-regular);
 }
 .onboard-open {
   flex-shrink: 0;
@@ -1320,6 +1393,30 @@ html[data-theme="dark"] .src-tile-icon {
   color: var(--danger);
 }
 
+/* "+ Add to-do" / "+ Add" affordances at the top of views. */
+.view-acts {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-2);
+}
+.qa-add {
+  flex: none;
+  align-self: center;
+  margin-right: var(--sp-2);
+}
+
+/* Small inline action inside a to-do row's meta line (Snooze / Open). */
+.linklike.row-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  text-decoration: none;
+  color: var(--text-3);
+}
+.linklike.row-act:hover {
+  color: var(--text);
+}
+
 .review-past-acts {
   padding: 0 var(--sp-4) var(--sp-1);
 }
@@ -1404,6 +1501,7 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-gutter { width: 34px; }
 .cal-day-head {
+  position: relative;
   background: var(--heat, transparent);
   border-left: 1px solid var(--border);
   padding: var(--sp-1) 3px;
@@ -1425,6 +1523,30 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   display: block;
   font-size: var(--fs-sm);
   font-weight: var(--w-semibold);
+}
+/* Tiny per-day quick-add affordance (month cell top-right, week header). */
+.cal-add {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 2px;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  opacity: 0.65;
+}
+.cal-add:hover,
+.cal-add:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface-2);
+}
+.cal-day-head > .cal-add {
+  position: absolute;
+  top: 1px;
+  right: 1px;
 }
 .cal-day-head.today .cal-date { color: var(--gold-ink); }
 .cal-due {
@@ -1610,6 +1732,12 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-cell.off { opacity: 0.45; }
 .cal-cell.sel { outline: 2px solid var(--gold-strong); outline-offset: -2px; }
+.cal-cell-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
 .cal-cell-num {
   align-self: flex-start;
   font-size: var(--fs-xs);
@@ -1653,11 +1781,19 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-day-items { margin-top: var(--sp-3); }
 .cal-day-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-sm);
   font-weight: var(--w-semibold);
   margin: 0 0 var(--sp-2);
 }
-.cal-empty-day { padding: var(--sp-3) var(--sp-4); margin: 0; }
+.cal-day-title .linklike {
+  font-weight: inherit;
+  text-decoration: none;
+}
+.cal-day-title .linklike:hover { text-decoration: underline; }
+.cal-empty-day { padding: var(--sp-3) var(--sp-4); margin: 0; cursor: pointer; }
 
 .cal-legend {
   display: flex;

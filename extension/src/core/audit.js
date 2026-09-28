@@ -73,7 +73,7 @@ function userStateActivity(us) {
 const SOURCE_SET = new Set(SOURCE_IDS);
 const TYPE_SET = new Set(ITEM_TYPES);
 /** userState keys that are app-level records, not per-item rows. */
-const USERSTATE_META_KEYS = new Set(["onboardingDismissedAt", "nudgeSnooze"]);
+const USERSTATE_META_KEYS = new Set(["onboardingDismissedAt", "nudgeSnooze", "onboardingOpened"]);
 
 /**
  * @param {Record<string, any>} snapshot  the whole of chrome.storage.local
@@ -275,6 +275,15 @@ export function auditStore(snapshot = {}, now = new Date()) {
       }
     }
   }
+  if (userState.onboardingOpened != null) {
+    if (!isObj(userState.onboardingOpened)) {
+      badOnboarding.push("onboardingOpened");
+    } else {
+      for (const [k, v] of Object.entries(userState.onboardingOpened)) {
+        if (parseMs(v) == null) badOnboarding.push(`onboardingOpened.${k}`);
+      }
+    }
+  }
   if (badOnboarding.length) {
     issue("userstate-onboarding-bad", "warn", "userState",
       `${badOnboarding.length} onboarding userState value(s) are missing or unparseable dates`,
@@ -468,6 +477,13 @@ export function applySafeFixes(snapshot = {}, issueIds, now = new Date()) {
     } else if (isObj(us.nudgeSnooze)) {
       us.nudgeSnooze = Object.fromEntries(
         Object.entries(us.nudgeSnooze).filter(([, v]) => parseMs(v) != null)
+      );
+    }
+    if (us.onboardingOpened != null && !isObj(us.onboardingOpened)) {
+      delete us.onboardingOpened;
+    } else if (isObj(us.onboardingOpened)) {
+      us.onboardingOpened = Object.fromEntries(
+        Object.entries(us.onboardingOpened).filter(([, v]) => parseMs(v) != null)
       );
     }
     patches.userState = us;

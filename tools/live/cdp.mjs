@@ -20,6 +20,9 @@
 //   probe <urlSub>                dump + run the source's probe/parser
 //   storage [key] [--source id] [--ext id]  read chrome.storage.local (SW)
 //   watch [--source id] [--secs] [--ext id] poll storage, print changes
+//   reload-ext [--ext id]                   chrome.runtime.reload() in our own SW
+//   screenshot <extPath> [--width n] [--height n] [--name x] [--ext id]
+//                                           PNG of an extension page -> captures/live/
 //   (WA1_EXT_ID selects a copy too — two unpacked dists can be loaded)
 
 import fs from "node:fs";
@@ -270,6 +273,37 @@ export function canTouch(targetId, opened) {
   return (
     !!id && (Array.isArray(opened) ? opened : []).some((e) => e && String(e.targetId) === id)
   );
+}
+
+/* ---------------------------- extension pages ---------------------------- */
+
+const EXT_ID_RE = /^[a-p]{32}$/;
+
+/**
+ * Build `chrome-extension://<id>/<extPath>` for our own pages only.
+ * extPath must be a relative path inside that origin: no absolute or
+ * scheme URLs, no backslashes, no `..` segments and no %2e encodings.
+ * Returns the absolute URL, or null when anything escapes the origin.
+ * @param {string} extId @param {string} extPath
+ * @returns {string|null}
+ */
+export function extPageUrl(extId, extPath) {
+  const id = String(extId || "").toLowerCase();
+  const raw = String(extPath || "").trim();
+  if (raw.startsWith("//")) return null;
+  const p = raw.replace(/^\/+/, "");
+  if (!EXT_ID_RE.test(id)) return null;
+  if (!p || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p)) return null;
+  if (p.includes("\\") || /%2e/i.test(p)) return null;
+  const bare = p.split(/[?#]/, 1)[0];
+  if (!bare || bare.split("/").some((seg) => seg === "..")) return null;
+  let u;
+  try {
+    u = new URL(`chrome-extension://${id}/${p}`);
+  } catch {
+    return null;
+  }
+  return u.protocol === "chrome-extension:" && u.host === id ? u.href : null;
 }
 
 /* ------------------------------- CDP client ------------------------------ */
@@ -856,6 +890,114 @@ async function cmdStorage(key, sourceId, extId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Reload our own extension: chrome.runtime.reload() evaluated inside its
+ * service worker (the socket drops — that is success), then poll for the
+ * new worker. Only that one extension id's worker target is touched.
+ * @param {string|null} extId
+ */
+async function cmdReloadExt(extId) {
+  const id = String(extId || process.env.WA1_EXT_ID || "");
+  if (!id) die("usage: reload-ext [--ext <id>] — or set WA1_EXT_ID.");
+  const targets = await listTargets();
+  const sw = serviceWorkerTargets(targets).find((t) => swExtId(t) === id);
+  if (!sw) {
+    die(`no service worker for extension "${id}" — is it loaded in that Edge?`);
+  }
+  const cdp = new Cdp(sw.webSocketDebuggerUrl);
+  try {
+    await cdp.open();
+    const name = await cdp.eval("chrome.runtime.getManifest().name").catch(() => "");
+    if (name !== EXT_NAME) die(`extension "${id}" is not "${EXT_NAME}".`);
+    await cdp.eval("chrome.runtime.reload()").catch(() => {});
+  } finally {
+    cdp.close();
+  }
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    await sleep(250);
+    const again = (await listTargets()).find(
+      (t) =>
+        t.type === "service_worker" && swExtId(t) === id && String(t.id) !== String(sw.id),
+    );
+    if (again) {
+      console.log(`reloaded ${id}\t${again.id}\t${again.url}`);
+      return;
+    }
+  }
+  die(`service worker for "${id}" did not reappear within 10s.`);
+}
+
+/**
+ * Screenshot one of the extension's own pages in a NEW tab: open, wait for
+ * load + 1.5 s, resize the viewport, capture a PNG into captures/live/,
+ * then close the tab it opened.
+ * @param {string} extPath @param {{ext?: string|null, width: number, height: number, name?: string|null}} opts
+ */
+async function cmdScreenshot(extPath, opts = {}) {
+  const id = String(opts.ext || process.env.WA1_EXT_ID || "");
+  if (!id) die("usage: screenshot <extPath> [--ext <id>] — or set WA1_EXT_ID.");
+  const url = extPageUrl(id, extPath);
+  if (!url) {
+    die(`"${extPath}" is not a path inside chrome-extension://${id}/ (rel path only, no ..)`);
+  }
+  const browser = await browserCdp();
+  let targetId;
+  try {
+    const created = await browser.send("Target.createTarget", { url });
+    targetId = created && created.targetId;
+  } finally {
+    browser.close();
+  }
+  if (!targetId) die("Target.createTarget returned no tab id.");
+  writeOpened([
+    ...readOpened(),
+    {
+      targetId: String(targetId),
+      url,
+      source: "extension",
+      rowId: "page",
+      openedAt: new Date().toISOString(),
+    },
+  ]);
+
+  const cdp = await connectTabById(targetId);
+  try {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const rs = await cdp.eval("document.readyState").catch(() => "");
+      if (rs === "complete") break;
+      await sleep(500);
+    }
+    await sleep(1500);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: opts.width,
+      height: opts.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
+    const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
+    if (!shot || !shot.data) die("Page.captureScreenshot returned no data.");
+    fs.mkdirSync(LIVE_DIR, { recursive: true });
+    const safe = (opts.name || `shot-${ts()}`).replace(/[^a-z0-9._-]+/gi, "-");
+    const out = path.join(LIVE_DIR, `${safe}.png`);
+    fs.writeFileSync(out, Buffer.from(String(shot.data), "base64"));
+    console.log(`${out}\t${opts.width}x${opts.height}\t${url}`);
+  } finally {
+    cdp.close();
+    const browser2 = await browserCdp();
+    try {
+      await browser2.send("Target.closeTarget", { targetId });
+    } catch {
+      /* closing the tab we opened is best-effort */
+    } finally {
+      browser2.close();
+    }
+    writeOpened(readOpened().filter((e) => String(e.targetId) !== String(targetId)));
+  }
+}
+
 async function cmdWatch(sourceId, secs, extId) {
   const until = Date.now() + secs * 1000;
   /** @type {string|null} */
@@ -917,6 +1059,9 @@ async function main() {
   probe <urlSub>                  dump + probe.js + DOM extraction counts
   storage [key] [--source id]     read chrome.storage.local (SW target)
   watch [--source id] [--secs n]  poll storage every 2s, print changes
+  reload-ext [--ext id]           reload our own extension (its SW only)
+  screenshot <extPath> [opts]     PNG of an extension page -> captures/live/
+                                  opts: --width 360 --height 900 --name x --ext id
 
   Both storage commands accept --ext <id> (or the WA1_EXT_ID env var) to pick
   one extension copy when more than one unpacked dist/ is loaded.
@@ -955,8 +1100,20 @@ close/scroll only reach tool-opened tabs; discord.com is always refused.`);
         Number(argValue(rest, "--secs")) || 120,
         argValue(rest, "--ext"),
       );
+    case "reload-ext":
+      return cmdReloadExt(argValue(rest, "--ext"));
+    case "screenshot":
+      if (!rest[0] || rest[0].startsWith("--")) {
+        die("usage: screenshot <extPath> [--width n] [--height n] [--name x] [--ext id]");
+      }
+      return cmdScreenshot(rest[0], {
+        ext: argValue(rest, "--ext"),
+        width: Number(argValue(rest, "--width")) || 360,
+        height: Number(argValue(rest, "--height")) || 900,
+        name: argValue(rest, "--name"),
+      });
     default:
-      die(`unknown command "${cmd}" — try: tabs, open, close, scroll, dump, probe, storage, watch`);
+      die(`unknown command "${cmd}" — try: tabs, open, close, scroll, dump, probe, storage, watch, reload-ext, screenshot`);
   }
 }
 

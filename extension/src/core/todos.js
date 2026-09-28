@@ -7,7 +7,7 @@
 */
 
 import { effectiveItem, isVisible } from "./effective.js";
-import { titleSimilarity } from "./merge.js";
+import { titleSimilarity, orgsCompatible } from "./merge.js";
 
 const DAY = 86400000;
 /** A finished study to-do is kept (as done) this long, then dropped. */
@@ -61,6 +61,14 @@ function itemWorkTerm(i) {
 }
 
 const todosSettings = (settings) => (settings && settings.todos) || {};
+
+/** meta.action values that belong to the co-op pipeline. */
+const COOP_ACTIONS = new Set([
+  "book-interview",
+  "respond-offer",
+  "submit-rankings",
+  "apply",
+]);
 
 /**
  * Study lead days for a parent item: exam category (midterm/final) first,
@@ -323,6 +331,15 @@ export function todoSourceItem(item, settings = {}) {
   if (auto === "study") return !(cfg.study && cfg.study.enabled === false);
   if (auto === "offer" || auto === "rank") return cfg.coop !== false;
   if (auto) return true; // project and future derived rules always list
+  // Adapter action to-dos (the shared meta.action seam): reply honours the
+  // replies toggle, the co-op actions the co-op toggle, the rest list as
+  // ordinary tasks.
+  const action = item.meta && item.meta.action;
+  if ((item.type === "task" || item.type === "deadline") && typeof action === "string" && action) {
+    if (action === "reply") return cfg.replies !== false;
+    if (COOP_ACTIONS.has(action)) return cfg.coop !== false;
+    return true;
+  }
   if (item.type === "task") {
     if (item.category === "reply" || item.category === "book-call") return cfg.replies !== false;
     return true; // manual + future project tasks always list
@@ -379,6 +396,35 @@ export function autoDoneRule(item, { applications = {}, items = {}, now = new Da
     }
     default:
       break;
+  }
+
+  if (meta.action === "book-interview") {
+    // A WaterlooWorks interview for the same employer means the slot got
+    // booked. The interview must not predate the task by more than a day —
+    // an interview seen BEFORE the task can't be the booking it asks for.
+    const who = meta.employer || item.org;
+    const seen = Array.isArray(item.seenIn) ? item.seenIn : [];
+    let firstAt = Infinity;
+    for (const s of seen) {
+      const ms = s && s.at ? Date.parse(s.at) : NaN;
+      if (!Number.isNaN(ms)) firstAt = Math.min(firstAt, ms);
+    }
+    const base = Number.isFinite(firstAt)
+      ? firstAt
+      : meta.createdAt
+        ? Date.parse(meta.createdAt)
+        : null;
+    const done = Object.values(items || {}).some((i) => {
+      if (!i || i.type !== "interview" || i.status === "cancelled" || !i.startAt) return false;
+      const fromWw =
+        i.source === "waterlooworks" ||
+        (Array.isArray(i.seenIn) && i.seenIn.some((s) => s && s.source === "waterlooworks"));
+      if (!fromWw) return false;
+      if (!orgsCompatible(who, (i.meta && i.meta.employer) || i.org)) return false;
+      if (base == null) return true;
+      return Date.parse(i.startAt) >= base - DAY;
+    });
+    return { done, reason: "Interview booked on WaterlooWorks" };
   }
 
   if (item.source === "learn" && (item.type === "deadline" || item.type === "quiz")) {

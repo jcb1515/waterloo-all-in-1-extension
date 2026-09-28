@@ -256,3 +256,99 @@ test("dueLabel: overdue and dated rows", () => {
   assert.match(dueLabel(r(t0 + 3600000), NOW), /·/);
   assert.equal(dueLabel({ item: {} }, NOW), "No date");
 });
+
+/* ----------------------- adapter action to-dos ----------------------- */
+
+test("buildTodos: meta.action maps to reply / coop / deadline kinds", () => {
+  const items = {
+    rep: item("rep", {
+      source: "gmail",
+      type: "task",
+      dueAt: iso(t0 + DAY),
+      meta: { action: "reply" },
+    }),
+    bi: item("bi", {
+      source: "gmail",
+      type: "task",
+      dueAt: iso(t0 + DAY),
+      meta: { action: "book-interview", employer: "Acme" },
+    }),
+    ro: item("ro", {
+      source: "outlook",
+      type: "task",
+      dueAt: iso(t0 + DAY),
+      meta: { action: "respond-offer", employer: "Acme" },
+    }),
+    sr: item("sr", {
+      source: "gmail",
+      type: "task",
+      dueAt: iso(t0 + DAY),
+      meta: { action: "submit-rankings" },
+    }),
+    sf: item("sf", {
+      source: "gmail",
+      type: "deadline",
+      org: "ECE 105",
+      dueAt: iso(t0 + DAY),
+      meta: { action: "submit-form" },
+    }),
+  };
+  const rows = Object.fromEntries(
+    buildTodos({ items, settings: SETTINGS, now: NOW })
+      .groups.flatMap((g) => g.rows)
+      .map((r) => [r.item.id, r.kind])
+  );
+  assert.equal(rows.rep, "reply");
+  assert.equal(rows.bi, "coop");
+  assert.equal(rows.ro, "coop");
+  assert.equal(rows.sr, "deadline", "a rankings task without employer falls through");
+  assert.equal(rows.sf, "deadline");
+});
+
+test("buildTodos: an emailed submit-rankings task folds into the derived rank to-do", () => {
+  const items = {
+    em: item("em", {
+      source: "gmail",
+      type: "task",
+      title: "Submit your rankings",
+      dueAt: iso(t0 + 6 * DAY),
+      meta: { action: "submit-rankings" },
+    }),
+    emFar: item("emFar", {
+      source: "gmail",
+      type: "task",
+      title: "Rankings for a later term",
+      dueAt: iso(t0 + 30 * DAY),
+      meta: { action: "submit-rankings" },
+    }),
+  };
+  const todos = {
+    "todo:rank:w": item("todo:rank:w", {
+      source: "manual",
+      type: "task",
+      title: "Submit your rankings",
+      dueAt: iso(t0 + 5 * DAY),
+      meta: { auto: "rank" },
+    }),
+  };
+  const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
+    .groups.flatMap((g) => g.rows.map((r) => r.item.id))
+    .sort();
+  assert.deepEqual(ids, ["emFar", "todo:rank:w"], "near rank to-do suppressed, far one stays");
+});
+
+test("buildTodos: meta.undated keeps its bucket but reads 'No due date · by <day>'", () => {
+  const items = {
+    u: item("u", {
+      source: "gmail",
+      type: "task",
+      dueAt: iso(t0 + 3 * DAY),
+      meta: { action: "reply", undated: true },
+    }),
+  };
+  const out = buildTodos({ items, settings: SETTINGS, now: NOW });
+  const week = out.groups.find((g) => g.id === "week");
+  const row = week && week.rows.find((r) => r.item.id === "u");
+  assert.ok(row, "the suggested date still lands in This week");
+  assert.match(dueLabel(row, NOW), /^No due date · by /);
+});

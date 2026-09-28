@@ -79,6 +79,98 @@ export function moreTabs(settings) {
   return tabsFor(settings).filter((t) => !t.primary && t.visible);
 }
 
+/* ------------------------------- More sheet ------------------------------- */
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Application statuses still in the pipeline (before an answer/outcome). */
+const APP_OPEN = new Set([
+  "applied",
+  "selected-for-interview",
+  "interview-scheduled",
+  "alternate",
+  "offer",
+]);
+
+/** Static row copy; app.jsx maps the icon keys to icons.jsx components. */
+const MORE_ROW_META = /** @type {Record<string, {icon: string, description: string}>} */ ({
+  courses: {
+    icon: "courses",
+    description: "Outlines, grades and sections for each course",
+  },
+  coop: {
+    icon: "coop",
+    description: "Applications, interviews and co-op dates",
+  },
+  teams: {
+    icon: "teams",
+    description: "Discord teams, meetings and tasks",
+  },
+  projects: {
+    icon: "projects",
+    description: "Your personal projects and their tasks",
+  },
+});
+
+const plural = (n, word, words) => `${n} ${n === 1 ? word : words || `${word}s`}`;
+
+/**
+ * The More sheet's rows: one per visible More view, in the saved order, each
+ * with an icon key, a one-line description and a live count where useful.
+ * @param {any} settings resolved wa1Settings
+ * @param {any} state panel state (items, applications, courses, projects)
+ * @param {Date|number} [now]
+ * @returns {{id: string, label: string, icon: string, description: string,
+ *   count: string | null}[]}
+ */
+export function moreSheetRows(settings, state, now = new Date()) {
+  const items = (state && state.items) || {};
+  const apps = (state && state.applications) || {};
+  const courses = (state && state.courses) || {};
+  const projects = Array.isArray(state && state.projects) ? state.projects : [];
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  const weekEnd = nowMs + WEEK_MS;
+
+  /** @type {Record<string, string | null>} */
+  const counts = {};
+
+  const nCourses = Object.keys(courses).length;
+  counts.courses = plural(nCourses, "course");
+
+  let nInterviews = 0;
+  let nTeams = 0;
+  for (const it of Object.values(items)) {
+    if (!it || it.status === "cancelled") continue;
+    const a = it.dueAt || it.startAt;
+    const ms = a ? Date.parse(a) : NaN;
+    if (Number.isNaN(ms) || ms < nowMs) continue;
+    if (it.type === "interview") nInterviews++;
+    const discord =
+      it.source === "discord" ||
+      (Array.isArray(it.seenIn) && it.seenIn.some((s) => s && s.source === "discord"));
+    if (discord && ms < weekEnd) nTeams++;
+  }
+  if (nInterviews) {
+    counts.coop = plural(nInterviews, "interview");
+  } else {
+    const nApps = Object.values(apps).filter((a) => a && APP_OPEN.has(a.status)).length;
+    counts.coop = nApps ? plural(nApps, "active application") : null;
+  }
+
+  counts.teams = nTeams ? `${nTeams} this week` : null;
+
+  const nProjects = projects.filter((p) => p && (!p.status || p.status === "active")).length;
+  counts.projects = nProjects ? `${nProjects} active` : null;
+
+  return moreTabs(settings).map((t) => ({
+    id: t.id,
+    label: t.label,
+    icon: (MORE_ROW_META[t.id] || {}).icon || "projects",
+    description: (MORE_ROW_META[t.id] || {}).description || "",
+    count: counts[t.id] || null,
+  }));
+}
+
 /** Every visible tab id (primary + More) — used to validate `tab` state. */
 export function visibleTabs(settings) {
   return tabsFor(settings).filter((t) => t.visible);

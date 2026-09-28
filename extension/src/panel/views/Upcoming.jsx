@@ -153,11 +153,16 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
       window.open(url, "_blank");
     }
   };
+  // Checklist Open: stamp the row opened AND open the page in one click.
+  const onOpenRow = (entry) => {
+    actions.markOnboardingOpened(`${entry.source}:${entry.row.id}`);
+    if (entry.row.url) actions.open(entry.row.url);
+  };
 
   return (
     <div class="agenda">
       {onboardingHidden ? null : (
-        <OnboardingCard rows={onboarding} onOpen={openUrl} onDismiss={actions.dismissOnboarding} />
+        <OnboardingCard rows={onboarding} onOpen={onOpenRow} onDismiss={actions.dismissOnboarding} />
       )}
       {calErr ? (
         <button type="button" class="attention-strip" onClick={onGoCalendar}>
@@ -218,6 +223,13 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
       </section>
 
       <div class="filter-bar" role="toolbar" aria-label="Filters">
+        <button
+          type="button"
+          class="btn btn-sm qa-add"
+          onClick={() => actions.openQuickAdd && actions.openQuickAdd({})}
+        >
+          + Add
+        </button>
         <div class="search-wrap">
           <SearchIcon size={14} />
           <input

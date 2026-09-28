@@ -8,6 +8,9 @@ import {
   manualDeleteResult,
 } from "../../extension/src/core/quickadd.js";
 import { applyResult, recompute } from "../../extension/src/core/merge.js";
+import { buildTodos } from "../../extension/src/panel/model/todo.js";
+import { buildFeedPayload } from "../../extension/src/calendar/payload.js";
+import { zonedParts } from "../../extension/src/lib/textdates/index.js";
 
 // Wednesday, Sep 30 2026 12:00 EDT.
 const NOW = new Date("2026-09-30T16:00:00.000Z");
@@ -149,4 +152,36 @@ test("manual upsert -> raw -> recompute shows the item; delete removes it", () =
   raw = applyResult(raw, manualDeleteResult(raw, "manual:q1"), { mode: "sync" });
   res = recompute({ raws: { manual: raw }, prevItems: res.items, links: res.links, uidMap: res.uidMap, userState: {}, now: NOW });
   assert.equal(res.items["manual:q1"], undefined);
+});
+
+/* ------------------- quick-add presets / undated tasks ------------------- */
+
+test("manualItemFrom: a task with no anchor stays anchorless", () => {
+  const it = manualItemFrom({ title: "Buy lab goggles", type: "task" }, { now: NOW });
+  assert.equal(it.type, "task");
+  assert.equal(it.dueAt, undefined);
+  assert.equal(it.startAt, undefined);
+});
+
+test("a dateless quick-add task lands in 'No date' and off the feed", () => {
+  const it = manualItemFrom({ title: "Buy lab goggles", type: "task" }, { now: NOW });
+  const out = buildTodos({ items: { [it.id]: it }, settings: { todos: {} }, now: NOW });
+  const nodate = out.groups.find((g) => g.id === "nodate");
+  assert.ok(nodate && nodate.rows.some((r) => r.item.id === it.id));
+  const feed = buildFeedPayload({ [it.id]: it }, {}, { include: { todos: true } }, NOW);
+  assert.equal(feed.count, 0, "an anchorless manual task is never published");
+});
+
+test("a preset date anchors the manual item on that Toronto day", () => {
+  // QuickAdd turns preset "2026-10-03" + default 09:00 into a local dueAt;
+  // the stored instant must still be Oct 3 on the Toronto clock.
+  const dueAt = new Date("2026-10-03T09:00").toISOString();
+  const it = manualItemFrom({ title: "Read chapter 4", type: "task", dueAt }, { now: NOW });
+  const z = zonedParts(new Date(/** @type {string} */ (it.dueAt)), "America/Toronto");
+  assert.equal(
+    `${z.y}-${String(z.m).padStart(2, "0")}-${String(z.d).padStart(2, "0")}`,
+    "2026-10-03"
+  );
+  const feed = buildFeedPayload({ [it.id]: it }, {}, {}, NOW);
+  assert.equal(feed.count, 1, "a dated task publishes normally");
 });

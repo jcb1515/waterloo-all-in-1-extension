@@ -34,6 +34,35 @@ export function typesCompatible(a, b) {
 
 const METHOD_RANK = { manual: 5, api: 4, invite: 4, html: 3, text: 1 };
 
+/**
+ * The cross-source identity of a derived to-do, stamped by the adapters:
+ * meta.action (what to do) + meta.employer or org (who it's for). Two items
+ * with the same action about the same employer/course are the same to-do
+ * even when the wording differs completely.
+ * @param {any} item
+ * @returns {{action: string, who: string | null} | null}
+ */
+export function taskKey(item) {
+  const t = item && item.type;
+  if (t !== "task" && t !== "deadline") return null;
+  const meta = item && item.meta;
+  const action = meta && meta.action;
+  if (typeof action !== "string" || !action) return null;
+  const who = (meta && meta.employer) || item.org || null;
+  return { action, who };
+}
+
+/** Action-task merge precedence: WaterlooWorks' own row wins, then email,
+ *  then Discord. Other sources keep their normal rank — a manual or Learn
+ *  task still outranks them on purpose. */
+const TASK_SOURCE_RANK = /** @type {Record<string, number>} */ ({
+  waterlooworks: 5,
+  gmail: 4,
+  outlook: 4,
+  email: 4,
+  discord: 3,
+});
+
 /** The merge method for an item: explicit evidence.method, else inferred per source. */
 export function methodOf(item) {
   const m = item && item.evidence && item.evidence.method;
@@ -51,6 +80,10 @@ export function methodOf(item) {
  * For timetable types the outline schedule (10) always beats Portal (2).
  */
 export function itemRank(item) {
+  if (taskKey(item)) {
+    const tr = TASK_SOURCE_RANK[item.source];
+    if (tr != null) return tr;
+  }
   let r = (METHOD_RANK[methodOf(item)] || 1) + (item.confidence === "exact" ? 2 : 0);
   if (CLASS_TYPES.has(item.type)) {
     if (item.source === "outline") r = 10;
@@ -251,6 +284,22 @@ function linkedAppOf(item, ctx) {
 function memberMatch(c, m, ctx) {
   if (!typesCompatible(c.type, m.type)) return null;
 
+  // Two action to-dos (meta.action) are the same to-do when the action and
+  // the employer/org agree and the anchors are within a week — wording is
+  // irrelevant. When one side lacks a who, the general rules decide.
+  const tc = taskKey(c);
+  const tm = taskKey(m);
+  if (tc && tm) {
+    if (tc.action !== tm.action) return null;
+    if (tc.who && tm.who) {
+      const ca2 = anchorOf(c);
+      const ma2 = anchorOf(m);
+      if (!orgsCompatible(tc.who, tm.who) || !ca2 || !ma2) return null;
+      const d = Math.abs(Date.parse(ca2) - Date.parse(ma2));
+      return d <= 7 * DAY_MS ? { sim: 1, delta: d } : null;
+    }
+  }
+
   // An emailed interview invite and the WaterlooWorks interview for the same
   // application are the same event — the link alone merges them when the
   // starts are within 15 minutes, whatever the wording.
@@ -384,6 +433,20 @@ function coalesceClusters(clusters, outLinks, prevItems, ctx) {
     const a = best && anchorOf(best);
     return a ? torontoDayMs(a) : NaN;
   };
+  // The shared meta.action when EVERY member of a cluster is an action task
+  // with the same action — else null. Same-action task clusters coalesce
+  // across up to a week of anchor drift, not just the same/adjacent day.
+  const taskActionOf = (members) => {
+    /** @type {string | null} */
+    let a = null;
+    for (const m of members) {
+      const k = taskKey(m);
+      if (!k) return null;
+      if (a === null) a = k.action;
+      else if (k.action !== a) return null;
+    }
+    return a;
+  };
   for (;;) {
     let did = false;
     const entries = [...clusters.entries()];
@@ -393,7 +456,9 @@ function coalesceClusters(clusters, outLinks, prevItems, ctx) {
         const [cidB, mB] = entries[j];
         const dA = dayOf(mA);
         const dB = dayOf(mB);
-        if (Number.isNaN(dA) || Number.isNaN(dB) || Math.abs(dA - dB) > DAY_MS) continue;
+        const actA = taskActionOf(mA);
+        const span = actA != null && actA === taskActionOf(mB) ? 7 * DAY_MS : DAY_MS;
+        if (Number.isNaN(dA) || Number.isNaN(dB) || Math.abs(dA - dB) > span) continue;
 
         // Merge test: every member of the smaller cluster must score
         // against the larger's members (equal sizes -> try both ways).
