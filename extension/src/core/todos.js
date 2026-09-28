@@ -32,6 +32,34 @@ const anchorMs = (item) => {
   return Number.isNaN(ms) ? null : ms;
 };
 
+/**
+ * "<Season> <YYYY>" for term-ish text — "2027 - Winter", "Winter 2027",
+ * "Winter 2027 main round", any case — or null for garbage. Spring and
+ * Summer stay distinct.
+ * @param {any} text
+ * @returns {string | null}
+ */
+export function termKey(text) {
+  const s = String(text ?? "").toLowerCase();
+  const year = /\b(?:19|20)\d{2}\b/.exec(s);
+  if (!year) return null;
+  const m = /\b(winter|spring|summer|fall)\b/.exec(s);
+  if (!m) return null;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${year[0]}`;
+}
+
+/** A cycle-date item's work term: meta.workTerm, else the "Work term" fact. */
+function itemWorkTerm(i) {
+  const m = i && i.meta;
+  if (m && m.workTerm) return m.workTerm;
+  const facts = m && m.facts;
+  if (Array.isArray(facts)) {
+    const f = facts.find((x) => x && /^work term$/i.test(String(x.label)));
+    if (f && f.value) return f.value;
+  }
+  return null;
+}
+
 const todosSettings = (settings) => (settings && settings.todos) || {};
 
 /**
@@ -152,7 +180,10 @@ export function deriveTodos({ items = {}, applications = {}, userState = {}, set
       });
     }
 
-    // Rankings: a closing cycle date while applications are in flight.
+    // Rankings: at most one to-do per work term — the earliest upcoming
+    // rankings-due date for each term with an in-flight application.
+    // Apps or dates without a parseable term share a single fallback
+    // to-do on the earliest upcoming date nothing claimed.
     const dueRankings = Object.values(items).filter(
       (i) =>
         i &&
@@ -169,7 +200,43 @@ export function deriveTodos({ items = {}, applications = {}, userState = {}, set
           (a.status === "ranked" || a.status === "matched") &&
           (ms == null ? true : (appLastAt(a) ?? 0) >= ms)
       );
-    for (const c of dueRankings) {
+
+    const earlier = (a, b) =>
+      /** @type {number} */ (anchorMs(a)) <= /** @type {number} */ (anchorMs(b)) ? a : b;
+
+    // The terms the student is in (in-flight) or just finished (ranked /
+    // matched — their to-do shows as done under the keep window).
+    const appTerms = new Set();
+    let unkeyedApp = false;
+    for (const a of apps) {
+      const relevant = APP_IN_FLIGHT.has(a.status) || a.status === "ranked" || a.status === "matched";
+      if (!relevant) continue;
+      const k = termKey(a.cycle);
+      if (k) appTerms.add(k);
+      else unkeyedApp = true;
+    }
+    /** @type {any[]} */
+    const chosen = [];
+    const chosenIds = new Set();
+    for (const term of appTerms) {
+      /** @type {any} */
+      let best = null;
+      for (const c of dueRankings) {
+        if (termKey(itemWorkTerm(c)) !== term) continue;
+        best = best ? earlier(best, c) : c;
+      }
+      if (best) {
+        chosen.push(best);
+        chosenIds.add(best.id);
+      }
+    }
+    const unmatched = dueRankings.filter((c) => !chosenIds.has(c.id));
+    const unkeyedDate = unmatched.some((c) => termKey(itemWorkTerm(c)) == null);
+    if (unmatched.length && (unkeyedApp || unkeyedDate)) {
+      chosen.push(unmatched.reduce(earlier));
+    }
+
+    for (const c of chosen) {
       const id = `todo:rank:${c.id}`;
       const since = rankingsOpenAt != null ? rankingsOpenAt : Date.parse(firstAt(id));
       const done = rankedAfter(since);
