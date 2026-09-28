@@ -91,6 +91,59 @@ test("unweighted, done, hidden and review-pending items never count", () => {
   assert.equal(clashes.length, 0, "only 2 eligible items remain");
 });
 
+test("all-day windows never overlap timed items (cycle-dates, term-dates)", () => {
+  // A multi-day all-day cycle window spanning a week of classes.
+  const items = {
+    cycle: item("cycle", {
+      type: "cycle-date",
+      title: "Cycle 1: Interviews",
+      startAt: "2026-10-05T04:00:00Z",
+      endAt: "2026-10-10T04:00:00Z",
+      allDay: true,
+    }),
+    c1: timed("c1", "2026-10-06T13:00:00Z", "2026-10-06T14:20:00Z"),
+    c2: timed("c2", "2026-10-07T15:00:00Z", "2026-10-07T16:20:00Z", { type: "tutorial" }),
+    c3: timed("c3", "2026-10-08T09:00:00Z", "2026-10-08T10:20:00Z", { type: "lab" }),
+  };
+  assert.equal(findClashes(items, {}, NOW).filter((c) => c.kind === "overlap").length, 0);
+});
+
+test("cycle-date/term-date stay out of timed overlaps even with a time", () => {
+  const items = {
+    cycle: item("cycle", {
+      type: "cycle-date",
+      startAt: "2026-10-06T13:30:00Z",
+      endAt: "2026-10-06T15:00:00Z",
+    }),
+    term: item("term", {
+      type: "term-date",
+      startAt: "2026-10-06T14:00:00Z",
+      endAt: "2026-10-06T16:00:00Z",
+    }),
+    cls: timed("cls", "2026-10-06T14:00:00Z", "2026-10-06T15:20:00Z"),
+  };
+  assert.equal(findClashes(items, {}, NOW).filter((c) => c.kind === "overlap").length, 0);
+});
+
+test("two all-day term-dates on the same day do not overlap", () => {
+  const items = {
+    t1: item("t1", { type: "term-date", title: "Classes begin", startAt: "2026-10-06", allDay: true }),
+    t2: item("t2", { type: "term-date", title: "Fees due", startAt: "2026-10-06", allDay: true }),
+  };
+  assert.equal(findClashes(items, {}, NOW).filter((c) => c.kind === "overlap").length, 0);
+});
+
+test("a timed interview during a class is one severe overlap", () => {
+  const items = {
+    iv: timed("iv", "2026-10-06T14:00:00Z", "2026-10-06T14:30:00Z", { type: "interview" }),
+    cls: timed("cls", "2026-10-06T13:30:00Z", "2026-10-06T14:20:00Z"),
+  };
+  const overlaps = findClashes(items, {}, NOW).filter((c) => c.kind === "overlap");
+  assert.equal(overlaps.length, 1);
+  assert.equal(overlaps[0].severity, "severe");
+  assert.deepEqual([...overlaps[0].itemIds].sort(), ["cls", "iv"]);
+});
+
 test("overlaps beyond the horizon are ignored", () => {
   const items = {
     a: timed("a", "2026-11-01T14:00:00Z", "2026-11-01T15:00:00Z"),

@@ -8,6 +8,7 @@ import {
   fmtLate,
   startOfDay,
 } from "../../extension/src/panel/model/agenda.js";
+import { buildTodos } from "../../extension/src/panel/model/todo.js";
 
 const DAY = 86400000;
 const HOUR = 3600000;
@@ -59,6 +60,63 @@ test("rows within a group sort by anchor (dueAt || startAt)", () => {
   };
   const ag = buildAgenda({ items, userState: {}, settings: {}, now: NOW });
   assert.deepEqual(ids(group(ag, "today")), ["early", "late"]);
+});
+
+/* ------------------------------ overdue rules ---------------------------- */
+
+test("overdue: only actionable misses — cycle-dates, events, classes drop out", () => {
+  const items = {
+    cyc: item("cyc", { type: "cycle-date", title: "Cycle 1 Posting A: Jobs posted", startAt: at(-23, 9), allDay: true }),
+    evt: item("evt", { type: "event", title: "Past social", startAt: at(-2, 14), endAt: at(-2, 15) }),
+    cls: item("cls", { type: "class", startAt: at(-1, 9), endAt: at(-1, 10) }),
+    iv: item("iv", { type: "interview", startAt: at(-1, 10), endAt: at(-1, 11) }),
+    dl: item("dl", { dueAt: at(-3, 23, 59) }),
+    qz: item("qz", { type: "quiz", dueAt: at(-1, 20) }),
+    task: item("task", { type: "task", dueAt: at(-2, 12) }),
+    app: item("app", { type: "application-deadline", dueAt: at(-4, 12) }),
+  };
+  const ag = buildAgenda({
+    items,
+    userState: {},
+    settings: { agenda: { showClasses: "all" } },
+    now: NOW,
+  });
+  assert.deepEqual(
+    ids(group(ag, "overdue")).sort(),
+    ["app", "dl", "qz", "task"]
+  );
+  // The summary counts exactly the rows in the Overdue group.
+  assert.equal(ag.summary.overdue, group(ag, "overdue").rows.length);
+  // Past non-actionable items appear in no group at all.
+  const listed = ag.groups.flatMap((g) => g.rows.map((r) => r.id));
+  for (const id of ["cyc", "evt", "cls", "iv"]) assert.ok(!listed.includes(id), id);
+});
+
+test("overdue: done/submitted misses never list", () => {
+  const items = {
+    done: item("done", { status: "done", dueAt: at(-2, 12) }),
+    sub: item("sub", { status: "submitted", dueAt: at(-2, 12) }),
+    can: item("can", { status: "cancelled", dueAt: at(-2, 12) }),
+    open: item("open", { dueAt: at(-2, 12) }),
+  };
+  const ag = buildAgenda({ items, userState: {}, settings: {}, now: NOW });
+  assert.deepEqual(ids(group(ag, "overdue")), ["open"]);
+  assert.equal(ag.summary.overdue, 1);
+});
+
+test("overdue window: older than 14 days leaves Upcoming but stays in To-do", () => {
+  const items = {
+    old: item("old", { dueAt: at(-20, 23, 59) }),
+    recent: item("recent", { dueAt: at(-3, 12) }),
+  };
+  const ag = buildAgenda({ items, userState: {}, settings: {}, now: NOW });
+  assert.deepEqual(ids(group(ag, "overdue")), ["recent"]);
+  assert.equal(ag.summary.overdue, group(ag, "overdue").rows.length);
+  const listed = ag.groups.flatMap((g) => g.rows.map((r) => r.id));
+  assert.ok(!listed.includes("old"));
+  const todos = buildTodos({ items, userState: {}, settings: {}, now: NOW });
+  const ov = todos.groups.find((g) => g.id === "overdue");
+  assert.deepEqual(ov.rows.map((r) => r.item.id).sort(), ["old", "recent"]);
 });
 
 /* --------------------------- class visibility --------------------------- */

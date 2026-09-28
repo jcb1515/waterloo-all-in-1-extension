@@ -96,11 +96,11 @@ const APP_OPEN = new Set([
 const MORE_ROW_META = /** @type {Record<string, {icon: string, description: string}>} */ ({
   courses: {
     icon: "courses",
-    description: "Outlines, grades and sections for each course",
+    description: "Outlines, grades and sections",
   },
   coop: {
     icon: "coop",
-    description: "Applications, interviews and co-op dates",
+    description: "Applications, interviews and dates",
   },
   teams: {
     icon: "teams",
@@ -108,7 +108,7 @@ const MORE_ROW_META = /** @type {Record<string, {icon: string, description: stri
   },
   projects: {
     icon: "projects",
-    description: "Your personal projects and their tasks",
+    description: "Your projects and their tasks",
   },
 });
 

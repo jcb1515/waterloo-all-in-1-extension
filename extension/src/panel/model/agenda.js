@@ -87,6 +87,21 @@ const anchor = (/** @type {any} */ item) => item.dueAt || item.startAt || null;
 const isClassish = (/** @type {any} */ i) =>
   i.type === "class" || i.type === "tutorial" || (i.type === "lab" && !!i.startAt);
 
+/* Deliverables whose missed anchor is still actionable — only these can be
+ * Overdue. Past sessions, events and cycle/term dates just drop out. */
+const OVERDUE_TYPES = new Set([
+  "deadline",
+  "quiz",
+  "task",
+  "presentation",
+  "application-deadline",
+  "offer-deadline",
+]);
+const overdueEligible = (/** @type {any} */ i) =>
+  OVERDUE_TYPES.has(i.type) || (i.type === "lab" && !!i.dueAt);
+/** Upcoming's Overdue group covers the last 14 days only; older misses stay in the To-do tab. */
+const OVERDUE_WINDOW_MS = 14 * DAY;
+
 const doneState = (/** @type {any} */ item) =>
   item.status === "done" || item.status === "submitted";
 
@@ -281,6 +296,13 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     const aMs = Date.parse(anchor(item));
     const classish = isClassish(item);
 
+    // Overdue is for actionable misses only — past sessions, events and
+    // cycle dates drop out of Upcoming entirely, and misses older than the
+    // 14-day window stay in the To-do tab's Overdue group instead.
+    if (aMs < today.getTime()) {
+      if (!overdueEligible(item) || now.getTime() - aMs > OVERDUE_WINDOW_MS) continue;
+    }
+
     // "Next class" — the next classish item later today or tomorrow.
     if (
       classish && item.startAt && aMs > now.getTime() && aMs < nextClassLimit &&
@@ -289,11 +311,12 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
       nextClass = item;
     }
 
-    // Counts ignore classish rows (they're sessions, not work due).
-    if (!classish) {
-      if (aMs < today.getTime()) overdueCount++;
-      else if (aMs < tomorrow.getTime()) dueToday++;
-      if (aMs >= today.getTime() && aMs < weekEnd.getTime()) {
+    // The summary's overdue count mirrors exactly the rows pushed below;
+    // due counts ignore classish rows (they're sessions, not work due).
+    if (aMs < today.getTime()) overdueCount++;
+    else if (!classish) {
+      if (aMs < tomorrow.getTime()) dueToday++;
+      if (aMs < weekEnd.getTime()) {
         dueWeek++;
         const dk = new Date(aMs).toDateString();
         dayCounts.set(dk, (dayCounts.get(dk) || 0) + 1);

@@ -190,19 +190,15 @@ export function Todo({ state, actions, now, orgs = [] }) {
 
   return (
     <div class="todo-view">
-      <div class="view-acts">
-        <button
-          type="button"
-          class="btn btn-sm"
-          onClick={() => actions.openQuickAdd && actions.openQuickAdd({ type: "task" })}
-        >
-          <PlusIcon size={13} /> Add to-do
-        </button>
-      </div>
       <form
         class="todo-add"
         onSubmit={(e) => {
           e.preventDefault();
+          // Empty box opens the full quick-add sheet; text adds inline.
+          if (!draft.trim()) {
+            actions.openQuickAdd && actions.openQuickAdd({ type: "task" });
+            return;
+          }
           addTask();
         }}
       >
@@ -213,8 +209,8 @@ export function Todo({ state, actions, now, orgs = [] }) {
           placeholder={'Add a task — e.g. "review lab notes Thursday"'}
           aria-label="Add a task"
         />
-        <button type="submit" class="btn btn-primary" disabled={!draft.trim()}>
-          <PlusIcon size={14} /> Add
+        <button type="submit" class="btn btn-primary">
+          <PlusIcon size={14} /> Add to-do
         </button>
       </form>
 

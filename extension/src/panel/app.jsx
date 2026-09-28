@@ -408,7 +408,7 @@ export function App() {
                   <span class="more-label">
                     {(more.find((t) => t.id === tab) || {}).label || "More"}
                   </span>
-                  <ChevronDownIcon size={12} />
+                  <ChevronDownIcon size={10} />
                 </button>
               </div>
             ) : null}
