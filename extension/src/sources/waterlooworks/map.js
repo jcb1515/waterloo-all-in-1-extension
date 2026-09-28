@@ -419,31 +419,118 @@ const isRegistered = (text) => {
 };
 
 /**
- * Host/employer display name from an event title: a "with X" / "hosted by
- * X" / "presented by X" clause on the last " — " segment, with trailing
- * modality words stripped. Titles without an em-dash segment yield nothing
- * (a bare "with" inside the event name is not a host). Never "WaterlooWorks".
- * @param {unknown} title
+ * Trailing modality/filler words stripped from an extracted org candidate.
  */
 const MODALITY_TAIL_RE =
   /(?:\s*[-–—(,]?\s*\b(?:in[-\s]?person|virtual|hybrid|online|remote|on[-\s]?site|information session|info session|session|workshop|webinar|networking|fair)\b)+[\s.,;)]*$/i;
-export function eventOrg(title) {
-  const segs = String(title || "").split(" — ");
-  const last = segs[segs.length - 1];
-  // "hosted by"/"presented by" are unambiguous on any title; a bare "with X"
-  // only counts on an em-dash segment, else "…with AI" names a fake org.
-  const m =
-    /\bhosted\s+by\s+(.+)$/i.exec(last) ||
-    /\bpresented\s+by\s+(.+)$/i.exec(last) ||
-    (segs.length > 1 ? /\bwith\s+(.+)$/i.exec(last) : null);
-  if (!m) return undefined;
-  const org = m[1]
+
+/**
+ * Clean an org candidate: strip the trailing modality tail and separators.
+ * @param {unknown} text
+ */
+function cleanEventOrg(text) {
+  const org = String(text || "")
     .replace(MODALITY_TAIL_RE, "")
     .replace(/\s*[-–—(,]\s*$/, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!org || org.length > 80 || /^waterlooworks$/i.test(org)) return undefined;
   return org;
+}
+
+/**
+ * Dashboard event name -> {org, title, employer, rule}. First matching rule
+ * wins, against the name after the "| -" cleanup plus " - <modality>" ->
+ * " — <modality>" normalization:
+ *   1. "<Employer> | <Title>" — a short first segment (<=60 chars, <=6
+ *      words) names the host; the title becomes the rest.
+ *   2. "with X" / "hosted by X" / "presented by X" anywhere — cut at a
+ *      modality separator or "Information Session".
+ *   3. (employer categories only) "<Org>: <Title>" — leading "Inside |
+ *      Explore |Discover |Meet " is stripped.
+ *   4. (employer categories only) "<Org> [modality|Employer] Info[rmation]
+ *      Session" or "<Org> Tech Talk".
+ *   5. Career Centre categories -> "Centre for Career Development" (org but
+ *      not an employer).
+ *   6. Nothing — never "WaterlooWorks".
+ * `employer` is set only when the org came from rules 1-4. `rule` records
+ * which rule fired, for diagnostics.
+ * @param {unknown} name
+ * @param {unknown} category
+ * @returns {{org?: string, employer?: string, title: string, rule: number}}
+ */
+export function eventOrgTitle(name, category) {
+  const full = String(name || "")
+    .replace(/\s*\|\s*-\s*/g, " — ")
+    .replace(/\s+-\s+(in[-\s]?person|virtual|hybrid)\b/gi, " — $1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const cat = String(category || "");
+  /** @type {{org?: string, employer?: string, title: string, rule: number}} */
+  const out = { title: full, rule: 6 };
+  /**
+   * @param {unknown} candidate
+   * @param {number} rule
+   */
+  const accept = (candidate, rule) => {
+    const org = cleanEventOrg(candidate);
+    if (!org) return false;
+    out.org = org;
+    out.employer = org;
+    out.rule = rule;
+    return true;
+  };
+  // 1. "<Employer> | <Title>".
+  const pipe = full.indexOf(" | ");
+  if (pipe > 0) {
+    const first = full.slice(0, pipe).trim();
+    if (
+      first.length <= 60 &&
+      first.split(/\s+/).length <= 6 &&
+      accept(first, 1)
+    ) {
+      out.title = full.slice(pipe + 3).trim() || full;
+      return out;
+    }
+  }
+  // 2. with / hosted by / presented by.
+  const host = /\b(?:hosted\s+by|presented\s+by|with)\s+(.+)$/i.exec(full);
+  if (host) {
+    const candidate = host[1]
+      .split(/\s*[-–—]\s*(?:in[-\s]?person|virtual|hybrid)\b/i)[0]
+      .split(/\binfo(?:rmation)?\s+session\b/i)[0];
+    if (accept(candidate, 2)) return out;
+  }
+  if (/employer/i.test(cat)) {
+    // 3. "<Org>: <Title>" — employer categories lead with the host.
+    const colon = /^([^:]{2,50}):\s/.exec(full);
+    if (
+      colon &&
+      accept(
+        colon[1].replace(/^(?:inside|explore|discover|meet)\s+/i, ""),
+        3
+      )
+    ) {
+      return out;
+    }
+    // 4. "<Org> Tech Talk" / "<Org> [modality|Employer] Info Session" —
+    //    the Tech Talk shape first so "X Tech Talk — IN-PERSON Information
+    //    Session" yields "X", not "X Tech Talk".
+    const session =
+      /^(.+?)\s+tech\s+talk\b/i.exec(full) ||
+      /^(.+?)\s+(?:(?:in[-\s]?person|virtual|hybrid|employer)\s+)*info(?:rmation)?\s+session\b/i.exec(
+        full
+      );
+    if (session && accept(session[1], 4)) return out;
+  }
+  // 5. Career Centre events are hosted by the centre — org, not employer.
+  if (/career centre/i.test(cat)) {
+    out.org = "Centre for Career Development";
+    out.rule = 5;
+    return out;
+  }
+  // 6. No host signal.
+  return out;
 }
 
 /**
@@ -480,13 +567,14 @@ export function dashboardEventItems(rows, now, { url } = {}) {
       : undefined;
     const waitlisted =
       row.registration && /waitlist/i.test(row.registration) ? true : undefined;
+    const et = eventOrgTitle(row.name, row.category);
     /** @type {any} */
     const item = {
       id,
       source: SOURCE,
       type: "event",
-      title: row.name || "Event",
-      org: eventOrg(row.name),
+      title: et.title || row.name || "Event",
+      org: et.org,
       startAt: timed ? row.startAt : row.date,
       endAt: timed ? row.endAt || undefined : undefined,
       location: row.link || row.location || undefined,
@@ -499,6 +587,9 @@ export function dashboardEventItems(rows, now, { url } = {}) {
       meta: {
         eventId: row.eventId || undefined,
         category: row.category || undefined,
+        // Only a host proven by the name (rules 1-4) is an employer; the
+        // Career Centre default is just the venue's organizer.
+        employer: et.employer,
         registered,
         waitlisted,
         registrationStatus: row.registration,

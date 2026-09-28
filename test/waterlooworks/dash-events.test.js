@@ -12,7 +12,7 @@ import { extractDates } from "../../extension/src/lib/textdates/index.js";
 import * as parsers from "../../extension/src/sources/waterlooworks/parsers.js";
 import {
   dashboardEventItems,
-  eventOrg,
+  eventOrgTitle,
 } from "../../extension/src/sources/waterlooworks/map.js";
 import { buildSnapshot } from "../../extension/src/sources/waterlooworks/refresh.js";
 import adapter from "../../extension/src/sources/waterlooworks/index.js";
@@ -80,23 +80,26 @@ test("dashboard events: rows, review states, orgs, ids", async () => {
   const res = await adapter.observe.parse(dashPayload(snap), makeCtx());
   const events = res.items.filter((i) => i.type === "event");
 
-  // 8 dated rows in the Sep-28 table + 1 in the Oct-7 table; the stray
+  // 10 dated rows in the Sep-28 table + 1 in the Oct-7 table; the stray
   // one-cell row and the undated "Coming Soon" table emit nothing.
-  assert.equal(events.length, 9);
+  assert.equal(events.length, 11);
 
   const byEv = Object.fromEntries(
     events.map((i) => [i.meta.eventId, i])
   );
   assert.deepEqual(
     Object.keys(byEv).sort(),
-    ["4701", "4702", "4703", "4704", "4705", "4706", "4707", "4708", "4709"]
+    [
+      "4701", "4702", "4703", "4704", "4705", "4706",
+      "4707", "4708", "4709", "4710", "4711",
+    ]
   );
   assert.equal(byEv["4701"].id, "waterlooworks:event:4701");
 
   // Review: only the Registered badge is auto; everything else is pending.
   assert.equal(byEv["4703"].review, "auto");
   assert.equal(byEv["4703"].meta.registered, true);
-  for (const id of ["4701", "4702", "4705", "4708", "4709"]) {
+  for (const id of ["4701", "4702", "4705", "4708", "4709", "4710", "4711"]) {
     assert.equal(byEv[id].review, "pending", `event ${id} pending`);
   }
   assert.equal(byEv["4701"].meta.registered, false);
@@ -104,19 +107,44 @@ test("dashboard events: rows, review states, orgs, ids", async () => {
   assert.equal(byEv["4704"].meta.waitlisted, true);
   assert.equal(byEv["4705"].meta.registered, undefined, "no badge -> undefined");
 
-  // Org extraction: with / hosted by / presented by on the last segment.
-  assert.equal(byEv["4701"].org, "Initech Corp");
-  assert.equal(byEv["4703"].org, "Centre for Career Development");
-  assert.equal(byEv["4704"].org, "Engineering Society");
+  // Org extraction: employer-first pipes, host clauses, employer-category
+  // colons and "X Info Session"/"X Tech Talk" shapes, then the Career
+  // Centre default.
+  assert.equal(byEv["4701"].org, "Initech Corp"); // rule 2 "with X"
+  assert.equal(byEv["4702"].org, "Globex Industries"); // rule 1 "<Org> | …"
+  assert.equal(byEv["4703"].org, "Centre for Career Development"); // hosted by
+  assert.equal(byEv["4704"].org, "Engineering Society"); // presented by
+  assert.equal(byEv["4706"].org, "Wayne Enterprises"); // cancelled, still org
+  assert.equal(byEv["4707"].org, "Umbrella Corp"); // "<Org> Employer Info…"
+  assert.equal(byEv["4709"].org, "Initech Corp"); // "Inside <Org>: …"
+  assert.equal(byEv["4710"].org, "Wayne Enterprises"); // "<Org> Tech Talk"
+  assert.equal(byEv["4705"].org, undefined, "no host named");
   assert.equal(byEv["4708"].org, undefined, "no host named");
-  assert.equal(byEv["4702"].org, undefined, "no em-dash segment");
 
-  // Titles: "| -" collapsed to " — ", "| " without a dash left alone.
+  // meta.employer follows rules 1-4 only: the Career Centre colon title is
+  // NOT rule 3 — it falls to the centre default, which is no employer.
+  assert.equal(byEv["4702"].meta.employer, "Globex Industries");
+  assert.equal(byEv["4707"].meta.employer, "Umbrella Corp");
+  assert.equal(byEv["4709"].meta.employer, "Initech Corp");
+  assert.equal(byEv["4710"].meta.employer, "Wayne Enterprises");
+  assert.equal(byEv["4711"].org, "Centre for Career Development");
+  assert.equal(byEv["4711"].meta.employer, undefined);
+  assert.equal(byEv["4705"].meta.employer, undefined);
+
+  // Titles: "| -" collapsed to " — "; a pipe title's employer segment is
+  // dropped once it names the org; " - <modality>" normalizes to " — ".
   assert.equal(
     byEv["4701"].title,
     "Explore Opportunities at Initech Corp — IN-PERSON Information Session with Initech Corp"
   );
-  assert.match(byEv["4702"].title, /^Globex Industries \| Globex:/);
+  assert.equal(
+    byEv["4702"].title,
+    "Globex: Building Better Widgets — VIRTUAL Information Session"
+  );
+  assert.equal(
+    byEv["4709"].title,
+    "Inside Initech Corp: Co-op Program Overview — VIRTUAL Information Session"
+  );
 
   // All-day row: dated but no time -> date-only startAt + allDay.
   assert.equal(byEv["4707"].allDay, true);
@@ -160,7 +188,10 @@ test("a registrations-grid row folds into the dashboard event", async () => {
     makeCtx(first.state)
   );
   const matches = second.items.filter(
-    (i) => i.type === "event" && i.title === "Employer Info Session: Initech Corp"
+    (i) =>
+      i.type === "event" &&
+      i.title ===
+        "Inside Initech Corp: Co-op Program Overview — VIRTUAL Information Session"
   );
   assert.equal(matches.length, 1, "one canonical item");
   assert.equal(matches[0].id, "waterlooworks:event:4709");
@@ -184,14 +215,106 @@ test("dashboardEventItems: no time without a date, fnv fallback ids", () => {
   assert.match(items[0].id, /^waterlooworks:event:[0-9a-f]+$/);
 });
 
-test("eventOrg: host clauses and modality tails", () => {
+test("eventOrgTitle: one case per rule, first match wins", () => {
+  const EMP = "Employer Information Sessions";
+  const CC = "Career Centre Events";
+  const NPE = "Additional Networking and Professional Events";
+
+  // Rule 1: "<Employer> | <Title>" — org is the first segment, the title
+  // keeps the rest with " - <modality>" normalized to " — ".
+  assert.deepEqual(
+    eventOrgTitle(
+      "Globex Industries | Globex: Building Better Widgets - VIRTUAL Information Session",
+      EMP
+    ),
+    {
+      org: "Globex Industries",
+      employer: "Globex Industries",
+      title: "Globex: Building Better Widgets — VIRTUAL Information Session",
+      rule: 1,
+    }
+  );
+  // First segment over the 6-word limit is not treated as an employer.
+  const long = eventOrgTitle(
+    "This Is A Very Long Employer Name Indeed | Panel - IN-PERSON Information Session",
+    EMP
+  );
+  assert.notEqual(long.rule, 1);
+
+  // Rule 2: with / hosted by / presented by — any category, modality cut.
   assert.equal(
-    eventOrg("Big Night — IN-PERSON Information Session with Wayne Enterprises"),
+    eventOrgTitle(
+      "Big Night — IN-PERSON Information Session with Wayne Enterprises",
+      EMP
+    ).org,
     "Wayne Enterprises"
   );
-  assert.equal(eventOrg("Fair — VIRTUAL Career Fair hosted by Alumni Office"), "Alumni Office");
-  assert.equal(eventOrg("Workshop presented by Co-op Office"), "Co-op Office");
-  assert.equal(eventOrg("Drop-in Hours | no separator"), undefined);
-  assert.equal(eventOrg("plain title"), undefined);
-  assert.equal(eventOrg(""), undefined);
+  assert.equal(
+    eventOrgTitle(
+      "Info Session with Wayne Enterprises VIRTUAL Information Session",
+      EMP
+    ).org,
+    "Wayne Enterprises"
+  );
+  assert.equal(
+    eventOrgTitle("Fair — VIRTUAL Career Fair hosted by Alumni Office", NPE).org,
+    "Alumni Office"
+  );
+  assert.equal(
+    eventOrgTitle("Workshop presented by Co-op Office", CC).org,
+    "Co-op Office"
+  );
+
+  // Rule 3: employer-category "<Org>: <Title>" with the opener stripped.
+  assert.equal(
+    eventOrgTitle("Webz Corporation: Operating at Scale — IN-PERSON Information Session", EMP)
+      .org,
+    "Webz Corporation"
+  );
+  assert.equal(
+    eventOrgTitle(
+      "Inside Wayne Enterprises: Our Products, Our People — IN-PERSON Information Session",
+      EMP
+    ).org,
+    "Wayne Enterprises"
+  );
+  assert.equal(
+    eventOrgTitle(
+      "Explore Globex Industries (GLO): Internships & Recruitment — IN-PERSON Information Session",
+      EMP
+    ).org,
+    "Globex Industries (GLO)"
+  );
+  // …but only for employer categories.
+  assert.equal(
+    eventOrgTitle("Teacher's college: planning for a successful application", CC).rule,
+    5
+  );
+
+  // Rule 4: "<Org> [modality|Employer] Info Session" / "<Org> Tech Talk".
+  assert.equal(
+    eventOrgTitle("Wayne Enterprises IN-PERSON Information Session", EMP).org,
+    "Wayne Enterprises"
+  );
+  assert.equal(
+    eventOrgTitle(
+      "Wayne Enterprises Employer Information Session — IN-PERSON Information Session",
+      EMP
+    ).org,
+    "Wayne Enterprises"
+  );
+  assert.equal(
+    eventOrgTitle("Acme Tech Talk — IN-PERSON Information Session", EMP).org,
+    "Acme"
+  );
+
+  // Rule 5: the Career Centre default is an org but never an employer.
+  const cc = eventOrgTitle("Resume drop-in hours", CC);
+  assert.equal(cc.org, "Centre for Career Development");
+  assert.equal(cc.employer, undefined);
+
+  // Rule 6: no signal -> undefined, never "WaterlooWorks".
+  assert.equal(eventOrgTitle("plain title", NPE).org, undefined);
+  assert.equal(eventOrgTitle("", EMP).org, undefined);
+  assert.equal(eventOrgTitle("WaterlooWorks | Panel - IN-PERSON", EMP).org, undefined);
 });

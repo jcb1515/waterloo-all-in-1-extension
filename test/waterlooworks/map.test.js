@@ -216,7 +216,10 @@ test("dashboardEventItems emits every dated row; only Registered is auto", () =>
   assert.match(kept.id, /^waterlooworks:event:[0-9a-f]+$/);
   assert.equal(kept.type, "event");
   assert.equal(kept.title, "Mock Interview Workshop");
-  assert.equal(kept.org, undefined, "no host clause in the title");
+  // Career Centre category: the centre itself is the org (rule 5), never
+  // an employer.
+  assert.equal(kept.org, "Centre for Career Development");
+  assert.equal(kept.meta.employer, undefined);
   assert.equal(kept.meta.category, "Career Centre Events");
   assert.equal(kept.startAt, "2026-09-29T22:00:00.000Z");
   assert.equal(kept.endAt, "2026-09-29T23:30:00.000Z");
