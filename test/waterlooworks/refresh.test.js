@@ -75,6 +75,8 @@ test("allowedClick accepts the Booked/Unscheduled interview Views", async () => 
   const { allowedClick } = await import(MOD);
   assert.equal(allowedClick(row("Booked Interviews", 3, booked).a, "interviews"), true);
   assert.equal(allowedClick(row("Unscheduled Interviews", 1, unsched).a, "interviews"), true);
+  // Live rows can carry a trailing colon.
+  assert.equal(allowedClick(row("Booked Interviews:", 2, booked).a, "interviews"), true);
   // Spacing/quote variants around the filter (&quot; keeps the attr parseable).
   const variant = `orbisAppSr.buildForm({'action':'x', selectedFilter : &quot;unscheduled&quot; }, '/x', '').submit();`;
   assert.equal(allowedClick(row("Unscheduled Interviews", 2, variant).a, "interviews"), true);
@@ -103,10 +105,13 @@ test("allowedClick: the applications View only on the Total row, no status key",
   const { allowedClick } = await import(MOD);
   const totalOc = `orbisAppSr.buildForm({'action':'${TOKEN}','numOfDays':'0'}, '/myAccount/co-op/full/applications.htm', '').submit();`;
   const statusOc = `orbisAppSr.buildForm({'action':'${TOKEN}','status':'applied'}, '/x', '').submit();`;
+  // The live row spells the label "Total Submitted:" — trailing colon.
+  assert.equal(allowedClick(row("Total Submitted:", 100, totalOc).a, "applications"), true);
+  // The bare spelling stays accepted too.
   assert.equal(allowedClick(row("Total Submitted", 100, totalOc).a, "applications"), true);
   assert.equal(allowedClick(row("Applied", 97, statusOc).a, "applications"), false);
-  assert.equal(allowedClick(row("Total Submitted", 100, statusOc).a, "applications"), false, "status key must fail");
-  assert.equal(allowedClick(row("Total Submitted", 100, totalOc, "Open").a, "applications"), false, "non-View text");
+  assert.equal(allowedClick(row("Total Submitted:", 100, statusOc).a, "applications"), false, "status key must fail");
+  assert.equal(allowedClick(row("Total Submitted:", 100, totalOc, "Open").a, "applications"), false, "non-View text");
   assert.equal(allowedClick(row("Mock Interviews", 2, totalOc).a, "applications"), false);
 });
 
@@ -251,7 +256,24 @@ function installWorld({ url = WW_URL, visible = "visible" } = {}) {
   globalThis.location = { href: url };
   globalThis.document = doc;
   globalThis.sessionStorage = win.sessionStorage;
-  globalThis.chrome = { runtime: { sendMessage: (m) => sent.push(m) } };
+  /** @type {any} */
+  let settingsVal;
+  /** @type {(() => any)|null} */
+  let settingsFn = null;
+  /** @type {any} */
+  let storageErr = null;
+  globalThis.chrome = {
+    runtime: { sendMessage: (m) => sent.push(m) },
+    storage: {
+      local: {
+        get: async () => {
+          if (storageErr) throw storageErr;
+          const v = settingsFn ? settingsFn() : settingsVal;
+          return v === undefined ? {} : { wa1Settings: v };
+        },
+      },
+    },
+  };
   globalThis.setTimeout = /** @type {any} */ ((fn, ms) => {
     const t = { fn, due: fakeNow + (ms || 0) };
     timers.push(t);
@@ -263,6 +285,18 @@ function installWorld({ url = WW_URL, visible = "visible" } = {}) {
     frames,
     sent,
     timers,
+    /** The wa1Settings object chrome.storage.local.get returns. */
+    setSettings: (v) => {
+      settingsVal = v;
+      settingsFn = null;
+    },
+    /** Per-call settings — a call-count stub can flip the switch mid-round. */
+    setSettingsFn: (fn) => {
+      settingsFn = fn;
+    },
+    failStorage: (e) => {
+      storageErr = e;
+    },
     advance: (ms) => {
       fakeNow += ms;
     },
@@ -325,7 +359,8 @@ test("maybeRefresh: hidden tab and throttle both stand down", async () => {
       String(Date.now())
     );
     const r = await maybeRefresh();
-    assert.equal(r, undefined);
+    // Throttled after the settings read — the round never starts.
+    assert.deepEqual(r, { sent: 0 });
     assert.equal(world2.frames.length, 0, "throttled round made no iframe");
   } finally {
     world2.restore();
@@ -477,12 +512,13 @@ test("a full round walks dashboard, interviews and applications; every payload i
 
     const appsLanding = mkDoc({
       title: "Applications",
-      text: "Total Submitted 100 Applied 97",
+      text: "Total Submitted: 100 Applied 97",
     });
+    // Live spelling — the first cell ends with a colon.
     const totalRow = {
-      cells: [{ textContent: "Total Submitted" }, { textContent: "100" }],
+      cells: [{ textContent: "Total Submitted:" }, { textContent: "100" }],
       querySelectorAll: (sel) => (sel === "a" ? [totalView] : []),
-      querySelector: () => ({ textContent: "Total Submitted" }),
+      querySelector: () => ({ textContent: "Total Submitted:" }),
     };
     const totalView = {
       tagName: "A",
@@ -534,6 +570,113 @@ test("a full round walks dashboard, interviews and applications; every payload i
       2,
       "page 1 and page 2 of applications"
     );
+  } finally {
+    world.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// kill switch — settings.sources.waterlooworks.autoRefresh / .enabled
+
+test("maybeRefresh honours the autoRefresh and enabled kill switches", async () => {
+  // autoRefresh: false -> no iframe, nothing sent.
+  const w1 = installWorld();
+  try {
+    w1.setSettings({
+      sources: { waterlooworks: { autoRefresh: false } },
+    });
+    const { maybeRefresh } = await import(MOD);
+    await maybeRefresh();
+    assert.equal(w1.frames.length, 0, "autoRefresh:false made no iframe");
+    assert.equal(w1.sent.length, 0);
+  } finally {
+    w1.restore();
+  }
+
+  // enabled: false -> no iframe either (the source is off entirely).
+  const w2 = installWorld();
+  try {
+    w2.setSettings({ sources: { waterlooworks: { enabled: false } } });
+    const { maybeRefresh } = await import(MOD);
+    await maybeRefresh();
+    assert.equal(w2.frames.length, 0, "enabled:false made no iframe");
+  } finally {
+    w2.restore();
+  }
+
+  // A storage read error fails closed — the refresh does not run.
+  const w3 = installWorld();
+  try {
+    w3.failStorage(new Error("denied"));
+    const { maybeRefresh } = await import(MOD);
+    await maybeRefresh();
+    assert.equal(w3.frames.length, 0, "storage error made no iframe");
+  } finally {
+    w3.restore();
+  }
+});
+
+test("maybeRefresh runs a round when the setting is absent", async () => {
+  const world = installWorld();
+  try {
+    const { maybeRefresh } = await import(MOD);
+    const d = settle(Promise.resolve(maybeRefresh()));
+    // The iframe appears once the settings read resolves.
+    await world.drain(() => world.frames.length > 0);
+    const frame = world.frames[0];
+    assert.ok(frame, "absent setting created the refresh iframe");
+    frame.routes = {
+      "/myAccount/dashboard.htm": mkDoc({
+        title: "WaterlooWorks Dashboard",
+        selectors: { table: [{}] },
+      }),
+      "/myAccount/co-op/full/interviews.htm": mkDoc({ title: "Interviews" }),
+      "/myAccount/co-op/full/applications.htm": mkDoc({
+        title: "Applications",
+      }),
+    };
+    await world.drain(d.done);
+    const res = await d.q;
+    assert.ok(res.sent >= 1, "the round sent snapshots");
+  } finally {
+    world.restore();
+  }
+});
+
+test("a mid-round flip to autoRefresh:false stops before the next step", async () => {
+  const world = installWorld();
+  try {
+    const { runRefreshRound } = await import(MOD);
+    let calls = 0;
+    world.setSettingsFn(() => {
+      calls++;
+      // The round's own pre-step-1 check passes; the pre-step-2 check sees
+      // the switch flipped off.
+      return calls <= 1
+        ? undefined
+        : { sources: { waterlooworks: { autoRefresh: false } } };
+    });
+    const d = settle(runRefreshRound());
+    const frame = world.frames[0];
+    frame.routes = {
+      "/myAccount/dashboard.htm": mkDoc({
+        title: "WaterlooWorks Dashboard",
+        selectors: { table: [{}] },
+      }),
+      "/myAccount/co-op/full/interviews.htm": mkDoc({ title: "Interviews" }),
+      "/myAccount/co-op/full/applications.htm": mkDoc({
+        title: "Applications",
+      }),
+    };
+    await world.drain(d.done);
+    const res = await d.q;
+    assert.equal(res.sent, 1, "dashboard sent, round stopped before interviews");
+    assert.equal(world.sent.length, 1);
+    assert.equal(
+      world.sent[0].payload.url,
+      "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+    );
+    assert.equal(frame.removed, true, "iframe removed after the early stop");
   } finally {
     world.restore();
   }
