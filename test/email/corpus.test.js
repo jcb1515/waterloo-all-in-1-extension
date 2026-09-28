@@ -478,11 +478,12 @@ const ALL = [
   {
     from: "Employer ATS <ats@acme.example.com>",
     subject: "Interview scheduling",
-    // "before Friday" is a stated due: the to-do is a deadline for Fri Oct 2
-    // 23:59 ET, not the generic two-day fallback.
+    // "before Friday" is a stated due: the to-do is due Fri Oct 2 23:59 ET,
+    // not the generic two-day fallback — still type task (to-dos stay off
+    // the feed; the opt-in exclusion keys on type "task").
     body: "Next step: select your interview slot before Friday.",
     receivedAt: AT,
-    expect: { type: "deadline", category: "book-call", dateToronto: "2026-10-02", time: "23:59", allDay: false },
+    expect: { type: "task", category: "book-call", dateToronto: "2026-10-02", time: "23:59", allDay: false },
   },
   {
     from: "Hiring Ops <ops@acme.example.com>",

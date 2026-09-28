@@ -953,8 +953,8 @@ test("to-do seam: reply and book tasks carry meta.action", async () => {
     ctx({}),
   );
   const dated = r2.items.find((i) => i.category === "reply");
-  assert.equal(dated.type, "deadline"); // the message states a hard due
-  assert.equal(dated.dueAt, "2026-10-06T03:59:00.000Z");
+  assert.equal(dated.type, "task"); // reply tasks always stay to-dos
+  assert.equal(dated.dueAt, "2026-10-06T03:59:00.000Z"); // the stated due
   assert.equal(dated.meta.undated, undefined);
 
   // A booking link without interview context -> "other".
@@ -988,7 +988,7 @@ test("to-do seam: reply and book tasks carry meta.action", async () => {
   const slot = r4.items.find((i) => i.category === "book-call");
   assert.equal(slot.meta.action, "book-interview");
   assert.equal(slot.meta.employer, "CECA");
-  assert.equal(slot.type, "deadline");
+  assert.equal(slot.type, "task"); // booking tasks stay to-dos
   assert.equal(slot.dueAt, "2026-10-07T03:59:00.000Z"); // Oct 6 23:59 ET
   assert.equal(slot.title, "Select interview time slot — CECA");
 });
@@ -1056,6 +1056,7 @@ test("submit-form and rsvp: a form link plus an ask", async () => {
   assert.equal(t2.title, "RSVP: Lab tour");
   assert.equal(t2.type, "task");
   assert.equal(t2.meta.undated, true);
+  assert.equal(t2.meta.calendar, false); // synthetic due -> never an event
 });
 
 test("submit-document: a document ask without a form link", async () => {

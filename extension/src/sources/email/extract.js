@@ -604,7 +604,7 @@ export function taskItems(prod, frame, prev, opts) {
   const replyDoneItem = (key, rec) => /** @type {Item} */ ({
     id: rec.id,
     source: /** @type {Item["source"]} */ (provider),
-    type: rec.dtype || "task",
+    type: "task",
     category: "reply",
     title: rec.title,
     dueAt: rec.dueAt,
@@ -625,7 +625,7 @@ export function taskItems(prod, frame, prev, opts) {
   const bookDoneItem = (key, rec) => /** @type {Item} */ ({
     id: rec.id,
     source: /** @type {Item["source"]} */ (provider),
-    type: rec.dtype || "task",
+    type: "task",
     category: "book-call",
     title: rec.title,
     dueAt: rec.dueAt,
@@ -707,7 +707,6 @@ export function taskItems(prod, frame, prev, opts) {
                 url: askRow.m.url,
                 status: "done",
                 doneAt,
-                dtype: ask.dueAt ? "deadline" : "task",
                 undated: !ask.dueAt || undefined,
               };
           items.push(replyDoneItem(key, replies[key]));
@@ -726,14 +725,13 @@ export function taskItems(prod, frame, prev, opts) {
             review: rev(askRow),
             url: askRow.m.url,
             status: "open",
-            dtype: ask.dueAt ? "deadline" : "task",
             undated: !ask.dueAt || undefined,
           };
           replies[key] = rec;
           items.push(/** @type {Item} */ ({
             id: rec.id,
             source: /** @type {Item["source"]} */ (provider),
-            type: /** @type {Item["type"]} */ (rec.dtype),
+            type: "task",
             category: "reply",
             title: rec.title,
             dueAt,
@@ -821,7 +819,6 @@ export function taskItems(prod, frame, prev, opts) {
         review: rev(r),
         status: "open",
         action,
-        dtype: bookDue ? "deadline" : "task",
         undated: !bookDue || undefined,
         employer:
           r.gate.coop || r.gate.employer || ATS_RE.test(email)
@@ -832,7 +829,7 @@ export function taskItems(prod, frame, prev, opts) {
       items.push(/** @type {Item} */ ({
         id: rec.id,
         source: /** @type {Item["source"]} */ (provider),
-        type: /** @type {Item["type"]} */ (rec.dtype),
+        type: "task",
         category: "book-call",
         title: rec.title,
         url: rec.url,
@@ -981,7 +978,9 @@ export function taskItems(prod, frame, prev, opts) {
             messageUrl: r.m.url,
             fromName: r.m.from,
             ...(employerish && employer ? { employer } : {}),
-            ...(due ? {} : { undated: true }),
+            // The 2-day fallback due is synthetic — an undated to-do is a
+            // panel to-do, never a calendar event.
+            ...(due ? {} : { undated: true, calendar: false }),
           },
           evidence: { method: "text", snippet: c.sentence.slice(0, 300), url: r.m.url },
           seenIn: seenEntry(id, key),
