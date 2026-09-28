@@ -275,3 +275,90 @@ test("stableHash is key-order independent", () => {
   assert.equal(stableHash(a), stableHash(b));
   assert.notEqual(stableHash(a), stableHash({ ...a, calendarName: "Other" }));
 });
+
+/* ------------- publish guard: mixed all-day/timed pairs ------------- */
+
+test("publish guard: all-day vs timed same event collapses to the timed one", () => {
+  // Live shape: the outline's all-day "Team Contract" vs the Learn dropbox
+  // item due 23:59 — one Toronto day, one real deadline.
+  const { payload, collapsed } = build({
+    "outline:tc": mk("outline:tc", {
+      source: "outline",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T03:59:00.000Z",
+      allDay: true,
+    }),
+    "learn:tc": mk("learn:tc", {
+      source: "learn",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T03:59:59.000Z",
+    }),
+  });
+  assert.equal(collapsed, 1);
+  assert.equal(payload.events.length, 1);
+  assert.equal(payload.events[0].id, "learn:tc");
+});
+
+test("publish guard: mixed pair on different Toronto days stays two", () => {
+  const { payload, collapsed } = build({
+    "outline:tc": mk("outline:tc", {
+      source: "outline",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T03:59:00.000Z",
+      allDay: true,
+    }),
+    "learn:tc": mk("learn:tc", {
+      source: "learn",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-05T03:59:00.000Z",
+    }),
+  });
+  assert.equal(collapsed, 0);
+  assert.equal(payload.events.length, 2);
+});
+
+test("publish guard: different course codes on the same day stay two", () => {
+  const { payload, collapsed } = build({
+    "outline:tc": mk("outline:tc", {
+      source: "outline",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T03:59:00.000Z",
+      allDay: true,
+    }),
+    "learn:tc": mk("learn:tc", {
+      source: "learn",
+      title: "Team Contract",
+      org: "ECE 190",
+      dueAt: "2026-10-03T03:59:59.000Z",
+    }),
+  });
+  assert.equal(collapsed, 0);
+  assert.equal(payload.events.length, 2);
+});
+
+test("publish guard: mixed pair across a Toronto date boundary stays two", () => {
+  // All-day anchored Toronto Oct 3 (00:59 EDT) vs timed Toronto Oct 2 (23:59
+  // EDT) — an hour apart on the clock, different calendar days.
+  const { payload, collapsed } = build({
+    "outline:tc": mk("outline:tc", {
+      source: "outline",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T04:59:00.000Z",
+      allDay: true,
+    }),
+    "learn:tc": mk("learn:tc", {
+      source: "learn",
+      title: "Team Contract",
+      org: "ECE 198",
+      dueAt: "2026-10-03T03:59:59.000Z",
+    }),
+  });
+  assert.equal(collapsed, 0);
+  assert.equal(payload.events.length, 2);
+});

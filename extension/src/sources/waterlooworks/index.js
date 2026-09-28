@@ -49,6 +49,32 @@ const MESSAGE_SCOPE_AGE_DAYS = 60;
 const MESSAGE_SCOPE_CAP = 300;
 /** The public co-op important-dates page is fetched at most once a day. */
 const COOP_FETCH_MS = DAY_MS;
+/** Bump whenever parseCoopDates/coopDateItems/COOP_CATEGORIES change output. */
+export const COOP_DATES_VERSION = 2;
+/** The parsed public entry list kept on state (public data, no personal info). */
+const COOP_ENTRIES_CAP = 400;
+
+/**
+ * Re-map stored public entries when the mapping version moved — no fetch.
+ * Upgraded installs whose coopDates record has no `entries` keep the old
+ * lastGood until the next fetch; sync bypasses the 24 h throttle then.
+ * @param {Record<string, any>} state  mutated in place
+ * @param {string} nowIso
+ */
+export function refreshCoopDates(state, nowIso) {
+  const cd = obj(state.coopDates);
+  if (cd.version === COOP_DATES_VERSION) return;
+  const entries = arr(cd.entries);
+  if (!entries.length) return;
+  state.coopDates = { ...cd, version: COOP_DATES_VERSION };
+  state.lastGood["coop-dates"] = {
+    items: coopDateItems(entries, { url: COOP_DATES_URL, nowIso }).slice(
+      0,
+      LAST_GOOD_CAP
+    ),
+    at: nowIso,
+  };
+}
 
 /**
  * Dedupe key for event items: a dashboard "upcoming events" row and an
@@ -288,11 +314,19 @@ export default {
     const nowIso = now instanceof Date ? now.toISOString() : new Date(now).toISOString();
     const settings = ctx.settings || {};
     let fetchedOk = false;
+    refreshCoopDates(state, nowIso);
 
     if (settings.coopDates !== false && typeof ctx.fetch === "function") {
       const url = settings.coopDatesUrl || COOP_DATES_URL;
       const lastFetch = Date.parse(state.coopDates?.fetchedAt || "");
-      if (!Number.isFinite(lastFetch) || nowMs - lastFetch >= COOP_FETCH_MS) {
+      // A stale mapping version with no stored entries means this install
+      // upgraded before entries existed — fetch now, throttle be damned.
+      const staleVersion = state.coopDates?.version !== COOP_DATES_VERSION;
+      if (
+        !Number.isFinite(lastFetch) ||
+        nowMs - lastFetch >= COOP_FETCH_MS ||
+        staleVersion
+      ) {
         state.coopDates = { ...state.coopDates, fetchedAt: nowIso };
         try {
           const res = await ctx.fetch(url);
@@ -302,8 +336,14 @@ export default {
               "waterlooworks/parseCoopDates"
             );
             if (parsed && typeof parsed === "object" && parsed.ok !== false) {
+              const entries = arr(parsed.entries).slice(0, COOP_ENTRIES_CAP);
+              state.coopDates = {
+                fetchedAt: nowIso,
+                version: COOP_DATES_VERSION,
+                entries,
+              };
               state.lastGood["coop-dates"] = {
-                items: coopDateItems(arr(parsed.entries), {
+                items: coopDateItems(entries, {
                   url,
                   nowIso,
                 }).slice(0, LAST_GOOD_CAP),
@@ -350,6 +390,7 @@ export default {
       // Updates now ride on SyncResult.updates; drop any persisted copy.
       delete state.lastUpdates;
       state.lastSeenAt = payload.at;
+      refreshCoopDates(state, payload.at);
 
       const body = String(payload.body || "").trim();
       if (body.startsWith("{") || body.startsWith("[")) {

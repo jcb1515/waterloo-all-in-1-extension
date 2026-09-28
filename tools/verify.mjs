@@ -23,6 +23,7 @@ import {
 } from "../extension/src/core/merge.js";
 import { normCourseCode } from "../extension/src/core/contract.js";
 import { buildFeedPayload } from "../extension/src/calendar/payload.js";
+import { zonedParts } from "../extension/src/lib/textdates/index.js";
 
 import learnDriver from "./verify/drivers/learn.mjs";
 import outlineDriver from "./verify/drivers/outline.mjs";
@@ -103,12 +104,21 @@ export function findSuspectedDuplicates(events) {
     if (Number.isFinite(start)) evs.push({ ev, start });
   }
   /** @type {{a: any, b: any}[]} */
+  // Mixed all-day/timed pairs on the same Toronto date count too — the
+  // publish guard collapses those on the calendar day, so a distant wall
+  // clock (all-day 00:00 vs a 23:59 deadline) must not hide them.
+  const dayKey = (ms) => {
+    const z = zonedParts(new Date(ms), "America/Toronto");
+    return `${z.y}-${z.m}-${z.d}`;
+  };
   const pairs = [];
   for (let i = 0; i < evs.length; i++) {
     for (let j = i + 1; j < evs.length; j++) {
       const a = evs[i];
       const b = evs[j];
-      if (Math.abs(a.start - b.start) > DUP_WINDOW_MS) continue;
+      const mixedSameDay =
+        !!a.ev.allDay !== !!b.ev.allDay && dayKey(a.start) === dayKey(b.start);
+      if (Math.abs(a.start - b.start) > DUP_WINDOW_MS && !mixedSameDay) continue;
       if (
         titleSimilarity(a.ev.title, a.ev.org, b.ev.title, b.ev.org) <
         DUP_TITLE_SIM

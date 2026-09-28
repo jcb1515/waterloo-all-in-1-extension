@@ -263,6 +263,26 @@ function collapseDuplicates(picked) {
     }
   }
 
+  // Mixed pairs: an all-day event and a timed one on the same Toronto date
+  // can still be one thing (an outline's all-day deadline vs the Learn item
+  // due at 23:59). The timed member wins — it is more precise.
+  for (const p of picked) {
+    if (!p.ev.allDay || removed.has(p)) continue;
+    const ams = evAnchor(p.ev);
+    if (ams == null) continue;
+    const az = zonedParts(new Date(ams), "America/Toronto");
+    for (const t of timed) {
+      if (removed.has(t.p)) continue;
+      const tz = zonedParts(new Date(/** @type {number} */ (t.ms)), "America/Toronto");
+      if (az.y !== tz.y || az.m !== tz.m || az.d !== tz.d) continue;
+      if (isDup(p.it, t.p.it)) {
+        removed.add(p);
+        collapsed++;
+        break;
+      }
+    }
+  }
+
   return { kept: picked.filter((p) => !removed.has(p)), collapsed };
 }
 
