@@ -11,7 +11,7 @@
 import { normCourseCode } from "../../core/contract.js";
 import { hashString } from "../../capture/redact.js";
 import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
-import { factsOf } from "../learn/classify.js";
+import { classify, factsOf } from "../learn/classify.js";
 import { KIND_TITLE, addDays, dow, slug, torontoDate } from "../outline/expand.js";
 
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -525,14 +525,37 @@ const TERM_RE =
   /(lectures?|classes) (begin|start|end)|first day of (lectures|classes)|last day of (lectures|classes)|reading week|mid-?term (week|period|break)|(final )?exam(ination)?s? (period|begin|start|end)|drop|withdraw|add (period|deadline)|holiday|thanksgiving|remembrance|fall break|study (day|break)|convocation|tuition|fee (payment|deadline)|grades? (due|available)/i;
 
 /** Class echoes on the calendar feed duplicate CourseSchedule rows. */
-const CLASS_ECHO = /^[A-Z]{2,5}\s?\d{3}[A-Z]?\s*[-–:]?\s*(LEC|TUT|LAB|SEM|TST)\b/;
+const CLASS_ECHO = /^[A-Z]{2,5}\s?\d{3}[A-Z]?\s*[-–:]?\s*\(?(LEC|TUT|LAB|SEM|TST)\b\)?/;
+
+/**
+ * DailyEventsV2 feed keys/names CourseSchedule and ExamSchedule already own.
+ * The feeds echo those reads row for row, so every class/exam row is dropped —
+ * a duplicated midterm would only restate (or fight) the exam item.
+ */
+const ECHO_FEED = /^(class|classes|exam|exams)$/i;
+/** The Learn mirror feed: rows duplicate Learn dropboxes the Learn adapter reads. */
+const LEARN_FEED = /^learn$/i;
+/** A course code inside a Learn feed title ("ECE190 midterm test"). */
+const LEARN_CODE = /\b([A-Z]{2,5})\s?(\d{3}[A-Z]?)\b/;
+
+/** Toronto 23:59 on a YYYY-MM-DD day — the Learn all-day due convention. */
+const dayEnd = (day) => {
+  const [y, m, d] = String(day).split("-").map(Number);
+  return zonedIso(y, m, d, 23, 59, TZ);
+};
 
 /**
  * DailyEventsV2 rows -> event/term-date items + TermInfo patches.
+ * `examIndex` (emitted ExamSchedule exams from an earlier read) lets the
+ * Learn feed's mirrored exam rows fold away instead of duplicating them —
+ * the core's same-source rule could never merge a portal row onto a portal
+ * exam.
+ * @param {any[]} rows
+ * @param {{scope?: string, at?: string, examIndex?: Record<string, any[]>}} ctx
  * @returns {{items: Item[], terms: {termCode: number, start?: string, end?: string,
  *   readingWeek?: {start: string, end?: string}, examPeriod?: {start?: string, end?: string}}[]}}
  */
-export function mapEvents(rows, { scope, at }) {
+export function mapEvents(rows, { scope, at, examIndex } = {}) {
   /** @type {Item[]} */
   const items = [];
   /** @type {Map<number, any>} */
@@ -543,6 +566,10 @@ export function mapEvents(rows, { scope, at }) {
     if (row.isEventCancelled) continue;
     const title = String(row.summary || row.name || "").trim();
     if (!title || CLASS_ECHO.test(title)) continue;
+    const feedKey = String(row.key || "");
+    const feedName = String(row.name || "");
+    if (ECHO_FEED.test(feedKey) || ECHO_FEED.test(feedName)) continue;
+    const isLearn = LEARN_FEED.test(feedKey) || LEARN_FEED.test(feedName);
     const startDay = torontoDay(row.startDate);
     if (!startDay) continue;
 
@@ -567,7 +594,92 @@ export function mapEvents(rows, { scope, at }) {
     if (!startAt) continue;
 
     const isTerm = TERM_RE.test(title);
-    const key = `event:${row.key || hashString(`${title}|${row.startDate}`)}:${startDay}`;
+    // row.key is the FEED key ("importantDate", "learn"), not unique per row —
+    // ids hash the title (+ startDate for Learn) so same-day rows can't
+    // collide. Learn rows hash startDate too because identical titles can
+    // recur at different times on a day.
+    const key = isLearn
+      ? `learn:${hashString(`${title}|${row.startDate}`)}:${startDay}`
+      : `event:${row.key || "cal"}:${hashString(title)}:${startDay}`;
+
+    if (isLearn && !isTerm) {
+      // Learn's calendar export appends " due" (or leads with "Due:") on rows
+      // whose Learn item title lacks it — strip it so the mirror merges at the
+      // same title. The id hash above already used the raw title.
+      const clean =
+        title
+          .replace(/\s*[-–:]?\s*due\s*$/i, "")
+          .replace(/^\s*due\s*[:-]\s*/i, "")
+          .trim() || title;
+      const cm = clean.match(LEARN_CODE);
+      const org = cm ? normCourseCode(`${cm[1]} ${cm[2]}`) : undefined;
+      const cls = classify({ title: clean, kind: /\bquiz\b/i.test(clean) ? "quiz" : undefined });
+      const base = {
+        id: `portal:${key}`,
+        source: /** @type {const} */ ("portal"),
+        title: clean,
+        org,
+        location: row.location || undefined,
+        details: row.description ? String(row.description).slice(0, 500) : undefined,
+        status: /** @type {const} */ ("open"),
+        meta: { feed: "Learn", ...(clean !== title ? { rawTitle: title } : {}) },
+        seenIn: seenIn(key, scope, at),
+        evidence: { ...EVIDENCE_CALENDAR },
+      };
+      if (!endAt || endAt <= startAt) {
+        // Zero-duration and single-day allDay rows are Learn due dates.
+        items.push({
+          ...base,
+          type: cls.type === "quiz" ? "quiz" : "deadline",
+          category: cls.category && cls.type !== "exam" ? cls.category : undefined,
+          dueAt: row.allDay ? dayEnd(startDay) : startAt,
+          allDay: row.allDay || undefined,
+          confidence: "tentative",
+          review: "auto",
+        });
+        continue;
+      }
+      if (cls.type === "exam") {
+        // The ExamSchedule exam on the same day at an overlapping (or
+        // within-an-hour) start IS this row — two portal items could never
+        // merge, so don't emit the mirror at all.
+        const seen = (org && (examIndex || {})[org]) || [];
+        const dupe = seen.some(
+          (e) =>
+            e.day === startDay &&
+            (overlaps(e.start, e.end, startAt, endAt || startAt) ||
+              Math.abs(Date.parse(e.start) - Date.parse(startAt)) <= 60 * 60 * 1000),
+        );
+        if (dupe) continue;
+        // A Learn-mirrored exam ("ECE190 midterm test") reuses the exam shape
+        // so the core merge can cluster it with the ExamSchedule item.
+        items.push({
+          ...base,
+          type: "exam",
+          category: cls.category,
+          title: cls.category === "midterm" ? "Midterm" : "Final exam",
+          startAt,
+          endAt,
+          allDay: row.allDay || undefined,
+          confidence: "tentative",
+          review: "auto",
+          meta: { feed: "Learn", rawTitle: title },
+        });
+        continue;
+      }
+      // Timed non-exam Learn rows keep the generic event shape.
+      items.push({
+        ...base,
+        type: "event",
+        category: "campus",
+        startAt,
+        endAt,
+        allDay: row.allDay || undefined,
+        confidence: "exact",
+        review: "pending",
+      });
+      continue;
+    }
     /** @type {Item} */
     const item = {
       id: `portal:${key}`,

@@ -7,6 +7,7 @@
 
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { termFromText } from "../learn/live-source.js";
+import { titleSimilarity } from "../../core/merge.js";
 import { classify, factsOf } from "../learn/classify.js";
 import { addDays, clockOf, dNum, dow, fromNum, inRanges, pad, slug, torontoDate } from "./expand.js";
 
@@ -342,11 +343,35 @@ export function parseSyllabusText(text, opts = {}) {
   }
 
   /* ---- "Last chance" deadline ---- */
+  // Same-day coverage of the structured :assess:/:due: items, as in
+  // expand.js: a prose "last chance" line that restates one of them folds
+  // into it instead of emitting a duplicate text item.
+  /** @type {{item: Item, a: string, b: string}[]} */
+  const structured = [];
+  for (const i of items) {
+    if (!i.id.includes(":assess:") && !i.id.includes(":due:")) continue;
+    const a = i.dueAt ? torontoDate(i.dueAt) : i.startAt ? torontoDate(i.startAt) : null;
+    if (!a) continue;
+    const b = i.allDay && i.endAt ? torontoDate(i.endAt) : addDays(a, 1);
+    structured.push({ item: i, a, b });
+  }
   for (const line of lines) {
     if (!/last chance/i.test(line)) continue;
     const hit = hits(line).find((h) => h.confidence >= 0.5);
     if (!hit) continue;
     const titleText = line.replace(/^\*+/, "").replace(/:.*$/, "").trim();
+    const day = torontoDate(hit.startAt);
+    const dup = structured.find(
+      (s) => s.a <= day && day < s.b && titleSimilarity(titleText, code, s.item.title, code) >= 0.6,
+    );
+    if (dup) {
+      const cur = String(dup.item.details || "");
+      if (!cur.includes(line)) dup.item.details = [cur, line].filter(Boolean).join(" ").slice(0, 500);
+      if (dup.item.evidence && !dup.item.evidence.snippet) {
+        dup.item.evidence = { ...dup.item.evidence, snippet: line.slice(0, 300) };
+      }
+      continue;
+    }
     emit("text", titleText, line, {
       type: "deadline",
       dueAt: hit.allDay ? dueEnd(hit) : hit.startAt,

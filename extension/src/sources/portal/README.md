@@ -63,7 +63,7 @@ strings carrying `Z` or a `±hh:mm`/`±hhmm` offset are honoured literally.
 | `v2/student/CourseSchedule/` | `portal:schedule` | one item per meeting: LEC/SEM/other -> `class`, TUT -> `tutorial`, LAB -> `lab`, TST -> `exam`/`midterm` "Midterm"; unions `<comp> <sect>` sections into `state.courses[code]` |
 | `v2/student/ExamSchedule/` | `portal:exams` | exam items; category midterm (matches the Learn midterm rule) else final, ids carry no date so a moved exam keeps its id (`:2`, `:3` only for true duplicates) |
 | `v2/student/CourseEnrollments/…` | `portal:enrollments` | no items; patches `state.courses` (sections union, `outlineURL` -> `outlineUrl` with `https://` prepended, `droppedDate` rows skipped). Both the list (`data.courseEnrollmentData[]`) and per-course (`data[]`) shapes are handled |
-| `v2/Calendar/DailyEventsV2` | `portal:events:<start>..<end>` | campus `event`s (`category "campus"`, `review "pending"` — the user imports everything into Review) and `term-date`s; cancelled events, empty titles and `ECE 150 LEC 002`-style class echoes are skipped |
+| `v2/Calendar/DailyEventsV2` | `portal:events:<start>..<end>` | campus `event`s (`category "campus"`, `review "pending"` — the user imports everything into Review) and `term-date`s; cancelled events, empty titles and `ECE 150 LEC 002`-style class echoes are skipped. `class`/`exam` feeds are dropped entirely (CourseSchedule/ExamSchedule own them); `learn`-feed rows become `portal:learn:<hash(title|startDate)>:<day>` deadline/quiz/exam mirrors; other rows take `portal:event:<feedKey>:<hash(title)>:<day>` — `key` is the feed key, so the title hash is what keeps same-day rows distinct |
 
 ## Field rules worth knowing
 
