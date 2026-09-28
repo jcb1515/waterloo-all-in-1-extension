@@ -1,7 +1,11 @@
 {
   "name": "waterloo-all-in-1-feed",
   "main": "src/worker.js",
-  "compatibility_date": "2026-09-01",
+  "compatibility_date": "2026-09-27",
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
   "triggers": {
     "crons": ["17 4 * * *"]
   },

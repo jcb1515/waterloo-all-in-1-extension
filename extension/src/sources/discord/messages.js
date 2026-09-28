@@ -5,6 +5,7 @@
 // an item's evidence/details.
 
 import { itemId } from "../../core/contract.js";
+import { hashString } from "../../capture/redact.js";
 import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import {
   REST_ROUTES,
@@ -14,6 +15,7 @@ import {
   BY_BEFORE_DATE_RE,
   TIME_LINE_RE,
   LOCATION_LINE_RE,
+  REPLY_REQUEST_RE,
 } from "./selectors.js";
 import { parseTimeValue } from "./time.js";
 import {
@@ -197,6 +199,39 @@ export function snippetAround(text, index, length) {
 const firstLine = (text) =>
   String(text || "").split("\n")[0].replace(/\s+/g, " ").trim();
 
+const WD3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH3 = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** ms -> Toronto wall text "Tue Sep 29, 4:05 PM" (for the Asked fact). */
+const localLine = (ms) => {
+  const p = zonedParts(new Date(ms));
+  return `${WD3[p.weekday]} ${MONTH3[p.m - 1]} ${p.d}, ${p.h % 12 || 12}:${String(p.mi).padStart(2, "0")} ${p.h >= 12 ? "PM" : "AM"}`;
+};
+
+/**
+ * Does this message ping the user? Direct selfId mention, a known role
+ * ping, a mentions-endpoint message that isn't a bare @everyone, or the
+ * DOM "mentioned" highlight.
+ */
+function mentionsMe(msg, o) {
+  const mentions = Array.isArray(msg?.mentions) ? msg.mentions : [];
+  const roles = Array.isArray(msg?.mention_roles) ? msg.mention_roles : [];
+  return Boolean(
+    (o.selfId && mentions.some((m) => String(m?.id) === o.selfId)) ||
+      (o.roleIds || []).some((r) => roles.includes(r)) ||
+      (o.fromMentions &&
+        !(
+          msg?.mention_everyone &&
+          mentions.length === 0 &&
+          roles.length === 0
+        )) ||
+      msg?.domMentionsMe === true
+  );
+}
+
 /**
  * A DOM extract message -> the REST message shape the candidate extractor
  * reads. `times` (ISO datetimes from <time> elements) are re-inserted as
@@ -323,19 +358,7 @@ export function candidatesForMessage(msg, o) {
   const taskTrig = wordTrigger(text, TASK_VERBS);
 
   // --- assigned to me? ---
-  const mentions = Array.isArray(msg?.mentions) ? msg.mentions : [];
-  const roles = Array.isArray(msg?.mention_roles) ? msg.mention_roles : [];
-  const assignedToMe = Boolean(
-    (o.selfId && mentions.some((m) => String(m?.id) === o.selfId)) ||
-      (o.roleIds || []).some((r) => roles.includes(r)) ||
-      (o.fromMentions &&
-        !(
-          msg?.mention_everyone &&
-          mentions.length === 0 &&
-          roles.length === 0
-        )) ||
-      msg?.domMentionsMe === true
-  );
+  const assignedToMe = mentionsMe(msg, o);
 
   // --- classification, first match wins ---
   /** @type {"task"|"deadline"|"meeting"|"event"|null} */
@@ -439,6 +462,12 @@ export function candidatesForMessage(msg, o) {
       undated: undated || undefined,
       weekdayMismatch: hit?.weekdayMismatch || undefined,
       // Never names or message bodies — just where/how it reached the user.
+      // The assigner is stored as a one-way hash (a DONE_RE reply from it
+      // can close the task); the raw author id is never persisted.
+      assignerKey:
+        kind === "task" && msg?.author?.id != null && msg.author.id !== ""
+          ? hashString(String(msg.author.id))
+          : undefined,
       facts: factsOf([
         ["Server", o.team],
         ["Channel", o.channelName ? `#${o.channelName}` : undefined],
@@ -468,4 +497,112 @@ export function candidatesForMessage(msg, o) {
     if (hit.endAt) item.endAt = hit.endAt;
   }
   return [item];
+}
+
+/** "Reply needed" to-dos are due two days after the ask, 5 PM Toronto. */
+const REPLY_DUE_DAYS = 2;
+const REPLY_DUE_HOUR = 17;
+
+/**
+ * A message that pings me AND asks a question / makes a request -> one
+ * "reply" to-do (type task, category reply). Skipped for self-authored
+ * messages and @everyone/@here-only pings; a message that already
+ * produced a task candidate is filtered by the caller (one to-do per
+ * ask). Pure.
+ * @param {any} msg  normalised REST message (or domMessageToRest output)
+ * @param {object} o
+ * @param {string} [o.selfId] @param {string[]} [o.roleIds]
+ * @param {boolean} [o.fromMentions]
+ * @param {string} [o.guildId] @param {string} [o.channelId]
+ * @param {string} [o.channelName] @param {string} [o.team]
+ * @param {"rest"|"dom"} [o.via]
+ * @param {string} o.nowIso
+ * @returns {Item|null}
+ */
+export function replyCandidate(msg, o) {
+  const type = Number(msg?.type ?? 0);
+  if (!READABLE_TYPES.has(type)) return null;
+  const content = String(msg?.content || "");
+  const text = stripMarkup(content);
+  if (!text) return null;
+
+  // --- the ping must be mine ---
+  const mentions = arr(msg?.mentions);
+  const roles = arr(msg?.mention_roles);
+  const direct =
+    Boolean(o.selfId) && mentions.some((m) => String(m?.id) === o.selfId);
+  const rolePing = arr(o.roleIds).some((r) => roles.includes(r));
+  const domMe = msg?.domMentionsMe === true;
+  // @everyone/@here that doesn't actually single me out is a broadcast.
+  if (msg?.mention_everyone && !direct && !rolePing && !domMe) return null;
+  if (!(direct || rolePing || mentionsMe(msg, o))) return null;
+  // Questions I asked don't need to-dos.
+  if (o.selfId && String(msg?.author?.id || "") === o.selfId) return null;
+
+  // --- a question or request phrase ---
+  const qi = text.indexOf("?");
+  const rm = REPLY_REQUEST_RE.exec(text);
+  let pos = -1;
+  let len = 1;
+  if (qi !== -1) pos = qi;
+  if (rm && (pos === -1 || rm.index < pos)) {
+    pos = rm.index;
+    len = rm[0].length;
+  }
+  if (pos === -1) return null;
+  const snippet = snippetAround(text, pos, len);
+
+  const channelId = String(o.channelId || msg?.channel_id || "");
+  const messageId = String(msg?.id || "");
+  if (!channelId || !messageId) return null;
+  const guildId = o.guildId || msg?.guild_id || undefined;
+  const msgMs = Date.parse(msg?.timestamp || "");
+  const nowMs = Date.parse(o.nowIso || "");
+  const askedMs = Number.isFinite(msgMs)
+    ? msgMs
+    : Number.isFinite(nowMs)
+      ? nowMs
+      : Date.now();
+  const askedAt = new Date(askedMs).toISOString();
+  // Toronto calendar day of (asked + 48 h), at 17:00 Toronto.
+  const p = zonedParts(new Date(askedMs + REPLY_DUE_DAYS * DAY_MS));
+  const dueAt = zonedIso(p.y, p.m, p.d, REPLY_DUE_HOUR, 0);
+  const key = `reply:${messageId}`;
+  const url = guildId
+    ? `https://discord.com/channels/${guildId}/${channelId}/${messageId}`
+    : undefined;
+  /** @type {Item} */
+  return {
+    id: itemId(SOURCE, key),
+    source: SOURCE,
+    type: "task",
+    category: "reply",
+    title: (
+      o.channelName
+        ? `Reply in #${o.channelName}${o.team ? ` (${o.team})` : ""}`
+        : `Reply in Discord${o.team ? ` (${o.team})` : ""}`
+    ).slice(0, TITLE_MAX),
+    org: o.team || undefined,
+    url,
+    status: "open",
+    confidence: "exact",
+    review: "auto",
+    dueAt,
+    seenIn: [{ source: SOURCE, key, scope: SCOPE, at: o.nowIso }],
+    evidence: { snippet, url, method: "text" },
+    details: snippet || undefined,
+    meta: {
+      reply: { channelId, messageId, askedAt },
+      guildId,
+      channelId,
+      messageId,
+      assignedToMe: true,
+      via: o.via === "dom" ? "dom" : "rest",
+      facts: factsOf([
+        ["Server", o.team],
+        ["Channel", o.channelName ? `#${o.channelName}` : undefined],
+        ["Asked", localLine(askedMs)],
+      ]),
+    },
+  };
 }

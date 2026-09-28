@@ -477,6 +477,21 @@ function eventRefOf(root) {
 }
 
 /**
+ * The open Events dialog element and which modal it is, or null.
+ * Shared by eventsModalExtract and probe.js.
+ * @param {Document} doc
+ * @returns {{dialog: any, modal: "list"|"detail"}|null}
+ */
+export function eventsDialog(doc) {
+  for (const el of doc.querySelectorAll(EVENT_DIALOG_SEL)) {
+    const t = textWithBreaks(el);
+    if (EVENTS_HEADER_RE.test(t)) return { dialog: el, modal: "list" };
+    if (t.includes(EVENT_DETAIL_MARK)) return { dialog: el, modal: "detail" };
+  }
+  return null;
+}
+
+/**
  * The Events list modal / event detail modal -> a DOM extract.
  * Card split: each card is the largest dialog subtree containing exactly
  * one "Copy Link" control; with none, the whole dialog is one card and the
@@ -487,24 +502,9 @@ function eventRefOf(root) {
  */
 export function eventsModalExtract(doc, href) {
   try {
-    /** @type {any} */
-    let dialog = null;
-    /** @type {"list"|"detail"|null} */
-    let modal = null;
-    for (const el of doc.querySelectorAll(EVENT_DIALOG_SEL)) {
-      const t = textWithBreaks(el);
-      if (EVENTS_HEADER_RE.test(t)) {
-        dialog = el;
-        modal = "list";
-        break;
-      }
-      if (t.includes(EVENT_DETAIL_MARK)) {
-        dialog = el;
-        modal = "detail";
-        break;
-      }
-    }
-    if (!dialog) return null;
+    const found = eventsDialog(doc);
+    if (!found) return null;
+    const { dialog, modal } = found;
 
     const location = readLocation(href) || { guildId: "", channelId: undefined };
     const guildName =

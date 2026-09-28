@@ -102,6 +102,17 @@ export const TIME_LINE_RE = /^\s*(?:time|when)\s*[:\-–]\s*(.+)$/im;
 export const LOCATION_LINE_RE =
   /^\s*(?:location|where|room|place)\s*[:\-–]\s*(.+)$/im;
 
+/**
+ * Question/request phrasing that turns a ping into a reply to-do
+ * (a literal "?" in the text qualifies on its own).
+ */
+export const REPLY_REQUEST_RE =
+  /\b(?:can you|could you|would you|can we|please|pls|plz|thoughts|what do you think|when are you free|are you free|are you available|let me know|lmk|any updates?|can someone|need you to)\b/i;
+
+/** Reply text that closes an assigned task ("done", "shipped", …). */
+export const DONE_RE =
+  /\b(?:done|finished|merged|completed|shipped|fixed)\b/i;
+
 /* Scheduled events modal -------------------------------------------------- */
 
 /** The Events list modal and event detail modal render as a dialog. */

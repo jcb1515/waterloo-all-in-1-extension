@@ -159,7 +159,18 @@ one file at a time with `node --test test/waterlooworks/<name>.test.js`.
 application status diffs; `dates.test.js` — Toronto conversions;
 `status.test.js` — status normalization; `adapter.test.js` — end-to-end
 parse/sync including the accumulator caps; `fuzz.test.js` — ~300
-deterministic malformed payloads plus a 1000-read growth bound.
+deterministic malformed payloads plus a 1000-read growth bound;
+`probe.test.js` — exact probe counts per fixture and the no-text
+privacy check.
+
+**Probe (`probe.js`).** `probe(doc, href)` powers the "Check readers"
+screen: it runs `detectPage` plus the same parsers and returns
+`{page, counts, ok, hints}` — COUNTS ONLY, so nothing user-visible ever
+leaves the DOM. `CHECKLIST` is the ordered list of pages to open; both
+are pure (no chrome/fetch) since W1's recorder imports them in a
+content-script context. When a parser's required structure changes,
+update the probe's count keys and the fixture expectations in
+`probe.test.js` together.
 
 **Open / needs tuning.** The grids' JSON response shape is still unknown
 (the recorder should capture one; `lastJsonAt` is stored meanwhile).
