@@ -816,7 +816,18 @@ function coopCellLines(td) {
     push(cur);
   };
   emit(td.childNodes);
-  return lines;
+  // A <br> can wrap a phrase mid-sentence ("…request removal<br />from
+  // Cycle 2 Match") — a line starting lowercase continues the previous
+  // one instead of starting a new event.
+  const folded = [];
+  for (const line of lines) {
+    if (folded.length && !line.strong && /^[a-z]/.test(line.text)) {
+      folded[folded.length - 1].text += ` ${line.text}`;
+    } else {
+      folded.push(line);
+    }
+  }
+  return folded;
 }
 
 /** "9 a.m." | "2:30 p.m." | "noon" -> "HH:MM" (24 h). */

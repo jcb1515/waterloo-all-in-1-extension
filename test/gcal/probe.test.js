@@ -53,6 +53,7 @@ test("probe: exact counts on the week fixture", () => {
   assert.deepEqual(r.counts, {
     eventChips: 6,
     labeled: 5,
+    unread: 1, // "Focus time" has no parseable label and a unique id
     decodedIds: 4,
     own: 1,
     subscribed: 3,
@@ -60,6 +61,35 @@ test("probe: exact counts on the week fixture", () => {
     detailPopup: 1,
     account: 1,
   });
+});
+
+test("probe: continuation chips of a labelled event don't count as unread", () => {
+  // A multi-day event renders one chip per day; only the first carries a
+  // label. Live: 32 unlabelled chips all shared an eventid with a labelled
+  // chip, yet the probe still warned "couldn't be read".
+  const html = `<!DOCTYPE html><html><head><title>Google Calendar</title></head>
+    <body data-viewkey="WEEK">
+      <div data-is-column-view-context="true"><div role="main">
+        <div data-eventid="bXVsdGkxIHdAMQ" aria-label="9pm to 11pm, Design review, October 1, 2026"></div>
+        <div data-eventid="bXVsdGkxIHdAMQ"></div>
+        <div data-eventid="bXVsdGkxIHdAMQ"></div>
+        <div data-eventid="c3RhbmR1cCB3QDE" aria-label="1pm to 2pm, Standup, October 2, 2026"></div>
+      </div></div>
+    </body></html>`;
+  const r = probe(parseHTML(html).document, GC + "week/2026/9/29");
+  assert.equal(r.counts.eventChips, 4);
+  assert.equal(r.counts.labeled, 2);
+  assert.equal(r.counts.unread, 0);
+  assert.ok(!r.hints.some((h) => h.includes("couldn't be read")));
+
+  // An unlabelled chip with a unique event id still warns.
+  const html2 = html.replace(
+    '<div data-eventid="bXVsdGkxIHdAMQ"></div>',
+    '<div data-eventid="dW5yZWFkIHdAMQ"></div>',
+  );
+  const r2 = probe(parseHTML(html2).document, GC + "week/2026/9/29");
+  assert.equal(r2.counts.unread, 1);
+  assert.ok(r2.hints.some((h) => h.includes("couldn't be read")));
 });
 
 test("probe: a bare /r URL still reads the view from the DOM", () => {

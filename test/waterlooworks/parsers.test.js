@@ -364,7 +364,7 @@ test("a snapshot containing the same table twice yields no duplicates", () => {
 test("parseCoopDates reads month calendars into dated entries", () => {
   const res = parsers.parseCoopDates(doc("coop-important-dates.html"));
   assert.equal(res.ok, true);
-  assert.equal(res.entries.length, 31);
+  assert.equal(res.entries.length, 35);
 
   const find = (date, text) =>
     res.entries.find((e) => e.date === date && e.text.includes(text));
@@ -407,6 +407,21 @@ test("parseCoopDates reads month calendars into dated entries", () => {
     res.entries.filter((e) => e.text === "Interviews" && e.date.startsWith("2027-01")).length,
     6
   );
+
+  // Live markup: a <br> inside a phrase ("…request removal<br />from
+  // Cycle 2 Match") is a wrap, not an event boundary — the continuation
+  // joins back instead of becoming its own fragment entry.
+  assert.deepEqual(find("2027-01-31", "Due date to request removal from Cycle 2 Match"), {
+    date: "2027-01-31",
+    cycle: "Cycle 2",
+    text: "Due date to request removal from Cycle 2 Match, 12 p.m. (ET)",
+    time: "12:00",
+    endOfDay: false,
+  });
+  assert.ok(!res.entries.some((e) => /^from Cycle/.test(e.text)));
+  // The ranking lines parse too — consults and close are distinct rows.
+  assert.ok(find("2027-01-31", "Student ranking consults"));
+  assert.ok(find("2027-01-31", "Student rankings close"));
 });
 
 test("parseCoopDates reports ok:false when no month tables exist", () => {

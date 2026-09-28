@@ -169,6 +169,7 @@ export function mapSchedule(rows, { scope = "", at = "", instructors, examIndex 
             location:
               [location, hit.seat && `Seat ${hit.seat}`].filter(Boolean).join(" · ") || undefined,
             details: hit.seatInstructions || undefined,
+            section: section || undefined,
             status: "open",
             confidence: "exact",
             review: "auto",
@@ -177,6 +178,16 @@ export function mapSchedule(rows, { scope = "", at = "", instructors, examIndex 
             evidence: { ...EVIDENCE_ACADEMICS },
           }),
         );
+        // The slot stays in tstIndex even when the exam was already known —
+        // a later ExamSchedule read must find it and keep the merged shape.
+        (tstIndex[code] = tstIndex[code] || []).push({
+          id: hit.id,
+          day,
+          start: startAt,
+          end: endAt || startAt,
+          room: row.roomDescription || undefined,
+          section: section || undefined,
+        });
       } else {
         const id = examIdFor(code);
         const key = String(id).replace(/^portal:/, "");
@@ -434,6 +445,7 @@ export function mapExams(rows, { scope, at, terms, courses, tstIndex } = {}) {
           [location, row.seatCode && `Seat ${row.seatCode}`].filter(Boolean).join(" · ") ||
           undefined,
         details: row.seatInstructions || undefined,
+        section: (hit && hit.section) || undefined,
         status: "open",
         confidence: "exact",
         review: "auto",

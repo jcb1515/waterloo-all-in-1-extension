@@ -97,16 +97,33 @@ export function probe(doc, href) {
     );
     let labeled = 0;
     let decodedIds = 0;
+    /** Event ids with at least one chip whose label parses. */
+    const readableIds = new Set();
+    /** data-eventid of each chip whose label didn't parse ("" if none). */
+    const unlabeled = [];
     for (const el of chips) {
-      if (parseChipLabel(labelOf(el), { fallbackDate: date })) labeled++;
+      const eid = el.getAttribute("data-eventid") || "";
+      if (parseChipLabel(labelOf(el), { fallbackDate: date })) {
+        labeled++;
+        if (eid) readableIds.add(eid);
+      } else {
+        unlabeled.push(eid);
+      }
       if (decodeCalId(el.getAttribute("data-eventid"))) decodedIds++;
     }
+    // A multi-day event renders one chip per day but only the first carries
+    // the label — continuation segments aren't unread. "Unread" is unique
+    // event ids with no labelled chip anywhere.
+    const unread =
+      new Set(unlabeled.filter((id) => id && !readableIds.has(id))).size +
+      unlabeled.filter((id) => !id).length;
     const dialogs = [...doc.querySelectorAll(GCAL.dialog)];
     const detailPopup = dialogs.some((d) => popupEvent(d, new Date(), "")) ? 1 : 0;
     /** @type {Record<string, number>} */
     const counts = {
       eventChips: chips.length,
       labeled,
+      unread,
       decodedIds,
       own: ex.events.filter((e) => e.calendarKind === "own").length,
       subscribed: ex.events.filter((e) => e.calendarKind === "subscribed").length,
@@ -116,7 +133,7 @@ export function probe(doc, href) {
     };
     const ok = labeled > 0;
     if (!chips.length) hints.push(HINT_CHIPS);
-    else if (labeled < chips.length) hints.push(HINT_SOME);
+    else if (unread) hints.push(HINT_SOME);
     if (!account) hints.push(HINT_ACCOUNT);
     return { page, counts, ok, hints };
   } catch {

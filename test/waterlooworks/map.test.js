@@ -17,6 +17,7 @@ import {
   interviewDetailItems,
   linkItems,
   mergeInterviewScopes,
+  mergeItemById,
   messageDateItems,
   coopDateItems,
 } from "../../extension/src/sources/waterlooworks/map.js";
@@ -42,6 +43,7 @@ test("toApplications normalizes statuses into the contract shape", () => {
     jobId: "488135",
     cycle: "2027 - Winter",
     jobStatus: "Interview Selections Complete",
+    submittedOn: "2026-09-15T20:12:00.000Z",
     status: "applied",
     history: [],
     itemIds: [],
@@ -49,6 +51,52 @@ test("toApplications normalizes statuses into the contract shape", () => {
   assert.equal(apps[1].jobStatus, "Interview Complete");
   assert.equal(apps[1].status, "not-selected");
   assert.equal(apps[2].status, "selected-for-interview");
+});
+
+test("mergeItemById: later wins per field, earlier fills the gaps — both orders", () => {
+  const schedule = {
+    id: "waterlooworks:interview:488135",
+    source: "waterlooworks",
+    type: "interview",
+    title: "Interview: X",
+    startAt: "2026-10-02T20:00:00.000Z",
+    endAt: "2026-10-02T20:30:00.000Z",
+    status: "open",
+    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: "a" }],
+    meta: { jobId: "488135", facts: [{ label: "Type", value: "In-Person" }] },
+  };
+  const list = {
+    id: "waterlooworks:interview:488135",
+    source: "waterlooworks",
+    type: "interview",
+    title: "Interview: X",
+    startAt: "2026-10-02T20:00:00.000Z",
+    location: "TC 2218",
+    status: "open",
+    details: "Type: In-Person\nMethod: In-Person",
+    seenIn: [{ source: "waterlooworks", key: "interview:488135", scope: "waterlooworks", at: "b" }],
+    meta: { jobId: "488135", facts: [{ label: "Where", value: "TC 2218" }] },
+  };
+  for (const merged of [
+    mergeItemById(schedule, list), // dashboard first, list later
+    mergeItemById(list, schedule), // list first, schedule later
+  ]) {
+    // No field is ever dropped: endAt and location both survive.
+    assert.equal(merged.endAt, "2026-10-02T20:30:00.000Z");
+    assert.equal(merged.location, "TC 2218");
+    assert.equal(merged.startAt, "2026-10-02T20:00:00.000Z");
+    // facts union by label — both scopes contribute.
+    assert.deepEqual(
+      merged.meta.facts.map((f) => f.label).sort(),
+      ["Type", "Where"]
+    );
+  }
+  // Later wins shared labels and shared fields.
+  const shared = mergeItemById(
+    { ...list, meta: { jobId: "488135", facts: [{ label: "Type", value: "FromList" }] } },
+    { ...schedule, meta: { jobId: "488135", facts: [{ label: "Type", value: "FromDash" }] } }
+  );
+  assert.deepEqual(shared.meta.facts, [{ label: "Type", value: "FromDash" }]);
 });
 
 test("interviewItems builds interview Items with contract fields", () => {
@@ -411,6 +459,31 @@ test("coopDateItems maps the fixture: times, ranges, ids, exclusions", () => {
   assert.ok(byId.has("waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-open"));
   assert.ok(byId.has("waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-open-2"));
   assert.ok(items.every((i) => !/\d{4}-\d{2}-\d{2}/.test(i.id)));
+
+  // Ranking lines: "Student ranking consults" are advising sessions —
+  // 'other', never rankings-due; only the close line is the deadline.
+  const consult = items.find((i) => /ranking consults/i.test(i.title));
+  assert.equal(consult.category, "other");
+  assert.equal(consult.title, "Cycle 1: Student ranking consults");
+  const rankingsDue = items.filter((i) => i.category === "rankings-due");
+  assert.deepEqual(
+    rankingsDue.map((i) => i.title),
+    ["Cycle 1: Student rankings close"]
+  );
+
+  // Word-boundary zone strip: "request" keeps its "est", and a <br>
+  // mid-phrase joins back into one event line.
+  const removal1 = items.find((i) => /Cycle 1 Match/.test(i.title));
+  const removal2 = items.find((i) => /Cycle 2 Match/.test(i.title));
+  assert.equal(
+    removal1.title,
+    "Cycle 1: Due date to request removal from Cycle 1 Match"
+  );
+  assert.equal(
+    removal2.title,
+    "Cycle 2: Due date to request removal from Cycle 2 Match"
+  );
+  assert.ok(!items.some((i) => /^Cycle \d: from Cycle/.test(i.title)));
 });
 
 test("coopDateItems: endOfDay -> 23:59 Toronto dueAt", () => {

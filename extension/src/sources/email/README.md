@@ -1,11 +1,12 @@
-# Email adapter (Outlook web + Gmail) — T3, DOM only
+# Email adapter (Outlook web + Gmail) — T3, DOM + one feed
 
 Finds dated things in already-rendered mail: meeting/interview invites and
 "important" mail (co-op, Learn, instructors, course-coded, keyworded) that
-mention a date. **No network access of any kind**: OWA's tokened API and
-Gmail's data endpoints were never captured, so there are no `urlPatterns`
-and `sync` is a no-tab stub. Everything arrives as a serialised DOM extract
-from `content.js` (a bundled IIFE; bundled separately by `tools/build.mjs`).
+mention a date. The only network access is Gmail's unread-mail Atom feed
+(see **Network**); OWA's tokened API was never captured, so Outlook stays
+DOM-only and there are no `urlPatterns`. Everything arrives as a serialised
+DOM extract from `content.js` (a bundled IIFE; bundled separately by
+`tools/build.mjs`).
 
 ## Pipeline
 
@@ -239,6 +240,39 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   list scope rather than over-removing.
 
 `parsers.js` stays a stub — there is no fetch tier to parse.
+
+## Network
+
+`atom.js` is the one exception to the passive rule, and only on
+`mail.google.com`: the user's own unread-mail feed. While a Gmail tab is
+open and not frozen, `atomRound` does **one** request — `GET
+/mail/u/<n>/feed/atom` (the `<n>` comes from the page path, default 0) —
+same-origin relative URL, `credentials: "same-origin"`, 15 s timeout. A
+response that isn't `200` + XML content-type, or that redirected (the
+sign-in page), stops the round and sends nothing.
+
+Entries map to the same `Msg` shape list rows produce (`key` = the
+`message_id=` link param or `<id>` tail, `subject` = `<title>`, `preview` =
+`<summary>`, `receivedAt` = `<issued>`, `from`/`fromEmail` =
+`<author>`) and are replayed as the exact `wa1:observed` `kind:"dom"`
+payload the passive reader sends, with `view: "atom"` and `folder:
+"inbox"`. The observe scope is `email:gmail:atom` — no item's `seenIn`
+scope ever equals it, so an entry leaving the unread feed can never delete
+its item (entries are additive; opening the thread upgrades them in place
+because the ids are the same `gmail:<key>:…` family).
+
+Privacy: the feed-level `<title>`/`<tagline>` contain the account address
+and are never read — only `<entry>` children are parsed. `author/email`
+feeds the same sender/bulk gates as list rows and is never stored in items
+or state. There are no tokens and no `chrome.storage` writes; the throttle
+is a `sessionStorage["wa1:gmail:atomAt"]` stamp (`{at, ok}`: 30 min after a
+success, 5 min retry after any failure). A Page Lifecycle `freeze` bumps a
+generation so an in-flight fetch that settles late is dropped, never
+double-sent; `resume`/`visibilitychange` continue where the tab left off.
+
+`content.js` wires this only for `location.hostname === "mail.google.com"`;
+the static test in `test/email/adapter.test.js` fails on any other
+`fetch(`/XHR/URL in `email/**`.
 
 ## Probe / checklist
 

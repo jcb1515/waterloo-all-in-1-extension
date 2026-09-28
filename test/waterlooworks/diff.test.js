@@ -11,7 +11,7 @@ const T2 = new Date("2026-09-12T12:00:00Z");
 /**
  * @param {string} id
  * @param {string} status
- * @param {Partial<Application>} [over]
+ * @param {Partial<Application> & Record<string, any>} [over]
  * @returns {Application}
  */
 const app = (id, status, over = {}) => ({
@@ -39,7 +39,10 @@ test("the first ever read seeds history but emits no updates", () => {
 
 test("a new application on a later read emits a 'new' update", () => {
   const { applications: prev } = diffApplications([], [app("1", "applied")], T1);
-  const { applications, updates } = diffApplications(prev, [...prev, app("2", "applied", { employer: "Initech" })], T2);
+  const { applications, updates } = diffApplications(prev, [...prev, app("2", "applied", {
+    employer: "Initech",
+    submittedOn: "2026-09-11",
+  })], T2);
   assert.equal(applications.length, 2);
   assert.equal(updates.length, 1);
   assert.equal(updates[0].kind, "new");
@@ -49,6 +52,37 @@ test("a new application on a later read emits a 'new' update", () => {
   assert.equal(updates[0].at, T2.toISOString());
   // Replay-stable id: no timestamp, so a re-read dedupes against the feed.
   assert.equal(updates[0].id, "waterlooworks:2:new");
+});
+
+test("a first-seen app is only 'new' when submitted within 7 days", () => {
+  const { applications: prev } = diffApplications([], [app("1", "applied")], T1);
+  const read = (over) =>
+    diffApplications(prev, [...prev, app("2", "applied", over)], T2);
+
+  // Old submissions — the page-2/3 flood — seed silently…
+  const old = read({ submittedOn: "2026-08-01" });
+  assert.equal(old.updates.length, 0);
+  const found = old.applications.find((a) => a.id === "waterlooworks:2");
+  // …but still store the app and seed its history.
+  assert.equal(found?.status, "applied");
+  assert.deepEqual(found?.history, [
+    { status: "applied", at: T2.toISOString() },
+  ]);
+
+  // Missing or malformed submittedOn reads as old — silent too.
+  assert.equal(read({}).updates.length, 0);
+  assert.equal(read({ submittedOn: "garbage" }).updates.length, 0);
+
+  // The 7-day boundary still counts as new — in either direction, since
+  // a same-day submission can parse to a time slightly after `now`.
+  const edge = read({ submittedOn: "2026-09-05T12:00:00Z" });
+  assert.equal(edge.updates.length, 1);
+  assert.equal(edge.updates[0].kind, "new");
+  const future = read({ submittedOn: "2026-09-19T12:00:00Z" });
+  assert.equal(future.updates.length, 1);
+  // One day past the boundary does not.
+  assert.equal(read({ submittedOn: "2026-09-04" }).updates.length, 0);
+  assert.equal(read({ submittedOn: "2026-09-20" }).updates.length, 0);
 });
 
 test("a status change appends history and emits a 'status' update", () => {
