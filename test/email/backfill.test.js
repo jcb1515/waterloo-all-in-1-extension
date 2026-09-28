@@ -20,7 +20,6 @@ import {
   checkNowDecision,
   doneFromResult,
   gmailOnInbox,
-  injectOnce,
   makeRunBox,
   makeRate,
   BF_MAX_PAGES,
@@ -77,19 +76,13 @@ test("gmailOnInbox: only the first inbox page", () => {
   assert.equal(gmailOnInbox("#search/in:inbox"), false);
 });
 
-test("injectOnce: the second copy returns false (no listeners)", () => {
-  const key = `test-${Date.now()}`;
-  assert.equal(injectOnce(key), true);
-  assert.equal(injectOnce(key), false);
-});
-
-test("checkNowDecision: own provider or 'email', else null", () => {
+test("checkNowDecision: only the tab's own provider answers", () => {
   const msg = { type: CHECK_NOW, source: "gmail", runId: "r1" };
   assert.deepEqual(checkNowDecision(msg, "gmail"), { accepted: true });
   assert.equal(checkNowDecision(msg, "outlook"), null);
-  assert.deepEqual(checkNowDecision({ ...msg, source: "email" }, "outlook"), {
-    accepted: true,
-  });
+  // "email" (and any other source) is nobody's tab — W1 sends gmail|outlook.
+  assert.equal(checkNowDecision({ ...msg, source: "email" }, "gmail"), null);
+  assert.equal(checkNowDecision({ ...msg, source: "email" }, "outlook"), null);
   assert.equal(checkNowDecision({ type: "other" }, "gmail"), null);
   assert.equal(checkNowDecision(null, "gmail"), null);
 });

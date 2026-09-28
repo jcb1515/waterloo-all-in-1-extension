@@ -1,24 +1,17 @@
 // Email setup blocks for the Sources card: the per-provider read toggles
 // (each asks for its own host group on click) and the per-provider check
-// status line with a "Check again now" button.
+// status line. The "Check now" button is W1's CheckNowButton on the
+// Sources tile — not duplicated here.
 // Moved from the old options Sources section — `save` writes the
 // sources.outlook settings slice via actions.saveSettings.
 
 import { useState } from "preact/hooks";
 import { Field, Toggle } from "../../options/bits.jsx";
-import {
-  OPTIONAL_PERMISSION_GROUPS,
-  requestSourceAccess,
-} from "../../core/permissions.js";
-import { IS_PREVIEW, send } from "../data.js";
-import { UI } from "../../core/messages.js";
+import { requestSourceAccess } from "../../core/permissions.js";
+import { IS_PREVIEW } from "../data.js";
 import { fmtAgo } from "../model/agenda.js";
 
 const PROVIDER_LABEL = { gmail: "Gmail", outlook: "Outlook" };
-const PROVIDER_HOME = {
-  gmail: "https://mail.google.com/mail/u/0/#inbox",
-  outlook: "https://outlook.office.com/mail/inbox",
-};
 
 /**
  * Two independent provider toggles under sources.outlook; each asks for
@@ -68,81 +61,15 @@ export function EmailProviders({ src, save }) {
  * Per-provider check status from sourceState.outlook.check[provider] (or,
  * until W1's writer hoists it, sourceState.outlook.state.check[provider]):
  * "Last checked N messages · <ago>", "Checking… N so far" while a run is in
- * flight, or "Not read yet — open Gmail/Outlook once". The button goes
- * through W1's UI.CHECK_NOW when that message exists; until then it pings
- * every open non-discarded tab of that provider with wa1:check-now and
- * shows the reply (accepted / not-on-page / signed-out) inline.
+ * flight, or "Not read yet — open Gmail/Outlook once". The "Check now"
+ * button lives on W1's Sources tile (CheckNowButton), not here.
  * @param {{src: any, st: any, now?: Date}} p
  */
 export function EmailBackfill({ src, st, now }) {
-  const [reply, setReply] = useState(/** @type {Record<string, string>} */ ({}));
   const check =
     (st && st.check) || ((st && st.state && st.state.check) || {});
   const enabled = ["gmail", "outlook"].filter((prov) => src[prov] !== false);
   if (!enabled.length) return null;
-
-  /** Force a read: UI.CHECK_NOW when wired, else wa1:check-now per tab. */
-  const checkNow = async (/** @type {string} */ prov) => {
-    if (IS_PREVIEW) return;
-    const runId = `${prov}-${Date.now().toString(36)}`;
-    const CHECK_NOW = /** @type {any} */ (UI).CHECK_NOW;
-    if (CHECK_NOW) {
-      send({ type: CHECK_NOW, source: prov }).catch(() => {});
-      setReply((r) => ({ ...r, [prov]: "Checking…" }));
-      return;
-    }
-    try {
-      const patterns = /** @type {Record<string, string[]>} */ (
-        OPTIONAL_PERMISSION_GROUPS
-      )[prov];
-      const tabs = patterns ? await chrome.tabs.query({ url: patterns }) : [];
-      let answered = false;
-      for (const t of tabs || []) {
-        if (t.id == null || t.discarded) continue;
-        try {
-          const res = await chrome.tabs.sendMessage(t.id, {
-            type: "wa1:check-now",
-            source: prov,
-            runId,
-          });
-          if (res && res.accepted) {
-            setReply((r) => ({ ...r, [prov]: "Checking…" }));
-          } else {
-            const why = res && res.reason;
-            setReply((r) => ({
-              ...r,
-              [prov]:
-                why === "not-on-page"
-                  ? `Open ${PROVIDER_LABEL[prov]} to the inbox first`
-                  : why === "signed-out"
-                    ? `Sign in to ${PROVIDER_LABEL[prov]} first`
-                    : why === "disabled"
-                      ? `${PROVIDER_LABEL[prov]} reading is off`
-                      : "Not available on that page",
-            }));
-          }
-          answered = true;
-          break;
-        } catch {
-          /* tab has no listener — try the next one */
-        }
-      }
-      if (!answered) {
-        setReply((r) => ({ ...r, [prov]: `No ${PROVIDER_LABEL[prov]} tab is open` }));
-      }
-    } catch {
-      /* no tabs API (preview) */
-    }
-  };
-
-  const openTab = (/** @type {string} */ prov) => {
-    if (IS_PREVIEW) return;
-    try {
-      chrome.tabs.create({ url: PROVIDER_HOME[prov] });
-    } catch {
-      window.open(PROVIDER_HOME[prov], "_blank");
-    }
-  };
 
   return (
     <div class="src-sub">
@@ -154,39 +81,22 @@ export function EmailBackfill({ src, st, now }) {
         const c = check[prov];
         const running = c && c.running;
         return (
-          <div class="mail-backfill" key={prov}>
-            <p class="source-detail">
-              <strong>{PROVIDER_LABEL[prov]}</strong>
-              {" — "}
-              {running ? (
-                <>Checking… {running.checked || 0} so far</>
-              ) : c ? (
-                <>
-                  Last checked {c.checked || 0} messages
-                  {" · "}
-                  {fmtAgo(c.at, now || new Date())}
-                  {c.ok === false && c.reason === "signed-out" ? " · signed out" : null}
-                </>
-              ) : (
-                `Not read yet — open ${PROVIDER_LABEL[prov]} once`
-              )}
-            </p>
-            <div class="source-actions">
-              <button type="button" class="btn btn-sm" onClick={() => checkNow(prov)}>
-                Check again now
-              </button>
-              {!c ? (
-                <button
-                  type="button"
-                  class="btn btn-sm btn-ghost"
-                  onClick={() => openTab(prov)}
-                >
-                  Open {PROVIDER_LABEL[prov]}
-                </button>
-              ) : null}
-            </div>
-            {reply[prov] ? <p class="help">{reply[prov]}</p> : null}
-          </div>
+          <p class="source-detail" key={prov}>
+            <strong>{PROVIDER_LABEL[prov]}</strong>
+            {" — "}
+            {running ? (
+              <>Checking… {running.checked || 0} so far</>
+            ) : c ? (
+              <>
+                Last checked {c.checked || 0} messages
+                {" · "}
+                {fmtAgo(c.at, now || new Date())}
+                {c.ok === false && c.reason === "signed-out" ? " · signed out" : null}
+              </>
+            ) : (
+              `Not read yet — open ${PROVIDER_LABEL[prov]} once`
+            )}
+          </p>
         );
       })}
     </div>

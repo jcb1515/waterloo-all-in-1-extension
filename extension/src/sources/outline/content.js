@@ -14,6 +14,8 @@
 //     tab re-issues exactly that URL once;
 //   - never throw into the page.
 
+import { guardInstance } from "../../capture/guard.js";
+
 export const FETCH_TIMEOUT_MS = 15000;
 export const ROUND_GAP_MS = 6 * 60 * 60 * 1000;
 export const ROUND_RETRY_MS = 5 * 60 * 1000;
@@ -242,10 +244,9 @@ async function runRound(env, round) {
 }
 
 (() => {
-  // Re-injected by W1 on install/update/startup — the second copy returns.
-  const g = /** @type {any} */ (globalThis);
-  if (g.__wa1_outline) return;
-  g.__wa1_outline = true;
+  // Re-injected by W1 on install/update/startup — a live copy answers the
+  // ping and we return; an orphan is superseded and runs teardown.
+  if (!guardInstance("outline-content", teardown)) return;
   // The fetch round runs on any outline.uwaterloo.ca tab; the snapshotter
   // only on /viewer/view/ pages (the real outlines).
   if (typeof location === "undefined" || location.hostname !== "outline.uwaterloo.ca") {
@@ -311,10 +312,13 @@ async function runRound(env, round) {
     loaded = true;
     send();
   };
+  /** @type {MutationObserver|null} */
+  let snapObserver = null;
   if (isViewer) {
     if (document.readyState === "complete") start();
     else window.addEventListener("load", start);
-    new MutationObserver(schedule).observe(document.documentElement, {
+    snapObserver = new MutationObserver(schedule);
+    snapObserver.observe(document.documentElement, {
       childList: true,
       subtree: true,
       characterData: true,
@@ -376,23 +380,37 @@ async function runRound(env, round) {
     outlineRound(env).catch(() => {});
   };
   tick(); // this load
-  setInterval(tick, TICK_MS); // while the tab stays open
-  try {
-    document.addEventListener("freeze", () => {
-      frozenNow = true;
-      outlineFreeze();
-    });
-    document.addEventListener("resume", () => {
+  const tickTimer = setInterval(tick, TICK_MS); // while the tab stays open
+  const onFreeze = () => {
+    frozenNow = true;
+    outlineFreeze();
+  };
+  const onResume = () => {
+    frozenNow = false;
+    tick();
+  };
+  const onVis = () => {
+    if (document.visibilityState === "visible") {
       frozenNow = false;
       tick();
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        frozenNow = false;
-        tick();
-      }
-    });
+    }
+  };
+  try {
+    document.addEventListener("freeze", onFreeze);
+    document.addEventListener("resume", onResume);
+    document.addEventListener("visibilitychange", onVis);
   } catch {
     /* older runtimes lack the Page Lifecycle events */
+  }
+
+  /** Superseded by a re-injected copy — drop timers, observer, listeners. */
+  function teardown() {
+    if (timer !== undefined) clearTimeout(timer);
+    clearInterval(tickTimer);
+    if (snapObserver) snapObserver.disconnect();
+    window.removeEventListener("load", start);
+    document.removeEventListener("freeze", onFreeze);
+    document.removeEventListener("resume", onResume);
+    document.removeEventListener("visibilitychange", onVis);
   }
 })();

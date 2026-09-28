@@ -17,6 +17,8 @@
 //     background; the adapter persists at most a per-message date snippet.
 
 import { MSG } from "../../core/contract.js";
+import { CHECK } from "../../core/messages.js";
+import { guardInstance } from "../../capture/guard.js";
 import { extractFor } from "./dom.js";
 import {
   atomRound,
@@ -33,20 +35,18 @@ import {
   checkNowDecision,
   doneFromResult,
   gmailOnInbox,
-  injectOnce,
   BF_TICK_MS,
   BF_LOCK_PREFIX,
   BF_FAIL_PREFIX,
-  CHECK_NOW,
-  CHECK_DONE,
 } from "./backfill.js";
 import { gmailBackfill } from "./gmail-backfill.js";
 import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
 
 (() => {
   // W1 re-injects content scripts into open tabs on install/update/startup —
-  // the second copy returns before registering anything.
-  if (!injectOnce("email")) return;
+  // a live copy answers the ping and we return; an orphan is superseded and
+  // runs teardown. See src/capture/guard.js.
+  if (!guardInstance("email-content", teardown)) return;
 
   const DEBOUNCE_MS = 2000;
   const BODY_CAP = 2 * 1024 * 1024;
@@ -54,6 +54,18 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
   let lastBody = null;
   /** @type {number|undefined} */
   let timer;
+  /** @type {number|undefined} */
+  let atomTimer;
+  /** @type {number|undefined} */
+  let tickTimer;
+  /** @type {MutationObserver|null} */
+  let observer = null;
+  /** @type {any} check-now listener (top window only) */
+  let onCheckNow;
+  /** @type {any} settings-change listener (top window only) */
+  let onSettings;
+  /** @type {any} automatic-read tick (top window only) */
+  let autoTick;
 
   const send = () => {
     try {
@@ -89,7 +101,8 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
 
   const start = () => {
     send();
-    new MutationObserver(schedule).observe(document.documentElement, {
+    observer = new MutationObserver(schedule);
+    observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
       characterData: true,
@@ -145,7 +158,7 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
       atomRound(env).catch(() => {});
     };
     atomTick(); // this load
-    setInterval(atomTick, ATOM_GAP_MS); // while the tab stays open
+    atomTimer = setInterval(atomTick, ATOM_GAP_MS); // while the tab stays open
   }
 
   /* ------------------------- automatic read -------------------------- */
@@ -259,50 +272,54 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
     // Automatic cadence: on load, every 30 min, and on hashchange to the
     // inbox (Gmail). backfillRound itself enforces the 30-min gate, the
     // retry window and the cross-tab lock for these non-forced runs.
-    const tick = () => {
+    autoTick = () => {
       if (!onInbox()) return;
       box.run(false).catch(() => {});
     };
-    tick();
-    setInterval(tick, BF_TICK_MS);
-    addEventListener("hashchange", tick);
+    autoTick();
+    tickTimer = setInterval(autoTick, BF_TICK_MS);
+    addEventListener("hashchange", autoTick);
 
     // Check-now (panel → background → tab): reply accepted/failed at once,
     // run a forced read (bypasses the 30-min gate, the lock and the passive
     // unchanged-snapshot dedupe — never the rate cap or the kill switch),
     // then report check-done. A run already in flight is joined.
-    try {
-      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-        const decision = checkNowDecision(msg, provider, {
-          onPage: onInbox,
-          disabled: () => curSettings != null && curSettings[provider] === false,
-          hasToken:
-            provider === "outlook"
-              ? () => outlookToken(lsTokenValues(), Date.now()) != null
-              : undefined,
-        });
-        if (decision == null) return false;
-        sendResponse(decision);
-        if (decision.accepted) {
-          const source = String(msg.source || "");
-          const runId = String(msg.runId || "");
-          lastBody = null;
-          send(); // re-extract the visible list — dedupe bypassed
-          box
-            .run(true)
-            .then((res) => {
-              sendMessage({
-                type: CHECK_DONE,
-                source,
-                provider,
-                runId,
-                ...doneFromResult(res),
-              });
-            })
-            .catch(() => {});
-        }
-        return false;
+    /**
+     * @param {any} msg @param {any} _sender @param {(r: any) => void} sendResponse
+     */
+    onCheckNow = (msg, _sender, sendResponse) => {
+      const decision = checkNowDecision(msg, provider, {
+        onPage: onInbox,
+        disabled: () => curSettings != null && curSettings[provider] === false,
+        hasToken:
+          provider === "outlook"
+            ? () => outlookToken(lsTokenValues(), Date.now()) != null
+            : undefined,
       });
+      if (decision == null) return false;
+      sendResponse(decision);
+      if (decision.accepted) {
+        const source = String(msg.source || "");
+        const runId = String(msg.runId || "");
+        lastBody = null;
+        send(); // re-extract the visible list — dedupe bypassed
+        box
+          .run(true)
+          .then((res) => {
+            sendMessage({
+              type: CHECK.DONE,
+              source,
+              provider,
+              runId,
+              ...doneFromResult(res),
+            });
+          })
+          .catch(() => {});
+      }
+      return false;
+    };
+    try {
+      chrome.runtime.onMessage.addListener(onCheckNow);
     } catch {
       /* older runtimes */
     }
@@ -310,19 +327,20 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
     // Settings changes: a provider off flag stops reads at the next tick;
     // any other filter change replays this tab's in-memory cache so the new
     // rules re-extract what was already read — no network.
+    onSettings = (/** @type {any} */ changes, /** @type {any} */ area) => {
+      if (area !== "local") return;
+      const s = /** @type {any} */ (changes && changes.wa1Settings);
+      if (!s) return;
+      const before = (((s.oldValue || {}).sources || {}).outlook || {});
+      const after = (((s.newValue || {}).sources || {}).outlook || {});
+      curSettings = after;
+      if (after[provider] === false) return; // reads stop at the next tick
+      if (JSON.stringify(before) !== JSON.stringify(after) && cache) {
+        replayCache({ ...env, now: new Date() }, impl);
+      }
+    };
     try {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== "local") return;
-        const s = /** @type {any} */ (changes && changes.wa1Settings);
-        if (!s) return;
-        const before = (((s.oldValue || {}).sources || {}).outlook || {});
-        const after = (((s.newValue || {}).sources || {}).outlook || {});
-        curSettings = after;
-        if (after[provider] === false) return; // reads stop at the next tick
-        if (JSON.stringify(before) !== JSON.stringify(after) && cache) {
-          replayCache({ ...env, now: new Date() }, impl);
-        }
-      });
+      chrome.storage.onChanged.addListener(onSettings);
     } catch {
       /* no storage API */
     }
@@ -331,23 +349,54 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
   // Page Lifecycle: freeze drops in-flight fetches/runs (generation);
   // resume/visible continues where the tab left off. A check-now that
   // joined a frozen run resolves stale — check-done reports "timeout".
-  try {
-    document.addEventListener("freeze", () => {
-      frozenNow = true;
-      atomFreeze();
-      backfillFreeze();
-    });
-    document.addEventListener("resume", () => {
+  const onFreeze = () => {
+    frozenNow = true;
+    atomFreeze();
+    backfillFreeze();
+  };
+  const onResume = () => {
+    frozenNow = false;
+    atomTick(); // the atom env re-checks its own gap — cheap
+  };
+  const onVis = () => {
+    if (document.visibilityState === "visible") {
       frozenNow = false;
-      atomTick(); // the atom env re-checks its own gap — cheap
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        frozenNow = false;
-        atomTick();
-      }
-    });
+      atomTick();
+    }
+  };
+  try {
+    document.addEventListener("freeze", onFreeze);
+    document.addEventListener("resume", onResume);
+    document.addEventListener("visibilitychange", onVis);
   } catch {
     /* older runtimes lack the Page Lifecycle events */
+  }
+
+  /**
+   * Everything this instance wired — run by guardInstance's supersede when
+   * a re-injected copy takes over (our chrome.runtime is dead by then).
+   */
+  function teardown() {
+    if (timer !== undefined) clearTimeout(timer);
+    if (atomTimer !== undefined) clearInterval(atomTimer);
+    if (tickTimer !== undefined) clearInterval(tickTimer);
+    if (observer) observer.disconnect();
+    try {
+      removeEventListener("load", start);
+      removeEventListener("hashchange", send);
+      removeEventListener("popstate", send);
+      if (autoTick) removeEventListener("hashchange", autoTick);
+    } catch {
+      /* dead context */
+    }
+    try {
+      if (onCheckNow) chrome.runtime.onMessage.removeListener(onCheckNow);
+      if (onSettings) chrome.storage.onChanged.removeListener(onSettings);
+    } catch {
+      /* dead context */
+    }
+    document.removeEventListener("freeze", onFreeze);
+    document.removeEventListener("resume", onResume);
+    document.removeEventListener("visibilitychange", onVis);
   }
 })();
