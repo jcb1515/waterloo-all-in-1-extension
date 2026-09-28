@@ -45,7 +45,7 @@ export function fmtTime(d) {
   const x = new Date(d);
   let h = x.getHours();
   const m = x.getMinutes();
-  const suffix = h >= 12 ? "pm" : "am";
+  const suffix = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
   return `${h}:${String(m).padStart(2, "0")} ${suffix}`;
 }

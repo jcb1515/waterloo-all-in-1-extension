@@ -1,9 +1,12 @@
 // @ts-check
-// One item row: org colour bar, done toggle, type icon, title, meta with a
-// SourceBadge, and a right column that always carries a date —
-//  - exam/interview/deadline rows get the key-event block (date + time + room);
-//  - rows outside a day group get the compact date block ("Thu Oct 8 · 7:00 pm");
-//  - rows under a day-group header may show the bare time.
+// One item row: org colour bar, done toggle, type icon, full-width title,
+// a date line under the title, meta with a SourceBadge, and a slim right
+// column (status/countdown, plus a bare time only for non-key rows inside a
+// day group).
+//  - key events (exam/interview/anything with a dueAt) get the bold date +
+//    time + room line — always with the date, even inside a day group;
+//  - other rows outside a day group get the same line, regular weight;
+//  - rows under a day-group header may show the bare time on the right.
 // Old callers that still pass {actions, done, clashes, items} keep working.
 
 import { rowView } from "../panel/model/agenda.js";
@@ -11,7 +14,7 @@ import { orgStyle } from "./colors.js";
 import { typeIcon, CheckIcon, MapPinIcon, CircleDashedIcon } from "./icons.jsx";
 import { SourceBadge } from "./SourceBadge.jsx";
 import { DateBlock } from "./DateBlock.jsx";
-import { KEY_TYPES } from "./dateLabel.js";
+import { isKeyEvent } from "./dateLabel.js";
 
 export const TYPE_LABELS = {
   deadline: "Deadline",
@@ -73,7 +76,7 @@ export function ItemRow({
   const Icon = typeIcon(item.type);
   const dimmed = done || item.status === "done" || item.status === "submitted";
   const checkable = !NO_CHECK.has(item.type) && (onToggleDone || (actions && actions.toggleDone));
-  const key = KEY_TYPES.has(item.type);
+  const key = isKeyEvent(item);
   const clash = clashes && clashes.length ? clashes[0] : null;
   const clashNames = clash
     ? clash.itemIds
@@ -131,6 +134,7 @@ export function ItemRow({
           ) : null}
           {item.title}
         </span>
+        {key || !inDayGroup ? <DateBlock item={item} /> : null}
         <span class="item-meta">
           {item.org && !hideOrg ? <span class="chip chip-org">{item.org}</span> : null}
           <SourceBadge item={item} />
@@ -177,9 +181,7 @@ export function ItemRow({
         ) : null}
         {v.lateLabel && !dimmed ? <span class="item-late">{v.lateLabel}</span> : null}
         {v.countdown && !v.lateLabel ? <span class="item-countdown">{v.countdown}</span> : null}
-        {key || !inDayGroup ? (
-          <DateBlock item={item} />
-        ) : v.timeLabel ? (
+        {!key && inDayGroup && v.timeLabel ? (
           <span class="item-time">{v.timeLabel}</span>
         ) : null}
       </span>

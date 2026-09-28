@@ -11,6 +11,8 @@ import {
   toApplications,
   interviewItems,
   eventItems,
+  scheduleItems,
+  dashboardEventItems,
   postingItems,
   interviewDetailItems,
   linkItems,
@@ -112,6 +114,87 @@ test("eventItems maps registration rows to event Items", () => {
   assert.equal(first.status, "open");
   assert.equal(first.meta.registrationStatus, "Attended");
   assert.equal(items[2].status, "cancelled");
+});
+
+test("scheduleItems maps dashboard rows, reusing interview ids per job", () => {
+  const { schedule } = parsers.parseDashboard(doc("dashboard-live.html"));
+  const items = scheduleItems(schedule.rows, [], NOW);
+  assert.equal(items.length, 2);
+  const interview = items[0];
+  assert.equal(interview.id, "waterlooworks:interview:488135");
+  assert.equal(interview.type, "interview");
+  assert.equal(
+    interview.title,
+    "Interview: Analog/Mixed-Signal Engineering Co-op"
+  );
+  assert.equal(interview.startAt, "2026-10-02T20:00:00.000Z");
+  assert.equal(interview.endAt, "2026-10-02T20:30:00.000Z");
+  assert.equal(interview.status, "open");
+  assert.equal(interview.meta.jobId, "488135");
+  assert.equal(interview.meta.status, "Confirmed");
+  // The employer resolves from stored applications.
+  const withApps = scheduleItems(
+    schedule.rows,
+    [{ jobId: "488135", employer: "Globex" }],
+    NOW
+  );
+  assert.equal(withApps[0].org, "Globex");
+  // Non-interview entries become plain events under their own key.
+  assert.equal(items[1].type, "event");
+  assert.equal(items[1].title, "Co-op Advising Appointment");
+  assert.match(items[1].id, /^waterlooworks:schedule:[0-9a-f]+$/);
+  // A jobless interview row still types as interview (stable hashed id).
+  const [jobless] = scheduleItems(
+    [{ ...schedule.rows[0], jobId: undefined, jobTitle: undefined }],
+    [],
+    NOW
+  );
+  assert.match(jobless.id, /^waterlooworks:schedule-interview:[0-9a-f]+$/);
+  assert.equal(jobless.type, "interview");
+});
+
+test("dashboardEventItems keeps only rows the student registered for", () => {
+  const { events } = parsers.parseDashboard(doc("dashboard-live.html"));
+  // The fixture models the Career Centre's public listing — "Registration
+  // Required" and no-badge rows are invites, not the student's plans. Only
+  // the synthetic "Registered" row becomes an item.
+  const items = dashboardEventItems(events.rows, NOW);
+  assert.equal(items.length, 1);
+  const kept = items[0];
+  assert.match(kept.id, /^waterlooworks:event:[0-9a-f]+$/);
+  assert.equal(kept.type, "event");
+  assert.equal(kept.title, "Mock Interview Workshop");
+  assert.equal(kept.org, "Career Centre Events");
+  assert.equal(kept.startAt, "2026-09-29T22:00:00.000Z");
+  assert.equal(kept.endAt, "2026-09-29T23:30:00.000Z");
+  assert.equal(kept.location, "TC 3317");
+  assert.equal(kept.meta.registrationStatus, "Registered");
+});
+
+test("dashboardEventItems drops required / not-registered / waitlist rows", () => {
+  const base = { startAt: "2026-09-29T14:00:00.000Z", name: "E", category: "C" };
+  for (const registration of [
+    "Registration Required",
+    "Not Registered",
+    "Waitlist",
+    "Waitlisted",
+    "required",
+    undefined,
+    "",
+  ]) {
+    assert.equal(
+      dashboardEventItems([{ ...base, registration }], NOW).length,
+      0,
+      `"${registration}" must not emit an item`
+    );
+  }
+  for (const registration of ["Registered", "Registered — seat confirmed"]) {
+    assert.equal(
+      dashboardEventItems([{ ...base, registration }], NOW).length,
+      1,
+      `"${registration}" must emit an item`
+    );
+  }
 });
 
 test("postingItems only emits a deadline while it is still in the future", () => {

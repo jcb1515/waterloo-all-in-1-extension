@@ -733,6 +733,11 @@ export function previewState(nowD = new Date(), variants = {}) {
       complete: true,
       failures: 0,
       itemCount: 24,
+      // Per-scope last-good-read stamps (written by the ingest). The
+      // portal:schedule read is 20 days old — older than the single
+      // portal-open row's refreshDays 14 — so it counts "done" on the
+      // setup card AND earns a "Needs a visit" nudge.
+      scopeOkAt: { "portal:schedule": iso(now - 20 * DAY) },
       state: {},
     },
     gcal: {
@@ -1298,6 +1303,15 @@ export function previewState(nowD = new Date(), variants = {}) {
   // reads OK, Discord's channel probe failed, everything else is a mix of
   // readStats-satisfied and not-yet-checked rows.
   const probes = {
+    learn: {
+      // Marks learn-home read on the "Get set up" card.
+      "learn-home": {
+        counts: { courseTiles: 5, navBars: 1 },
+        ok: true,
+        hints: [],
+        at: iso(now - 30 * MIN),
+      },
+    },
     waterlooworks: {
       applications: {
         counts: { listRows: 25, interviews: 3, deadlines: 2 },

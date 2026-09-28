@@ -3,7 +3,7 @@
 import { useRef, useState } from "preact/hooks";
 import { Card } from "../bits.jsx";
 import { IS_PREVIEW, query, send } from "../../panel/data.js";
-import { SETTINGS_KEY, setLocal } from "../../core/store.js";
+import { enqueue, SETTINGS_KEY } from "../../core/store.js";
 import { UI } from "../../core/messages.js";
 import {
   applyBackup,
@@ -289,10 +289,15 @@ export function AboutSection({ state }) {
         : (await chrome.storage.local.get("userState")).userState,
     });
     if (!IS_PREVIEW) {
-      await setLocal(SETTINGS_KEY, writes.settings);
-      await setLocal("userState", writes.userState);
-      await setLocal("outlineFiles", writes.outlineFiles);
-      if (writes.projects) await setLocal("projects", writes.projects);
+      // One atomic write inside the store queue — four separate setLocals
+      // could interleave with a sync write mid-import.
+      const all = {
+        [SETTINGS_KEY]: writes.settings,
+        userState: writes.userState,
+        outlineFiles: writes.outlineFiles,
+        ...(writes.projects ? { projects: writes.projects } : {}),
+      };
+      await enqueue(() => chrome.storage.local.set(all));
       await send({ type: UI.MANUAL_SET, items: writes.manualItems });
     }
     setPending(null);

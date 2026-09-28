@@ -5,6 +5,20 @@
 // complete=0, so observe.parse dropped them).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const CONTENT_JS = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "extension",
+  "src",
+  "sources",
+  "waterlooworks",
+  "content.js"
+);
 
 const URL = "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm";
 const realSetTimeout = globalThis.setTimeout;
@@ -114,6 +128,25 @@ test("already-complete page schedules the resend at import time", async () => {
     assert.match(page.sent[1].payload.body, /data-wa1-complete="1"/);
   } finally {
     page.restore();
+  }
+});
+
+test("the snapshot selector covers the live dashboard's date anchors", () => {
+  // Dashboard day headings live in <strong> and the "Rank and Match" notice
+  // in .orbis-posting-actions — outside the original h1-h4/table/dl/.label
+  // set, so the selector must name them or the snapshot loses those modules.
+  const src = readFileSync(CONTENT_JS, "utf8");
+  for (const sel of [
+    "h1",
+    "table",
+    "dl",
+    ".label",
+    ".control-label",
+    ".field-label",
+    "strong",
+    ".orbis-posting-actions",
+  ]) {
+    assert.ok(src.includes(`"${sel}"`), `OBSERVE_SEL missing ${sel}`);
   }
 });
 

@@ -43,6 +43,30 @@ const SOURCE_VARS = /** @type {Record<string, string>} */ ({
 
 const EMAIL_PROVIDERS = new Set(["gmail", "outlook"]);
 
+// Monogram for the source icon tile (Sources view). "@" = the shared
+// email adapter (Outlook + Gmail).
+const SOURCE_GLYPHS = /** @type {Record<string, string>} */ ({
+  learn: "L",
+  portal: "P",
+  outline: "O",
+  waterlooworks: "W",
+  discord: "D",
+  gmail: "@",
+  outlook: "@",
+  gcal: "G",
+  manual: "M",
+});
+
+/** The source colour as a CSS var reference ("var(--src-learn)"). @param {string} id */
+export function sourceColorVar(id) {
+  return SOURCE_VARS[id] || "var(--text-3)";
+}
+
+/** The monogram letter for a source icon tile. @param {string} id */
+export function sourceGlyph(id) {
+  return SOURCE_GLYPHS[id] || (SOURCE_LABELS[id] || id || "?").slice(0, 1).toUpperCase();
+}
+
 /**
  * All source ids for an item, deduped and sorted by primary-source precedence.
  * Reads seenIn[{source, scope}] first, then item.source, then meta.provider.
@@ -109,6 +133,6 @@ export function sourceBadge(item) {
     label: labels[0],
     extra: uniqLabels.length - 1,
     title: uniqLabels.join(" · "),
-    color: SOURCE_VARS[primary] || "var(--text-3)",
+    color: sourceColorVar(primary),
   };
 }

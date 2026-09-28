@@ -168,3 +168,35 @@ test("CHECKLIST is a list of {id, label, how} entries", () => {
     assert.ok(item.id && item.label && item.how);
   }
 });
+
+test("CHECKLIST url/essential/refreshDays: exact values and invariants", () => {
+  const byId = Object.fromEntries(CHECKLIST.map((r) => [r.id, r]));
+  assert.equal(byId["channel"].url, "https://discord.com/channels/@me");
+  assert.equal(byId["channel"].essential, true);
+  assert.equal(byId["channel"].refreshDays, 3);
+  assert.equal(byId["events"].url, "https://discord.com/channels/@me");
+  assert.equal(byId["events"].essential, true);
+  assert.equal(byId["events"].refreshDays, 7);
+
+  // Every url is https on the source's own origin; ≤3 essential rows;
+  // essential implies url; refreshDays is a positive integer.
+  let essential = 0;
+  for (const r of CHECKLIST) {
+    if (r.url !== undefined) {
+      const u = new URL(r.url);
+      assert.equal(u.protocol, "https:", `${r.id} url must be https`);
+      assert.equal(u.hostname, "discord.com", `${r.id} url must stay on Discord`);
+    }
+    if (r.essential) {
+      essential++;
+      assert.ok(r.url, `${r.id} is essential but has no url`);
+    }
+    if (r.refreshDays !== undefined) {
+      assert.ok(
+        Number.isInteger(r.refreshDays) && r.refreshDays > 0,
+        `${r.id} refreshDays must be a positive integer`
+      );
+    }
+  }
+  assert.ok(essential <= 3, `too many essential rows: ${essential}`);
+});

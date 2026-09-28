@@ -39,6 +39,30 @@ test("detectPage identifies each page kind", () => {
   assert.equal(parsers.detectPage(doc("applications-missing.html")), "unknown");
 });
 
+test("detectPage recognises the dashboard by URL and by structure", () => {
+  const url = "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm";
+  assert.equal(
+    parsers.detectPage(doc("dashboard-live.html"), { url }),
+    "dashboard"
+  );
+  // The suffix-less URL and the /myAccount root render the same page.
+  assert.equal(
+    parsers.detectPage(doc("dashboard-live.html"), {
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/dashboard",
+    }),
+    "dashboard"
+  );
+  assert.equal(
+    parsers.detectPage(doc("dashboard-live.html"), {
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/",
+    }),
+    "dashboard"
+  );
+  // Structure alone detects it too — the live module markers are unique.
+  assert.equal(parsers.detectPage(doc("dashboard-live.html")), "dashboard");
+  assert.equal(parsers.detectPage(doc("dashboard-snapshot.html")), "dashboard");
+});
+
 // --- applications grid ------------------------------------------------------
 
 test("parseApplications maps columns by label, not position", () => {
@@ -230,6 +254,71 @@ test("parseRankings reads the closed state", () => {
   assert.match(rankings.note, /not open at this time/);
 });
 
+// --- dashboard ---------------------------------------------------------------
+
+test("parseDashboard reads schedule, events, counts and the rankings notice", () => {
+  // The full-page module markup and the flattened content.js snapshot parse
+  // identically — the day scan is document-order based.
+  for (const name of ["dashboard-live.html", "dashboard-snapshot.html"]) {
+    const res = parsers.parseDashboard(doc(name));
+    assert.equal(res.ok, true, name);
+    // "Your Upcoming Schedule": the day lives in the <strong> above the table.
+    assert.equal(res.schedule.tables, 1);
+    assert.equal(res.schedule.rows.length, 2);
+    assert.deepEqual(res.schedule.rows[0], {
+      dayText: "Friday, October 2, 2026",
+      date: "2026-10-02",
+      startAt: "2026-10-02T20:00:00.000Z", // 4:00 PM Toronto (EDT)
+      endAt: "2026-10-02T20:30:00.000Z",
+      entryType: "Interview",
+      name: "Interview for Analog/Mixed-Signal Engineering Co-op (488135)",
+      jobId: "488135",
+      jobTitle: "Analog/Mixed-Signal Engineering Co-op",
+      status: "Confirmed",
+      conflicts: "0",
+    });
+    assert.equal(res.schedule.rows[1].entryType, "Appointment");
+    assert.equal(res.schedule.rows[1].startAt, "2026-10-02T15:00:00.000Z");
+    assert.equal(res.schedule.rows[1].jobId, undefined);
+    // "Upcoming Events / Workshops": the day is each table's colspan'd th.
+    assert.equal(res.events.tables, 2);
+    assert.equal(res.events.rows.length, 6);
+    assert.deepEqual(res.events.rows[0], {
+      dayText: "Monday, September 28, 2026",
+      date: "2026-09-28",
+      startAt: "2026-09-28T15:30:00.000Z", // 11:30 AM Toronto (EDT)
+      endAt: "2026-09-28T17:30:00.000Z",
+      category: "Employer Information Sessions",
+      name: "Initech Corp | - IN-PERSON Information Session with Initech",
+      location: "Tatham Centre 2218",
+      registration: "Registration Required",
+    });
+    assert.equal(res.events.rows[4].startAt, "2026-09-29T20:00:00.000Z");
+    assert.equal(res.events.rows[4].location, undefined);
+    // The synthetic "Registered" row — the only dashboard event the calendar
+    // should keep (map.js filters the public listing).
+    assert.equal(res.events.rows[5].name, "Mock Interview Workshop");
+    assert.equal(res.events.rows[5].registration, "Registered");
+    assert.equal(res.events.rows[5].startAt, "2026-09-29T22:00:00.000Z");
+    assert.equal(res.events.rows[5].endAt, "2026-09-29T23:30:00.000Z");
+    assert.equal(res.newMessages, 2);
+    assert.equal(res.webcamAppointments, 0);
+    assert.deepEqual(res.rankings, {
+      term: "2027 - Winter",
+      open: false,
+      note: "Rankings are not open at this time. Visit the calendar to see when rankings will be open.",
+    });
+  }
+});
+
+test("an interview detail page is not mistaken for dashboard events", () => {
+  // Slot tables also open with a single-th date row; the colspan guard plus
+  // the interview-detail check keep them out of parseDashboard.
+  const res = parsers.parseDashboard(doc("interview-detail-unbooked.html"));
+  assert.equal(res.events, undefined);
+  assert.equal(res.ok, false);
+});
+
 // --- parseAll -----------------------------------------------------------------
 
 test("parseAll returns every section present in one fragment", () => {
@@ -240,6 +329,16 @@ test("parseAll returns every section present in one fragment", () => {
   assert.equal(result.events.rows.length, 1);
   assert.equal(result.messages.rows.length, 1);
   assert.equal(result.posting, undefined);
+});
+
+test("parseAll emits the dashboard section for the live module markup", () => {
+  for (const name of ["dashboard-live.html", "dashboard-snapshot.html"]) {
+    const result = parsers.parseAll(doc(name), {
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
+    });
+    assert.equal(result.page, "dashboard", name);
+    assert.equal(result.dashboard.ok, true, name);
+  }
 });
 
 test("a snapshot containing the same table twice yields no duplicates", () => {

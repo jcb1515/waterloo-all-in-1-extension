@@ -96,6 +96,38 @@ test("dashboard counts event rows", () => {
   assert.deepEqual(probe(doc("events.html"), "").counts, { eventRows: 3 });
 });
 
+test("the live dashboard layout counts every module", () => {
+  const r = probe(
+    doc("dashboard-live.html"),
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(r.page, "dashboard");
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.counts, {
+    scheduleTables: 1,
+    scheduleRows: 2,
+    eventDays: 2,
+    eventRows: 6,
+    newMessages: 2,
+    webcamToday: 0,
+    rankingsNotice: 1,
+  });
+  assert.deepEqual(r.hints, []);
+  // The content.js snapshot of the same page reads the same way.
+  const snap = probe(doc("dashboard-snapshot.html"), "");
+  assert.deepEqual(snap.counts, r.counts);
+});
+
+test("a dashboard with nothing dated is not ok", () => {
+  const r = probe(
+    doc("applications-missing.html"),
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(r.page, "dashboard");
+  assert.equal(r.ok, false);
+  assert.ok(r.hints.length > 0);
+});
+
 test("messages inbox and message detail", () => {
   const inbox = probe(doc("messages.html"), `${WW}/messages.htm`);
   assert.equal(inbox.page, "messages");
@@ -155,6 +187,8 @@ test("probe output carries no page text — counts only", () => {
     "message-detail.html",
     "messages.html",
     "dashboard.html",
+    "dashboard-live.html",
+    "dashboard-snapshot.html",
   ]) {
     const r = probe(doc(name), "");
     const json = JSON.stringify(r);
@@ -166,6 +200,9 @@ test("probe output carries no page text — counts only", () => {
       "Casey Advisor",
       "confidential",
       "Virtual Room",
+      "Initech",
+      "Umbrella",
+      "Tatham",
     ]) {
       assert.ok(!json.includes(secret), `${name} leaked "${secret}"`);
     }
@@ -180,4 +217,52 @@ test("CHECKLIST is a list of {id, label, how} entries", () => {
   for (const item of CHECKLIST) {
     assert.ok(item.id && item.label && item.how);
   }
+});
+
+test("CHECKLIST url/essential/refreshDays: exact values and invariants", () => {
+  const byId = Object.fromEntries(CHECKLIST.map((r) => [r.id, r]));
+  assert.equal(
+    byId["applications"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm"
+  );
+  assert.equal(byId["applications"].essential, true);
+  assert.equal(byId["applications"].refreshDays, 7);
+  assert.equal(
+    byId["interviews"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm"
+  );
+  assert.equal(byId["interviews"].essential, true);
+  assert.equal(byId["interviews"].refreshDays, 3);
+  assert.equal(
+    byId["dashboard"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(byId["dashboard"].essential, true);
+  assert.equal(byId["dashboard"].refreshDays, 3);
+
+  // Every url is https on the source's own origin; ≤3 essential rows;
+  // essential implies url; refreshDays is a positive integer.
+  let essential = 0;
+  for (const r of CHECKLIST) {
+    if (r.url !== undefined) {
+      const u = new URL(r.url);
+      assert.equal(u.protocol, "https:", `${r.id} url must be https`);
+      assert.equal(
+        u.hostname,
+        "waterlooworks.uwaterloo.ca",
+        `${r.id} url must stay on WaterlooWorks`
+      );
+    }
+    if (r.essential) {
+      essential++;
+      assert.ok(r.url, `${r.id} is essential but has no url`);
+    }
+    if (r.refreshDays !== undefined) {
+      assert.ok(
+        Number.isInteger(r.refreshDays) && r.refreshDays > 0,
+        `${r.id} refreshDays must be a positive integer`
+      );
+    }
+  }
+  assert.ok(essential <= 3, `too many essential rows: ${essential}`);
 });

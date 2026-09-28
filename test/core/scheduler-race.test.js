@@ -1,8 +1,8 @@
 // @ts-check
-// Race coverage: a slow adapter sync() that resolves after an observe landed
-// must not write back stale state or items. doSync folds inside the same
-// per-source ingest queue as observes, and re-runs sync once when the
-// sourceState version moved underneath it.
+// Race coverage: the whole of doSync — state read, adapter call, fold, and
+// status writes — runs inside the source's ingest queue, so an observe for
+// the same source queues behind an in-flight sync and a slow sync can never
+// overwrite a newer observe.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -42,10 +42,13 @@ const SOURCE = "manual";
 const rawKey = `raw:${SOURCE}`;
 const seen = async () => (await chrome.storage.local.get("sourceState")).sourceState;
 
-test("a sync that resolves after an observe keeps the observe's state and items", async () => {
-  let calls = 0;
+const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
+
+test("an observe fired during a sync parses only after the sync's fold", async () => {
+  /** @type {string[]} */
+  const order = [];
   /** @type {any[]} */
-  const syncStates = [];
+  const parseStates = [];
   /** @type {() => void} */
   let release = () => {};
   const gate = new Promise((r) => {
@@ -56,30 +59,28 @@ test("a sync that resolves after an observe keeps the observe's state and items"
     id: SOURCE,
     intervalMinutes: 0,
     async sync(/** @type {any} */ ctx) {
-      calls++;
-      syncStates.push(ctx.state);
-      if (calls === 1) await gate; // held until the observe has landed
-      // Mimic a real adapter folding its private cache: items previously
-      // observed into state ride along with the sync items.
-      const cached = (ctx.state && ctx.state.cached) || [];
+      order.push("sync-call");
+      await gate; // held until the observe is already queued behind us
+      order.push("sync-return");
       return {
         items: [
-          ...cached,
           { id: "m:sync-1", type: "event", title: "Synced", org: "M", source: SOURCE, startAt: "2026-10-02T13:00:00.000Z" },
         ],
         complete: true,
         session: "signed-in",
-        state: { from: `sync${calls}`, cached },
+        state: { from: "sync1" },
       };
     },
     observe: {
-      async parse() {
+      async parse(/** @type {any} */ payload, /** @type {any} */ ctx) {
+        order.push("observe-parse");
+        parseStates.push(ctx.state);
         return {
           items: [{ id: "m:obs-1", type: "deadline", title: "Observed", org: "M", source: SOURCE, dueAt: "2026-10-03T23:59:00.000Z" }],
           scope: "m",
           complete: true,
           session: "signed-in",
-          state: { from: "obs", cached: [{ id: "m:obs-1", type: "deadline", title: "Observed", org: "M", source: SOURCE, dueAt: "2026-10-03T23:59:00.000Z" }] },
+          state: { from: "obs" },
         };
       },
     },
@@ -87,23 +88,31 @@ test("a sync that resolves after an observe keeps the observe's state and items"
   ADAPTERS.push(/** @type {any} */ (adapter));
   try {
     const syncP = runSync(SOURCE, "manual");
-    while (!calls) await new Promise((r) => setTimeout(r, 0));
+    while (!order.includes("sync-call")) await sleep(0);
 
-    // Observe lands while sync() is still in flight.
-    await handleObserved({ source: SOURCE, url: "https://x/", status: 200 });
+    // The observe queues behind the whole sync — it must not parse while
+    // the adapter call is still held.
+    const obsP = handleObserved({ source: SOURCE, url: "https://x/", status: 200 });
+    await sleep(30);
+    assert.deepEqual(order, ["sync-call"], "observe did not interleave mid-sync");
+
     release();
-    await syncP;
+    await Promise.all([syncP, obsP]);
+    assert.deepEqual(order, ["sync-call", "sync-return", "observe-parse"]);
 
-    assert.equal(calls, 2, "sync re-ran once on the fresh state");
-    assert.deepEqual(syncStates[1] && syncStates[1].from, "obs");
+    // The parse ran against the state the sync had just written.
+    assert.equal(parseStates[0] && parseStates[0].from, "sync1");
 
     const raw = (await chrome.storage.local.get(rawKey))[rawKey];
     const ids = raw.items.map((/** @type {any} */ i) => i.id).sort();
     assert.deepEqual(ids, ["m:obs-1", "m:sync-1"]);
 
+    // The observe's write is the later one, so it wins the stored state.
     const st = (await seen())[SOURCE];
-    assert.equal(st.state.from, "sync2", "folded the re-run result, not the stale one");
+    assert.equal(st.state.from, "obs");
     assert.equal(st.error, null);
+    // A real observe records when its scope last produced items.
+    assert.ok(st.scopeOkAt && st.scopeOkAt["m"], "scopeOkAt recorded for the observe's scope");
   } finally {
     ADAPTERS.splice(ADAPTERS.indexOf(/** @type {any} */ (adapter)), 1);
     store.clear();
