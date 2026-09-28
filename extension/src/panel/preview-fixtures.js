@@ -1137,7 +1137,7 @@ export function previewState(nowD = new Date(), variants = {}) {
         // ECE 2027 runs in custom mode (only its two targeted channels are
         // watched); WATonomous stays on automatic suggestions.
         channelTargets: { "ECE 2027": ["9814", "9816"] },
-        userId: "416820311045488640",
+        userId: "000000000000000001",
         roleIds: ["8804112233", "9102445566"],
         keywords: ["standup", "retro"],
       },
