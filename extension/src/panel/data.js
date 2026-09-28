@@ -29,6 +29,7 @@ const KEYS = [
   "lastAudit",
   "probes",
   "readStats",
+  "checkRuns",
   SETTINGS_KEY,
 ];
 
@@ -75,6 +76,7 @@ async function readAll() {
     lastAudit: isObj(all.lastAudit) ? all.lastAudit : null,
     probes: isObj(all.probes) ? all.probes : {},
     readStats: Array.isArray(all.readStats) ? all.readStats : [],
+    checkRuns: isObj(all.checkRuns) ? all.checkRuns : {},
     settings: mergeSettings(all[SETTINGS_KEY]),
   };
 }
@@ -96,6 +98,7 @@ function blank() {
     lastAudit: null,
     probes: {},
     readStats: [],
+    checkRuns: {},
     settings: mergeSettings(null),
   });
 }
@@ -132,6 +135,7 @@ export function useStore() {
         lastAudit: fx.lastAudit || null,
         probes: isObj(fx.probes) ? fx.probes : {},
         readStats: Array.isArray(fx.readStats) ? fx.readStats : [],
+        checkRuns: isObj(fx.checkRuns) ? fx.checkRuns : {},
         settings: mergeSettings(fx.settings),
       });
       return;
@@ -204,8 +208,16 @@ export function useStore() {
         }
         return setSettings(patch).catch(() => null);
       },
-      open(url) {
-        return send({ type: UI.OPEN, url });
+      open(url, opts) {
+        return send({
+          type: UI.OPEN,
+          url,
+          ...(opts && opts.newTab === true ? { newTab: true } : {}),
+        });
+      },
+      /** "Check now" on a source — background starts a checkRuns run. */
+      checkNow(source) {
+        return send({ type: UI.CHECK_NOW, source });
       },
       clearSource(source) {
         return send({ type: UI.CLEAR_SOURCE, source });

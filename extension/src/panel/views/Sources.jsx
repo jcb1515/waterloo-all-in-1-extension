@@ -4,8 +4,10 @@
 // views/sources slots (W3). Missing slots render an EmptyState.
 
 import { useMemo, useState } from "preact/hooks";
-import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
-import { sourceStatus } from "../model/sources.js";
+import { ADAPTERS, adapterForSource, stageForAdapter } from "../../core/registry.js";
+import { CHECK_SOURCES } from "../../sources/probes.js";
+import { sourceStatus, openTargetFor } from "../model/sources.js";
+import { CheckNowButton } from "../../ui/CheckNowButton.jsx";
 import { fmtAgo } from "../model/agenda.js";
 import { onboardingRows, nudges as visitNudges } from "../model/onboarding.js";
 import { OnboardingCard, NudgeCard } from "../../ui/Onboarding.jsx";
@@ -33,17 +35,31 @@ import {
 
 const TONE_BADGE = { ok: "badge-ok", warn: "badge-warn", danger: "badge-danger", muted: "badge-muted" };
 
-/** Open an external page in a new tab — click handlers only. */
-function openExternal(url) {
+/**
+ * The checkable SourceIds an adapter tile covers. Gmail and Outlook share
+ * the email adapter but check separately — they stay distinct SourceIds.
+ * @param {string} adapterId
+ * @returns {string[]}
+ */
+function checkSourceIds(adapterId) {
+  return Object.keys(CHECK_SOURCES).filter((s) => {
+    const a = adapterForSource(s);
+    return (a ? a.id : s) === adapterId;
+  });
+}
+
+/**
+ * Open an external page in a NEW tab — routes through UI.OPEN with
+ * newTab:true so the background uses chrome.tabs.create, never reuses.
+ * @param {any} actions @param {string|null} url
+ */
+function openSite(actions, url) {
+  if (!url) return;
   if (IS_PREVIEW) {
     window.open(url, "_blank");
     return;
   }
-  try {
-    chrome.tabs.create({ url });
-  } catch {
-    window.open(url, "_blank");
-  }
+  actions.open(url, { newTab: true });
 }
 
 const SEGMENTS = [
@@ -126,33 +142,49 @@ export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
                       : "not synced yet"
                 }`;
           const tone = enabled ? status.tone : "muted";
+          const checkIds = checkSourceIds(adapter.id);
           return (
-            <button
-              key={adapter.id}
-              type="button"
-              class={`src-tile${enabled ? "" : " off"}`}
-              role="listitem"
-              title={`${name} — ${status.label}`}
-              aria-label={`${name}: ${meta}. Status: ${status.label}`}
-              onClick={() => {
-                setSourceId(adapter.id);
-                setSegment("picked");
-              }}
-            >
-              <span class="src-tile-icon" style={{ "--src": sourceColorVar(adapter.id) }} aria-hidden="true">
-                {sourceGlyph(adapter.id)}
-              </span>
-              <span class="src-tile-text">
-                <span class="src-tile-name">{name}</span>
-                <span class="src-tile-meta tabular">{meta}</span>
-              </span>
-              <span
-                class={`src-status-dot tone-${tone}`}
-                title={status.label}
-                aria-label={`Status: ${status.label}`}
-                role="img"
-              />
-            </button>
+            <div key={adapter.id} class="src-tile-wrap" role="listitem">
+              <button
+                type="button"
+                class={`src-tile${enabled ? "" : " off"}`}
+                title={`${name} — ${status.label}`}
+                aria-label={`${name}: ${meta}. Status: ${status.label}`}
+                onClick={() => {
+                  setSourceId(adapter.id);
+                  setSegment("picked");
+                }}
+              >
+                <span class="src-tile-icon" style={{ "--src": sourceColorVar(adapter.id) }} aria-hidden="true">
+                  {sourceGlyph(adapter.id)}
+                </span>
+                <span class="src-tile-text">
+                  <span class="src-tile-name">{name}</span>
+                  <span class="src-tile-meta tabular">{meta}</span>
+                </span>
+                <span
+                  class={`src-status-dot tone-${tone}`}
+                  title={status.label}
+                  aria-label={`Status: ${status.label}`}
+                  role="img"
+                />
+              </button>
+              {enabled && checkIds.length ? (
+                <div class="src-tile-check">
+                  {checkIds.map((sid) => (
+                    <CheckNowButton
+                      key={sid}
+                      source={sid}
+                      state={state}
+                      actions={actions}
+                      now={now}
+                      compact
+                      named={checkIds.length > 1}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>
@@ -234,6 +266,7 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
   };
 
   const Setup = SETUP[adapter.id];
+  const checkIds = checkSourceIds(adapter.id);
 
   return (
     <div class="src-page">
@@ -257,6 +290,20 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
         {enabled ? <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span> : null}
         <Toggle label="Enabled" checked={enabled} onChange={onToggle} />
       </div>
+      {enabled && checkIds.length ? (
+        <div class="src-page-check">
+          {checkIds.map((sid) => (
+            <CheckNowButton
+              key={sid}
+              source={sid}
+              state={state}
+              actions={actions}
+              now={now}
+              named={checkIds.length > 1}
+            />
+          ))}
+        </div>
+      ) : null}
       {denied ? (
         <p class="help status-err">
           Permission wasn't granted — {adapter.label} stays off. The browser prompt asks for access
@@ -273,7 +320,7 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
           rows={onboard}
           onOpen={(entry) => {
             actions.markOnboardingOpened(`${entry.source}:${entry.row.id}`);
-            if (entry.row.url) actions.open(entry.row.url);
+            openSite(actions, openTargetFor(entry.source, entry.row));
           }}
           onDismiss={actions.dismissOnboarding}
         />
@@ -297,7 +344,7 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
         )
       ) : (
         <>
-          <NudgeCard nudges={visits} onOpen={openExternal} onSnooze={actions.snoozeNudge} />
+          <NudgeCard nudges={visits} onOpen={(url) => openSite(actions, url)} onSnooze={actions.snoozeNudge} />
           <Check sourceId={adapter.id} state={state} actions={actions} now={now} />
         </>
       )}

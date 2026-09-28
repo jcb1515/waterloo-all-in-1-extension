@@ -571,6 +571,28 @@ async function failObserve(source, payload, e) {
 }
 
 /**
+ * Stamp `scopeReadAt[scope] = now` on the adapter serving `sourceId`
+ * (sourceState is keyed by adapter id — gmail shares "outlook"). Check-now
+ * calls this on an ok run so essential checklist rows flip to "read"
+ * immediately, using the same capped map as the ingest path.
+ * @param {string} sourceId
+ * @param {Iterable<string>} scopes
+ * @param {Date|string|number} [now]
+ */
+export async function stampScopesRead(sourceId, scopes, now = new Date()) {
+  const adapter = adapterForSource(sourceId);
+  const id = adapter ? adapter.id : sourceId;
+  const nowIso = (now instanceof Date ? now : new Date(now)).toISOString();
+  await mutateKey("sourceState", (cur) => {
+    const prev = (cur || {})[id] || {};
+    return {
+      ...(cur || {}),
+      [id]: { ...prev, scopeReadAt: nextScopeOkAt(prev.scopeReadAt, scopes, nowIso) },
+    };
+  });
+}
+
+/**
  * Run `fn` over a source's stored adapter state inside its ingest queue,
  * then save.
  * @param {string} sourceId

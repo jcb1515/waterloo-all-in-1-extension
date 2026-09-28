@@ -42,4 +42,18 @@ export const UI = Object.freeze({
   PROBE_SNAPSHOT: "wa1:snapshot",
   /** panel -> background: { type } build the redacted check-readers report */
   CHECK_REPORT: "wa1:check-report",
+  /** panel -> background: { type, source } start a "Check now" run */
+  CHECK_NOW: "wa1:check-now-request",
+});
+
+/**
+ * The check-now protocol between the background and a site's content
+ * scripts. `source` is the SourceId (gmail and outlook stay distinct even
+ * though they share the "outlook" adapter).
+ */
+export const CHECK = Object.freeze({
+  /** background -> content script: { type, source, runId }; reply {accepted, reason?} */
+  NOW: "wa1:check-now",
+  /** content script -> background: { type, source, runId, ok, reason?, checked? } */
+  DONE: "wa1:check-done",
 });

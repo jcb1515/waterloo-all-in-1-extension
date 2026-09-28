@@ -1152,6 +1152,60 @@ html[data-theme="dark"] .src-tile-icon {
   color: var(--text-2);
 }
 
+/* check-now */
+.src-tile-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.src-tile-check {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: 0 var(--sp-3) 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.src-page-check {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.checknow {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.checknow.compact .checknow-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.checknow.compact .checknow-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.checknow-btn:disabled {
+  opacity: 0.7;
+}
+.checknow-spin {
+  display: inline-flex;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+.checknow-result {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.checknow-open {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+}
+
 /* Discord sweep controls on the Sources card. */
 .discord-controls {
   display: flex;
