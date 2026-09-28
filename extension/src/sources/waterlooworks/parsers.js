@@ -28,7 +28,10 @@ import {
   DASHBOARD_PATH_RE,
   DASHBOARD_CONTAINER_SELECTOR,
   DASH_ACTIONS_SELECTOR,
+  DASH_NOTICE_SELECTOR,
   DASH_RANKINGS_HEADING_RE,
+  SHORTLIST_MARKER_SELECTOR,
+  SHORTLIST_MARKER_RE,
   SCHEDULE_INTERVIEW_RE,
   NEW_MESSAGES_LABEL_RE,
   WEBCAM_LABEL_RE,
@@ -414,6 +417,7 @@ export function detectPage(doc, opts = {}) {
   if (isMessageDetail(doc)) return "message-detail";
   if (isPosting(doc)) return "posting";
   if (isRankings(doc)) return "rankings";
+  if (isShortlist(doc) && tableOfKind(doc, "shortlist")) return "shortlist";
   // Last: a recognised single-purpose page keeps its name; the dashboard is
   // the multi-module catch-all (its own tables match nothing above).
   if (isDashboard(doc, url)) return "dashboard";
@@ -501,6 +505,43 @@ export function parseMessages(doc) {
       from: obj.from || undefined,
       to: obj.to || undefined,
       subject: obj.subject || "",
+    });
+  }
+  return { ok: true, rows };
+}
+
+/**
+ * The page positively identifies as the Shortlist only through its own
+ * heading / breadcrumb / fieldset legend / active nav tab — a plain "Shortlist"
+ * tab LINK next to the job-search grid must not count, so generic job grids
+ * ("deadlines in the next 10 days", search results) yield nothing.
+ * @param {any} doc
+ */
+export function isShortlist(doc) {
+  try {
+    for (const el of doc.querySelectorAll(SHORTLIST_MARKER_SELECTOR)) {
+      if (SHORTLIST_MARKER_RE.test(cleanText(el))) return true;
+    }
+  } catch {
+    // garbage doc — not a shortlist
+  }
+  return false;
+}
+
+export function parseShortlist(doc) {
+  const table = isShortlist(doc) ? tableOfKind(doc, "shortlist") : null;
+  if (!table) return { ok: false, rows: [] };
+  const rows = [];
+  for (const obj of rowsAsObjects(table, "shortlist")) {
+    if (!obj.jobId) continue;
+    rows.push({
+      jobId: obj.jobId,
+      jobTitle: obj.jobTitle || "",
+      employer: obj.employer || "",
+      division: obj.division || undefined,
+      term: obj.term || undefined,
+      location: obj.location || undefined,
+      appDeadline: parseWwDate(obj.appDeadline || ""),
     });
   }
   return { ok: true, rows };
@@ -919,7 +960,8 @@ export function parseCoopDates(doc) {
  * @returns {{ok: boolean, schedule?: {tables: number, rows: any[]},
  *   events?: {tables: number, rows: any[]}, newMessages?: number,
  *   webcamAppointments?: number,
- *   rankings?: {term: string|undefined, open: boolean, note: string|undefined}}}
+ *   rankings?: {term: string|undefined, open: boolean, note: string|undefined},
+ *   notices?: {heading: string, text: string}[]}}
  */
 export function parseDashboard(doc) {
   /** @type {{tables: number, rows: any[]}|undefined} */
@@ -1071,10 +1113,31 @@ export function parseDashboard(doc) {
     }
   }
 
+  // Notices/alerts/posts: alert boxes, the posting-actions module and the
+  // user-dashboard post region — submit-document deadlines live in their
+  // text ("Work-term report due ..."). A block nested inside another kept
+  // region (an .alert inside .user-dashboard) is deduped on text.
+  /** @type {{heading: string, text: string}[]|undefined} */
+  let notices;
+  /** @type {Set<string>} */
+  const seenNotice = new Set();
+  for (const block of doc.querySelectorAll(DASH_NOTICE_SELECTOR)) {
+    const text = cleanText(block);
+    if (!text || seenNotice.has(text)) continue;
+    seenNotice.add(text);
+    const headingEl = block.querySelector("strong, b, h2, h3, h4");
+    if (!notices) notices = [];
+    notices.push({
+      heading: headingEl ? cleanText(headingEl) : "",
+      text,
+    });
+  }
+
   const ok = Boolean(
     schedule ||
       events ||
       rankings ||
+      notices ||
       newMessages !== undefined ||
       webcamAppointments !== undefined
   );
@@ -1087,6 +1150,7 @@ export function parseDashboard(doc) {
     out.webcamAppointments = webcamAppointments;
   }
   if (rankings) out.rankings = rankings;
+  if (notices) out.notices = notices;
   return out;
 }
 
@@ -1114,6 +1178,8 @@ export function parseAll(doc, opts = {}) {
   if (isMessageDetail(doc)) out["message-detail"] = parseMessageDetail(doc);
   if (isPosting(doc)) out.posting = parsePosting(doc);
   if (isRankings(doc)) out.rankings = parseRankings(doc);
+  if (isShortlist(doc) && tableOfKind(doc, "shortlist"))
+    out.shortlist = parseShortlist(doc);
   const dashboard = parseDashboard(doc);
   if (dashboard.ok) out.dashboard = dashboard;
   return out;

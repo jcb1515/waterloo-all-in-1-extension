@@ -27,6 +27,9 @@ import {
   messageDateItems,
   messageKey,
   coopDateItems,
+  noticeItems,
+  rankingsTaskItems,
+  applyItems,
 } from "./map.js";
 import { diffApplications } from "./diff.js";
 
@@ -108,7 +111,10 @@ function cachedItems(state) {
     arr(lastGood.events?.items),
     arr(lastGood.posting?.items),
     arr(lastGood["message-dates"]?.items),
-    arr(lastGood["coop-dates"]?.items)
+    arr(lastGood["coop-dates"]?.items),
+    arr(lastGood.notices?.items),
+    arr(lastGood["rankings-tasks"]?.items),
+    arr(lastGood.shortlist?.items)
   );
   /** @type {Map<string, any>} */
   const byId = new Map();
@@ -130,8 +136,21 @@ function cachedItems(state) {
   const dupEventKeys = new Set(
     rest.map(eventDupKey).filter((k) => k && dashEventKeys.has(k))
   );
+  // A shortlisted posting's Apply deadline supersedes the deadline the
+  // viewed-posting page produced for the same job.
+  const applyJobs = new Set(
+    arr(lastGood.shortlist?.items)
+      .map((item) => item?.meta?.jobId)
+      .filter(Boolean)
+  );
   const out = [];
   for (const item of byId.values()) {
+    if (
+      applyJobs.has(item?.meta?.jobId) &&
+      String(item.id || "").startsWith(`${SCOPE}:deadline:`)
+    ) {
+      continue;
+    }
     const key = eventDupKey(item);
     if (!key || !dupEventKeys.has(key)) {
       out.push(item);
@@ -496,7 +515,11 @@ export default {
       if (parsed["interview-detail"]) {
         // One detail page = one job: keep other jobs' items, replace this
         // job's (a booked detail drops that job's timeslot item).
-        const fresh = interviewDetailItems(obj(parsed["interview-detail"]), now);
+        const fresh = interviewDetailItems(
+          obj(parsed["interview-detail"]),
+          now,
+          { apps: arr(state.applications) }
+        );
         state.lastGood["interview-detail"] = {
           items: accumulateJobItems(
             arr(state.lastGood["interview-detail"]?.items),
@@ -602,6 +625,7 @@ export default {
               url: payload.url,
               category: detail.category,
               employer,
+              jobId: detail.linkedJobId || undefined,
             },
           ],
           "detail",
@@ -654,8 +678,33 @@ export default {
             at: payload.at,
           };
         }
+        if (dash.notices) {
+          state.lastGood.notices = {
+            items: noticeItems(
+              arr(dash.notices),
+              ctx.textDates,
+              now.toISOString()
+            ).slice(0, LAST_GOOD_CAP),
+            at: payload.at,
+          };
+        }
         readOk.push("dashboard");
         delete state.needsUpdate.dashboard;
+      }
+      if (parsed.shortlist) {
+        // Observe-only: the shortlist grid is reached by buildForm POSTs the
+        // refresh round never sends, so this only fires when the student
+        // opens their own shortlist.
+        state.lastGood.shortlist = {
+          items: applyItems(
+            arr(obj(parsed.shortlist).rows),
+            arr(state.applications),
+            now
+          ).slice(0, LAST_GOOD_CAP),
+          at: payload.at,
+        };
+        readOk.push("shortlist");
+        delete state.needsUpdate.shortlist;
       }
 
       // Fail-soft: a URL that should have yielded a section but didn't means
@@ -675,6 +724,20 @@ export default {
         failed.push(expected[0]);
       }
 
+      // Submit-rankings tasks derive from apps + coop-dates + the rankings
+      // notice, so the bucket re-computes on every parse (stable ids).
+      state.lastGood["rankings-tasks"] = {
+        items: rankingsTaskItems(
+          {
+            applications: arr(state.applications),
+            cycleItems: arr(state.lastGood["coop-dates"]?.items),
+            rankings: state.rankings,
+          },
+          now
+        ),
+        at: payload.at,
+      };
+
       const items = cachedItems(state);
       if (state.applications) state.applications = linkItems(state.applications, items);
       if (!Object.keys(state.needsUpdate).length) delete state.needsUpdate;
@@ -691,7 +754,18 @@ export default {
         scope: SCOPE,
         state,
       };
-      if (readOk.length) result.readOk = [SCOPE];
+      if (readOk.length) {
+        result.readOk = [SCOPE];
+        // A complete snapshot also reports per-page scopes (dashboard,
+        // interviews, applications, …) so the checklist can age each page
+        // read separately — including counts-only landings and empty lists.
+        if (parsed.complete === true) {
+          for (const section of readOk) {
+            const scoped = `${SCOPE}:${section}`;
+            if (!result.readOk.includes(scoped)) result.readOk.push(scoped);
+          }
+        }
+      }
       if (updates) result.updates = updates;
       if (failed.length) {
         result.error = {

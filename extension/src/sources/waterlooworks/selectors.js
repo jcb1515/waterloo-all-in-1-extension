@@ -76,6 +76,19 @@ export const HEADER_KEYS = Object.freeze({
     "status": "statusText",
     "conflicts": "conflictsText",
   }),
+  // Postings -> Shortlist grid: same column family as a job search grid,
+  // distinguished by the page's own shortlist marker (see isShortlist).
+  shortlist: Object.freeze({
+    "job title": "jobTitle",
+    "job id": "jobId",
+    "term": "term",
+    "organization": "employer",
+    "division": "division",
+    "location": "location",
+    "city": "city",
+    "app deadline": "appDeadline",
+    "applications": "numApps",
+  }),
 });
 
 /** A table is of a kind when its cleaned headers include ALL of these labels. */
@@ -85,6 +98,7 @@ export const TABLE_RULES = Object.freeze({
   events: Object.freeze(["event date", "registration status"]),
   messages: Object.freeze(["date received", "subject"]),
   schedule: Object.freeze(["time", "type", "name", "status"]),
+  shortlist: Object.freeze(["job id", "app deadline"]),
 });
 
 /** Dashboard URL: /myAccount root and dashboard.htm are the same page. */
@@ -95,6 +109,22 @@ export const DASHBOARD_CONTAINER_SELECTOR = ".user-dashboard";
 
 /** "Rank and Match" module on the dashboard (holds the rankings notice). */
 export const DASH_ACTIONS_SELECTOR = ".orbis-posting-actions";
+
+/**
+ * Dashboard notice/alert/post blocks scanned for submit-document deadlines:
+ * info alerts, the posting-actions module, and the user-dashboard posts.
+ */
+export const DASH_NOTICE_SELECTOR =
+  ".alert, .orbis-posting-actions, .user-dashboard";
+
+/**
+ * Elements that can identify the page itself as the Shortlist: real headings,
+ * breadcrumbs, fieldset legends, or the ACTIVE nav tab — never a plain tab
+ * link (a job-search page links to the shortlist without being it).
+ */
+export const SHORTLIST_MARKER_SELECTOR =
+  "h1, h2, h3, h4, legend, .breadcrumb, .panel-heading, .nav-tabs li.active a, .nav-tabs a.active, li.active > a";
+export const SHORTLIST_MARKER_RE = /short\s?list/i;
 /** Its heading: "RANKING (2027 - Winter)" -> term "2027 - Winter". */
 export const DASH_RANKINGS_HEADING_RE = /^rankings?\s*\(([^)]+)\)/i;
 

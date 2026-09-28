@@ -2,6 +2,7 @@
 // Parser rows/details -> contract objects (pure; no chrome APIs).
 
 import { itemId } from "../../core/contract.js";
+import { termKey } from "../../core/todos.js";
 import { hashString } from "../../capture/redact.js";
 import { termCodeFor, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { normalizeStatus } from "./status.js";
@@ -27,6 +28,16 @@ import {
 
 const SOURCE = "waterlooworks";
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Employer display name as WaterlooWorks shows it: whitespace collapsed,
+ * trimmed; undefined when absent.
+ * @param {any} value
+ */
+function normEmployer(value) {
+  const s = String(value || "").replace(/\s+/g, " ").trim();
+  return s || undefined;
+}
 
 const iso = (now) => (now instanceof Date ? now : new Date(now)).toISOString();
 
@@ -179,9 +190,11 @@ export function interviewItems(rows, now) {
  * the adapter can merge) and/or a time-slot selection deadline (not booked).
  * @param {any} detail  parseInterviewDetail result
  * @param {Date} now
+ * @param {{apps?: any[]}} [opts]  apps = stored applications for the
+ *   employer fallback on the timeslot task
  * @returns {Item[]}
  */
-export function interviewDetailItems(detail, now) {
+export function interviewDetailItems(detail, now, { apps } = {}) {
   if (!detail?.ok || !detail.jobId) return [];
   const nowIso = iso(now);
   const items = [];
@@ -289,6 +302,11 @@ export function interviewDetailItems(detail, now) {
       ],
       meta: {
         jobId: detail.jobId,
+        action: "book-interview",
+        employer:
+          detail.employer ||
+          arr(apps).find((a) => a && a.jobId === detail.jobId)?.employer ||
+          undefined,
         availableSlots: available.length,
         rule: "24h-before-first-slot",
         facts: factsOf([
@@ -658,7 +676,8 @@ function messageType(subject, snippet) {
  * `text` is transient (subject + body text); only the ≤300-char sentence that
  * contains each matched date is stored, in `details` and `evidence.snippet`.
  * @param {{subject?: string, sentAt?: string, text?: string, url?: string,
- *   category?: string, employer?: string, origin?: "list"|"detail"}} msg
+ *   category?: string, subCategory?: string, employer?: string,
+ *   jobId?: string, origin?: "list"|"detail"}} msg
  * @param {(text: string, opts: {now: Date, termCode?: number, tz?: string}) => any[]} extractDates
  *   ctx.textDates — the shared textdates extractor
  * @param {string} nowIso
@@ -675,6 +694,13 @@ export function messageDateItems(msg, extractDates, nowIso) {
   });
   const msgKey = messageKey(msg.subject, msg.sentAt, now);
   const cutoff = ref.getTime() - MSG_PAST_MS;
+  const employer = normEmployer(msg.employer);
+  // Offer mail turns its date hits into respond-to-offer tasks rather than
+  // generic message items (same id, so they replace rather than duplicate).
+  const offerMessage =
+    /\boffers?\b/i.test(
+      `${msg.subject || ""} ${msg.category || ""} ${msg.subCategory || ""}`
+    ) || /\b(?:job\s+)?offers?\b/i.test(String(msg.text || ""));
   const items = [];
   for (const hit of hits || []) {
     if (hit.confidence < MSG_MIN_CONFIDENCE) continue;
@@ -719,7 +745,230 @@ export function messageDateItems(msg, extractDates, nowIso) {
       item.startAt = hit.startAt;
       if (hit.endAt) item.endAt = hit.endAt;
     }
+    if (offerMessage) {
+      item.type = "deadline";
+      item.title = employer
+        ? `Respond to offer — ${employer}`
+        : "Respond to offer";
+      item.org = employer || "Co-op";
+      delete item.startAt;
+      delete item.endAt;
+      delete item.allDay;
+      item.dueAt = hit.startAt;
+      /** @type {Record<string, unknown>} */
+      const meta = item.meta || {};
+      meta.action = "respond-offer";
+      meta.employer = employer;
+      meta.jobId = msg.jobId || undefined;
+    }
     items.push(item);
+  }
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// shared task seam: meta.action + meta.employer on every derived to-do
+
+/**
+ * Undated-task fallback: anchor + 2 days at 17:00 America/Toronto.
+ * @param {number|string|Date} anchor
+ * @returns {string} ISO
+ */
+function undatedDueAt(anchor) {
+  const plus2 = new Date(new Date(anchor).getTime() + 2 * DAY_MS);
+  const p = zonedParts(plus2, "America/Toronto");
+  return zonedIso(p.y, p.m, p.d, 17, 0, "America/Toronto");
+}
+
+const NOTICE_DOC_RE =
+  /\b(reports?|forms?|evaluations?|documents?|reflections?|resumes?|résumés?|cover\s+letters?|transcripts?)\b/i;
+const NOTICE_DUE_RE = /\b(due|submits?|submit|deadlines?|by)\b/i;
+
+/**
+ * Dashboard notices/alerts/posts -> "submit a document" hard deadlines.
+ * A notice only qualifies when its text carries a document noun AND a due
+ * cue AND a parseable date — "Posted <date>" video posts, term-status
+ * alerts and the rankings-not-open notice never match the triple.
+ * @param {{heading?: string, text?: string}[]} notices  parseDashboard
+ * @param {(text: string, opts: {now: Date, termCode?: number}) => any[]}|undefined} extractDates
+ * @param {string} nowIso
+ * @returns {Item[]}
+ */
+export function noticeItems(notices, extractDates, nowIso) {
+  if (typeof extractDates !== "function") return [];
+  const now = new Date(nowIso);
+  const items = [];
+  const seenText = new Set();
+  for (const notice of arr(notices)) {
+    const text = `${notice?.heading || ""} ${notice?.text || ""}`.trim();
+    if (!text || seenText.has(text)) continue;
+    seenText.add(text);
+    if (!NOTICE_DOC_RE.test(text) || !NOTICE_DUE_RE.test(text)) continue;
+    const hit = arr(
+      extractDates(text, { now, termCode: termCodeFor(now) })
+    ).find(
+      (h) =>
+        h &&
+        h.confidence >= MSG_MIN_CONFIDENCE &&
+        Date.parse(h.startAt) >= now.getTime() - MSG_PAST_MS
+    );
+    if (!hit) continue;
+    const heading = String(notice?.heading || "").trim();
+    const key = `notice:${fnv(`${heading}|${hit.startAt}`)}`;
+    items.push({
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type: "deadline",
+      title: heading.slice(0, TITLE_MAX) || "WaterlooWorks notice",
+      org: "Co-op",
+      dueAt: hit.startAt,
+      status: "open",
+      review: "pending",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      details: notice?.text
+        ? String(notice.text).slice(0, 300)
+        : undefined,
+      evidence: { method: "text" },
+      meta: {
+        action: "submit-document",
+        employer: "Co-op",
+        facts: factsOf([["From notice", heading]]),
+      },
+    });
+  }
+  return items;
+}
+
+/** App statuses still in the interview/offer pipeline (rankings pending). */
+const RANKINGS_IN_FLIGHT = new Set([
+  "selected-for-interview",
+  "interview-scheduled",
+  "alternate",
+  "offer",
+]);
+
+/**
+ * One "Submit your rankings" task per work term that has an in-flight app.
+ * dueAt = the earliest upcoming rankings-due co-op date for that term; when
+ * none exists but the dashboard shows rankings open for the term the
+ * undated rule anchors the task at the notice's read time.
+ * @param {{applications?: any[], cycleItems?: Item[],
+ *   rankings?: {term?: string, open?: boolean, note?: string,
+ *   at?: string}}} input
+ * @param {Date} now
+ * @returns {Item[]}
+ */
+export function rankingsTaskItems(input, now) {
+  const nowMs = now.getTime();
+  const nowIso = iso(now);
+  /** @type {Set<string>} */
+  const inFlight = new Set();
+  /** @type {Set<string>} */
+  const answered = new Set();
+  for (const app of arr(input?.applications)) {
+    const term = termKey(app?.cycle);
+    if (!term) continue;
+    if (RANKINGS_IN_FLIGHT.has(app?.status)) inFlight.add(term);
+    else if (app?.status === "ranked" || app?.status === "matched") {
+      answered.add(term);
+    }
+  }
+  const rankings = input?.rankings;
+  const openTerm = rankings?.open ? termKey(rankings.term) : null;
+  const items = [];
+  for (const term of inFlight) {
+    if (answered.has(term)) continue;
+    let due;
+    for (const c of arr(input?.cycleItems)) {
+      if (c?.category !== "rankings-due") continue;
+      if (termKey(c?.meta?.workTerm) !== term) continue;
+      const ms = Date.parse(c.dueAt || c.startAt || "");
+      if (!Number.isFinite(ms) || ms <= nowMs) continue;
+      if (due === undefined || ms < Date.parse(due)) {
+        due = c.dueAt || c.startAt;
+      }
+    }
+    const undated = due === undefined;
+    if (undated && !(openTerm && openTerm === term)) continue;
+    const key = `rankings:${slug(term)}`;
+    items.push({
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type: undated ? "task" : "deadline",
+      title: `Submit your rankings — ${term}`,
+      org: "Co-op",
+      dueAt: undated ? undatedDueAt(rankings?.at || now) : due,
+      status: "open",
+      review: "auto",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      meta: {
+        action: "submit-rankings",
+        employer: "Co-op",
+        workTerm: term,
+        undated: undated || undefined,
+        facts: factsOf([
+          ["Work term", term],
+          undated && rankings?.note ? ["Notice", rankings.note] : null,
+        ]),
+      },
+    });
+  }
+  return items;
+}
+
+/**
+ * Shortlist grid rows -> "Apply" deadlines, future postings only and never
+ * for a job the applications list already shows.
+ * @param {any[]} rows  parseShortlist rows
+ * @param {any[]} applications  stored apps
+ * @param {Date} now
+ * @returns {Item[]}
+ */
+export function applyItems(rows, applications, now) {
+  const applied = new Set(
+    arr(applications)
+      .map((app) => app && app.jobId)
+      .filter(Boolean)
+  );
+  const nowMs = now.getTime();
+  const nowIso = iso(now);
+  const items = [];
+  for (const row of arr(rows)) {
+    const jobId = row && row.jobId;
+    if (!jobId || applied.has(jobId)) continue;
+    const dueMs = Date.parse(row.appDeadline || "");
+    if (!Number.isFinite(dueMs) || dueMs <= nowMs) continue; // future only
+    const employer = normEmployer(row.employer);
+    const key = `apply:${jobId}`;
+    items.push({
+      id: itemId(SOURCE, key),
+      source: SOURCE,
+      type: "deadline",
+      title: `Apply: ${row.jobTitle || jobId}${employer ? ` — ${employer}` : ""}`.slice(
+        0,
+        TITLE_MAX
+      ),
+      org: employer,
+      dueAt: row.appDeadline,
+      status: "open",
+      review: "pending",
+      seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
+      evidence: { method: "html" },
+      meta: {
+        action: "apply",
+        employer,
+        jobId,
+        category: "apply",
+        facts: factsOf([
+          [
+            "Job",
+            row.jobTitle ? `${jobId} - ${row.jobTitle}` : jobId,
+          ],
+          ["Employer", employer],
+          ["Deadline", wwLocalText(row.appDeadline)],
+        ]),
+      },
+    });
   }
   return items;
 }
