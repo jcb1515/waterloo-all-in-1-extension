@@ -1,36 +1,51 @@
-// Agenda view: summary card, filter chips + org picker, grouped item list,
-// and the empty / first-run / loading states.
+// Upcoming view: summary card, type chips + course/source filters, and the
+// grouped item list with sticky full-date day headers. Every row carries a
+// SourceBadge and a DateBlock — rows under a day header may show just a time.
 
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
 import { fmtEstimate } from "../model/itemsheet.js";
 import { attentionSource } from "../model/sources.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
-import { ItemRow } from "../components/ItemRow.jsx";
+import { ItemRow } from "../../ui/ItemRow.jsx";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { normCourseCode } from "../../core/contract.js";
 import { orgStyle } from "../../ui/colors.js";
-import { SearchIcon, ExternalLinkIcon, AlertTriangleIcon } from "../../ui/icons.jsx";
+import { itemSourceIds, sourceLabel } from "../../ui/sourceLabel.js";
+import { fmtCompactDay } from "../../ui/dateLabel.js";
+import {
+  SearchIcon,
+  ExternalLinkIcon,
+  AlertTriangleIcon,
+  FilterIcon,
+  XIcon,
+} from "../../ui/icons.jsx";
 
 const FILTERS = [
   ["all", "All"],
+  ["exams", "Exams"],
   ["deadlines", "Deadlines"],
   ["classes", "Classes"],
-  ["exams", "Exams"],
   ["meetings", "Meetings"],
   ["coop", "Co-op"],
+  ["clash", "Clashes"],
 ];
+
+// Group ids that are day headers — rows under them may show a bare time.
+const DAY_GROUP = /^(today|tomorrow|classes-today|day:)/;
 
 /**
  * @param {{state: any, actions: any, now: Date, onGoSources: () => void,
  *   onGoCalendar?: () => void}} props
  */
-export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
+export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
   const [filter, setFilter] = useState(query0("filter") || "all");
   const [org, setOrg] = useState(null);
+  const [source, setSource] = useState(() => query0("src") || null);
   const [q, setQ] = useState("");
   const [collapsed, setCollapsed] = useState(() => ({}));
+  const [filterOpen, setFilterOpen] = useState(() => query0("fsheet") === "1");
 
   const orgs = useMemo(() => {
     const seen = new Map();
@@ -41,6 +56,31 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
     return [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [state.items]);
 
+  // Sources that actually produced items, in badge order.
+  const sources = useMemo(() => {
+    const seen = new Set();
+    for (const it of Object.values(state.items)) {
+      for (const s of itemSourceIds(it)) seen.add(s);
+    }
+    return [...seen].filter((id) => id !== "manual");
+  }, [state.items]);
+
+  // Fade edge on the chip row only while it actually overflows.
+  const chipRef = useRef(null);
+  const [chipsOverflow, setChipsOverflow] = useState(false);
+  useEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    const check = () => setChipsOverflow(el.scrollWidth - el.scrollLeft > el.clientWidth + 2);
+    check();
+    el.addEventListener("scroll", check);
+    window.addEventListener("resize", check);
+    return () => {
+      el.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, [state.ready]);
+
   const agenda = useMemo(
     () =>
       buildAgenda({
@@ -50,10 +90,11 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
         now,
         filter,
         org,
+        source,
         q,
         projects: state.projects,
       }),
-    [state.items, state.userState, state.settings, state.projects, filter, org, q]
+    [state.items, state.userState, state.settings, state.projects, filter, org, source, q]
   );
 
   if (!state.ready) {
@@ -125,11 +166,14 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
             {s.busyDay ? <span>Busy {s.busyDay.label.split(", ")[0]}: {s.busyDay.count} due</span> : null}
           </p>
         ) : null}
-        {agenda.nextUp && agenda.nextUp.length ? (
-          <p class="summary-nextup">
-            Next up: {agenda.nextUp.map((u) => u.title).join(" · ")}
-          </p>
-        ) : null}
+        {(() => {
+          const nu = (agenda.nextUp || []).find((u) => u.key) || null;
+          return nu ? (
+            <p class="summary-nextup" title={`${nu.org ? `${nu.org} — ` : ""}${nu.title}`}>
+              Next up: {fmtCompactDay(nu.anchor)} · {nu.title}
+            </p>
+          ) : null;
+        })()}
         {agenda.nextClass ? (
           <div
             class="next-class"
@@ -147,63 +191,131 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
       </section>
 
       <div class="filter-bar" role="toolbar" aria-label="Filters">
-        <div class="filter-row">
-          <div class="search-wrap">
-            <SearchIcon size={14} />
-            <input
-              id="agenda-search"
-              class="input search-input"
-              type="search"
-              placeholder="Search titles, courses, rooms…"
-              aria-label="Search agenda"
-              value={q}
-              onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
-            />
+        <div class="search-wrap">
+          <SearchIcon size={14} />
+          <input
+            id="upcoming-search"
+            class="input search-input"
+            type="search"
+            placeholder="Search titles, courses, rooms…"
+            aria-label="Search upcoming items"
+            value={q}
+            onInput={(e) => setQ(/** @type {any} */ (e.target).value)}
+          />
+        </div>
+        <div class="chip-row">
+          <div
+            ref={chipRef}
+            class={`chip-scroll${chipsOverflow ? " has-overflow" : ""}`}
+            role="group"
+            aria-label="Type filter"
+          >
+            {FILTERS.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                class={`chip filter-chip${filter === id ? " active" : ""}`}
+                aria-pressed={filter === id}
+                onClick={() => setFilter(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          {orgs.length > 1 ? (
-            <select
-              class="select org-select"
-              aria-label="Filter by course or team"
-              value={org || ""}
-              onChange={(e) => setOrg(/** @type {any} */ (e.target).value || null)}
-            >
-              <option value="">All courses &amp; teams</option>
-              {orgs.map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          ) : null}
-        </div>
-        <div class="chip-scroll" role="group" aria-label="Type filter">
-          {s.clashCount || filter === "clash" ? (
+          <div class="filter-wrap">
             <button
               type="button"
-              class={`chip filter-chip${filter === "clash" ? " active" : ""}`}
-              aria-pressed={filter === "clash"}
-              onClick={() => setFilter(filter === "clash" ? "all" : "clash")}
+              class={`btn btn-sm filter-btn${filterOpen ? " open" : ""}`}
+              aria-expanded={filterOpen}
+              aria-haspopup="dialog"
+              onClick={() => setFilterOpen((o) => !o)}
             >
-              Clashes
+              <FilterIcon size={13} /> Filter
+              {org || source ? (
+                <span class="count-badge" aria-label={`${(org ? 1 : 0) + (source ? 1 : 0)} filters active`}>
+                  {(org ? 1 : 0) + (source ? 1 : 0)}
+                </span>
+              ) : null}
             </button>
-          ) : null}
-          {FILTERS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              class={`chip filter-chip${filter === id ? " active" : ""}`}
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-            >
-              {label}
-            </button>
-          ))}
+            {filterOpen ? (
+              <>
+                <button
+                  type="button"
+                  class="filter-backdrop"
+                  aria-label="Close filters"
+                  onClick={() => setFilterOpen(false)}
+                />
+                <div class="filter-sheet" role="dialog" aria-label="Filter by course and source">
+                  {orgs.length ? (
+                    <div class="filter-sheet-group">
+                      <span class="filter-sheet-label">Course / team</span>
+                      <FilterOption
+                        label="All courses & teams"
+                        active={!org}
+                        onPick={() => { setOrg(null); setFilterOpen(false); }}
+                      />
+                      {orgs.map(([key, label]) => (
+                        <FilterOption
+                          key={key}
+                          label={label}
+                          active={org === key}
+                          onPick={() => { setOrg(key); setFilterOpen(false); }}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                  {sources.length ? (
+                    <div class="filter-sheet-group">
+                      <span class="filter-sheet-label">Source</span>
+                      <FilterOption
+                        label="All sources"
+                        active={!source}
+                        onPick={() => { setSource(null); setFilterOpen(false); }}
+                      />
+                      {sources.map((id) => (
+                        <FilterOption
+                          key={id}
+                          label={sourceLabel(id, null)}
+                          active={source === id}
+                          onPick={() => { setSource(id); setFilterOpen(false); }}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
+        {org || source ? (
+          <div class="filter-pills">
+            {org ? (
+              <button
+                type="button"
+                class="filter-pill"
+                title="Remove course filter"
+                onClick={() => setOrg(null)}
+              >
+                {(orgs.find(([k]) => k === org) || [null, org])[1]} <XIcon size={11} />
+              </button>
+            ) : null}
+            {source ? (
+              <button
+                type="button"
+                class="filter-pill"
+                title="Remove source filter"
+                onClick={() => setSource(null)}
+              >
+                {sourceLabel(source, null)} <XIcon size={11} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {!hasItems && !learnSynced ? <FirstRun actions={actions} onGoSources={onGoSources} /> : null}
       {hasItems && agenda.groups.length === 0 ? (
-        <EmptyState filter={filter} />
+        <EmptyRows filter={filter} />
       ) : null}
 
       {agenda.groups.map((g) => (
@@ -229,6 +341,7 @@ export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
                   key={item.id}
                   item={item}
                   now={now}
+                  inDayGroup={DAY_GROUP.test(g.id)}
                   actions={actions}
                   done={g.done}
                   clashes={agenda.clashById.get(item.id)}
@@ -258,6 +371,20 @@ function query0(name) {
   }
 }
 
+/** @param {{label: string, active: boolean, onPick: () => void}} p */
+function FilterOption({ label, active, onPick }) {
+  return (
+    <button
+      type="button"
+      class={`filter-opt${active ? " active" : ""}`}
+      aria-pressed={active}
+      onClick={onPick}
+    >
+      {label}
+    </button>
+  );
+}
+
 /** @param {{actions: any, onGoSources: () => void}} p */
 function FirstRun({ actions, onGoSources }) {
   return (
@@ -281,7 +408,7 @@ function FirstRun({ actions, onGoSources }) {
 }
 
 /** @param {{filter: string}} p */
-function EmptyState({ filter }) {
+function EmptyRows({ filter }) {
   return (
     <div class="card empty-card">
       <SearchIcon size={20} />

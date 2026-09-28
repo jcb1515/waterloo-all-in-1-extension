@@ -279,6 +279,12 @@ export const MoreIcon = (p) => (
   </Svg>
 );
 
+export const FilterIcon = (p) => (
+  <Svg {...p}>
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+  </Svg>
+);
+
 export const InboxIcon = (p) => (
   <Svg {...p}>
     <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />

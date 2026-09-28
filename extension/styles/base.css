@@ -433,12 +433,14 @@ html[data-theme="dark"] .segmented button[aria-pressed="true"] {
   color: var(--text-3);
 }
 
-/* DateBlock: "Thu Oct 8 · 7:00 pm"; .key = exam/interview/deadline */
+/* DateBlock: "Thu Oct 8 · 7:00 PM"; .key = exam/interview/deadline. It may
+   wrap (long room names) — it lives on its own full-width line now. */
 .date-block {
   font-size: var(--fs-xs);
   font-weight: var(--w-medium);
   color: var(--text-2);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .date-block.key {
   font-size: var(--fs-sm);

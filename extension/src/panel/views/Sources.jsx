@@ -1,7 +1,7 @@
-// Sources view: one setup card per adapter — enabled toggle, status badge,
-// a one-line description, and the per-source setup blocks (outline -> the
-// Courses tab, email providers + guided scan, Discord servers/channels,
-// Google Calendar duplicate check). Disabled cards collapse to the header.
+// Sources view: a tile per source (status dot · "N picked up" · synced time),
+// then a per-source page with the Picked up | Setup | Check segments. Setup
+// mounts SETUP[id] from components/setup (W2); PickedUp/Check mount the
+// views/sources slots (W3). Missing slots render an EmptyState.
 
 import { useMemo, useState } from "preact/hooks";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
@@ -16,45 +16,41 @@ import {
   requestSourceAccess,
 } from "../../core/permissions.js";
 import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
-import { Toggle } from "../../options/bits.jsx";
+import { Toggle } from "../../ui/bits.jsx";
+import { Segmented } from "../../ui/Segmented.jsx";
+import { EmptyState } from "../../ui/EmptyState.jsx";
+import { sourceColorVar, sourceGlyph, sourceLabel } from "../../ui/sourceLabel.js";
 import { inventoryReport } from "../../sources/discord/index.js";
-import { EmailProviders, MailScan } from "../components/EmailSetup.jsx";
-import { DiscordChannels, DiscordWatched } from "../components/DiscordSetup.jsx";
+import { SETUP } from "../components/setup/index.js";
+import { PickedUp } from "./sources/PickedUp.jsx";
+import { Check } from "./sources/Check.jsx";
 import {
   RefreshIcon,
   ExternalLinkIcon,
   TrashIcon,
   ShieldIcon,
   ArrowRightIcon,
+  ArrowLeftIcon,
   ClipboardCheckIcon,
   SettingsIcon,
 } from "../../ui/icons.jsx";
 
 const TONE_BADGE = { ok: "badge-ok", warn: "badge-warn", danger: "badge-danger", muted: "badge-muted" };
 
-/** One-line "what does this source do" text per adapter. */
-const SOURCE_HELP = {
-  learn: "Reads classes, deadlines and announcements while you browse Learn.",
-  outline: "Course outline pages, plus imported outline pages and PDFs.",
-  portal: "Reads your course sections while you browse Portal.",
-  outlook: "Calendar invites and dated mail in Outlook/Gmail tabs you open.",
-  waterlooworks: "Applications, interviews and deadlines while you browse.",
-  discord: "Dated messages in servers you read — passive, never posts.",
-  gcal: "Skip events already on my calendar — reads event titles and times from your own calendars only, so nothing is published twice. Subscribed calendars (including this extension's own feed) never suppress anything, and nothing it reads leaves your browser.",
-};
-
-/** Monogram from a label: "Course outlines" -> "Co", "WaterlooWorks" -> "Wa". */
-function monogram(label) {
-  const words = String(label).replace(/\(.*\)/, "").trim().split(/\s+/);
-  const first = words[0] || "?";
-  const second = words.length > 1 ? words[1] : first.slice(1);
-  return (first[0] + (second[0] || "")).toUpperCase();
-}
+const SEGMENTS = [
+  ["picked", "Picked up"],
+  ["setup", "Setup"],
+  ["check", "Check"],
+];
 
 /**
- * @param {{state: any, actions: any, now: Date, onGoCourses?: () => void}} props
+ * @param {{state: any, actions: any, now: Date, onGoCourses?: () => void,
+ *   onOpenCheck?: () => void}} props
  */
-export function Sources({ state, actions, now, onGoCourses }) {
+export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
+  const [sourceId, setSourceId] = useState(query0("source") || null);
+  const [segment, setSegment] = useState(() => query0("seg") || "picked");
+
   const cards = useMemo(
     () =>
       ADAPTERS.map((a) => {
@@ -62,7 +58,7 @@ export function Sources({ state, actions, now, onGoCourses }) {
         const st = (state.sourceState || {})[a.id] || null;
         return { adapter: a, stage, st, status: sourceStatus(a, st, stage, now) };
       }),
-    [state.sourceState]
+    [state.sourceState, now]
   );
 
   const openOptions = (hash) => {
@@ -80,33 +76,91 @@ export function Sources({ state, actions, now, onGoCourses }) {
     window.open(url, "_blank");
   };
 
+  const card = sourceId ? cards.find((c) => c.adapter.id === sourceId) : null;
+
+  if (card) {
+    return (
+      <SourcePage
+        card={card}
+        state={state}
+        actions={actions}
+        now={now}
+        segment={segment}
+        setSegment={setSegment}
+        onBack={() => setSourceId(null)}
+        onGoCourses={onGoCourses}
+        onOpenCheck={onOpenCheck}
+      />
+    );
+  }
+
   return (
-    <div class="sources-list">
-      {cards.map(({ adapter, stage, st, status }) => (
-        <SourceCard
-          key={adapter.id}
-          adapter={adapter}
-          stage={stage}
-          st={st}
-          status={status}
-          state={state}
-          actions={actions}
-          now={now}
-          onGoCourses={onGoCourses}
-        />
-      ))}
-      <button
-        type="button"
-        class="btn btn-ghost sources-privacy"
-        onClick={() => openOptions("#privacy")}
-      >
+    <div class="sources-view">
+      <div class="sources-tiles" role="list">
+        {cards.map(({ adapter, st, status }) => {
+          const src = (state.settings && state.settings.sources && state.settings.sources[adapter.id]) || {};
+          const enabled = adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
+          const name = adapter.id === "gcal" ? sourceLabel("gcal", null) : adapter.label;
+          const meta = !enabled
+            ? "Off"
+            : adapter.id === "gcal"
+              ? "Duplicate check"
+              : `${
+                  st && typeof st.itemCount === "number" && st.itemCount > 0
+                    ? `${st.itemCount} picked up`
+                    : "Nothing picked up yet"
+                } · ${
+                  st && st.lastOkAt
+                    ? `synced ${fmtAgo(st.lastOkAt, now)}`
+                    : st && st.lastRunAt
+                      ? `tried ${fmtAgo(st.lastRunAt, now)}`
+                      : "not synced yet"
+                }`;
+          const tone = enabled ? status.tone : "muted";
+          return (
+            <button
+              key={adapter.id}
+              type="button"
+              class={`src-tile${enabled ? "" : " off"}`}
+              role="listitem"
+              title={`${name} — ${status.label}`}
+              aria-label={`${name}: ${meta}. Status: ${status.label}`}
+              onClick={() => {
+                setSourceId(adapter.id);
+                setSegment("picked");
+              }}
+            >
+              <span class="src-tile-icon" style={{ "--src": sourceColorVar(adapter.id) }} aria-hidden="true">
+                {sourceGlyph(adapter.id)}
+              </span>
+              <span class="src-tile-text">
+                <span class="src-tile-name">{name}</span>
+                <span class="src-tile-meta tabular">{meta}</span>
+              </span>
+              <span
+                class={`src-status-dot tone-${tone}`}
+                title={status.label}
+                aria-label={`Status: ${status.label}`}
+                role="img"
+              />
+            </button>
+          );
+        })}
+      </div>
+      <div class="source-actions">
+        <button type="button" class="btn btn-sm" onClick={() => actions.sync()}>
+          <RefreshIcon size={13} /> Sync all
+        </button>
+        {onOpenCheck ? (
+          <button type="button" class="btn btn-sm" onClick={onOpenCheck}>
+            <ClipboardCheckIcon size={13} /> Check readers
+          </button>
+        ) : null}
+      </div>
+      <button type="button" class="btn btn-ghost sources-privacy" onClick={() => openOptions("#privacy")}>
         <ShieldIcon size={14} /> Privacy &amp; discovery settings
       </button>
-      <button
-        type="button"
-        class="btn btn-ghost sources-privacy"
-        onClick={() => openOptions("#advanced")}
-      >
+      <button type="button" class="btn btn-ghost sources-privacy" onClick={() => openOptions("#advanced")}>
         <SettingsIcon size={14} /> Advanced settings
       </button>
     </div>
@@ -114,20 +168,16 @@ export function Sources({ state, actions, now, onGoCourses }) {
 }
 
 /**
- * One source card. The Enabled toggle drives sources.<id>.enabled through
- * actions.saveSettings; enabling discord/gcal asks for its host group inside
- * the click (denied -> stays off with a note). When the source is enabled
- * but its optional host permission isn't granted, the badge reads "Needs
- * permission" and an Allow button requests it in-place.
- * @param {{adapter: any, stage: string, st: any, status: any, state: any,
- *   actions: any, now: Date, onGoCourses?: () => void}} p
+ * One source's page: header (name, status, Enabled toggle), the Segmented
+ * picker, the three slot segments and the per-source actions.
+ * @param {{card: any, state: any, actions: any, now: Date, segment: string,
+ *   setSegment: (s: string) => void, onBack: () => void,
+ *   onGoCourses?: () => void, onOpenCheck?: () => void}} p
  */
-function SourceCard({ adapter, stage, st, status, state, actions, now, onGoCourses }) {
+function SourcePage({ card, state, actions, now, segment, setSegment, onBack, onOpenCheck }) {
+  const { adapter, stage, st, status } = card;
   const src = (state.settings && state.settings.sources && state.settings.sources[adapter.id]) || {};
-  // gcal is the one source that's off until the user turns it on — nothing
-  // reads Google Calendar unless the toggle (and its permission) is on.
-  const enabled =
-    adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
+  const enabled = adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
   const [denied, setDenied] = useState(false);
 
   const needed = neededGroups(adapter.id, src);
@@ -147,7 +197,6 @@ function SourceCard({ adapter, stage, st, status, state, actions, now, onGoCours
   /** @param {boolean} v */
   const onToggle = async (v) => {
     if (v && !IS_PREVIEW && (adapter.id === "discord" || adapter.id === "gcal")) {
-      // The request must start inside the click — no await before it.
       const ok = await requestSourceAccess(adapter.id);
       if (!ok) {
         setDenied(true);
@@ -160,144 +209,127 @@ function SourceCard({ adapter, stage, st, status, state, actions, now, onGoCours
     });
   };
 
-  const save = (patch) =>
-    actions.saveSettings({ sources: { [adapter.id]: { ...src, ...patch } } });
+  const Setup = SETUP[adapter.id];
 
   return (
-    <section class="card source-card">
-      <div class="source-head">
-        <span class="mono-tile" aria-hidden="true">
-          {monogram(adapter.label)}
-        </span>
+    <div class="src-page">
+      <button type="button" class="linklike src-back" onClick={onBack}>
+        <ArrowLeftIcon size={13} /> All sources
+      </button>
+      <div class="src-page-head">
         <div class="source-title">
           <h3>{adapter.label}</h3>
-          {enabled && (st || stage !== "soon") ? (
-            <span class="source-meta tabular">
-              {st && st.lastOkAt
+          <span class="source-meta tabular">
+            {enabled
+              ? st && st.lastOkAt
                 ? `Synced ${fmtAgo(st.lastOkAt, now)}`
                 : st && st.lastRunAt
                   ? `Tried ${fmtAgo(st.lastRunAt, now)}`
-                  : "Not synced yet"}
-              {st && typeof st.itemCount === "number" && st.itemCount > 0
-                ? ` · ${st.itemCount} items`
-                : ""}
-            </span>
-          ) : null}
+                  : "Not synced yet"
+              : "Off"}
+            {st && typeof st.itemCount === "number" && st.itemCount > 0 ? ` · ${st.itemCount} items` : ""}
+          </span>
         </div>
-        {enabled ? (
-          <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span>
-        ) : null}
-        <Toggle
-          label="Enabled"
-          checked={enabled}
-          onChange={onToggle}
-        />
+        {enabled ? <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span> : null}
+        <Toggle label="Enabled" checked={enabled} onChange={onToggle} />
       </div>
-      {SOURCE_HELP[adapter.id] ? (
-        <p class="source-detail">{SOURCE_HELP[adapter.id]}</p>
-      ) : null}
       {denied ? (
         <p class="help status-err">
-          Permission wasn't granted — {adapter.label} stays off. The browser
-          prompt asks for access to{" "}
-          {adapter.origins[0].replace("https://", "")}; allow it, then toggle
-          again.
+          Permission wasn't granted — {adapter.label} stays off. The browser prompt asks for access
+          to {adapter.origins[0].replace("https://", "")}; allow it, then toggle again.
         </p>
       ) : null}
-      {!enabled ? null : (
-        <>
-          {shown.detail ? <p class="source-detail">{shown.detail}</p> : null}
-          {stage === "live" && !(adapter.intervalMinutes > 0) && !needsPerm ? (
-            <p class="source-detail">Updates while you browse {adapter.label}.</p>
-          ) : null}
-          {adapter.id === "outline" && !needsPerm ? (
-            <p>
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => onGoCourses && onGoCourses()}
-              >
-                Manage outlines in Courses
-              </button>
-            </p>
-          ) : null}
-          {adapter.id === "outlook" && !needsPerm ? (
-            <>
-              <EmailProviders src={src} save={save} />
-              <MailScan src={src} />
-              <EmailScanControls st={st} />
-            </>
-          ) : null}
-          {adapter.id === "discord" && !needsPerm ? (
-            <>
-              <DiscordWatched src={src} save={save} />
-              <DiscordChannels
-                discordState={st && st.state}
-                src={src}
-                actions={actions}
-              />
-              <DiscordControls st={st} />
-            </>
-          ) : null}
-          <div class="source-actions">
-            {missing.map((g) => (
-              <AllowSourceButton
-                key={g}
-                sourceId={g}
-                label={`Allow ${GROUP_LABELS[g] || g}`}
-              />
-            ))}
-            {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => actions.sync(adapter.id)}
-              >
-                <RefreshIcon size={13} /> Sync now
-              </button>
-            ) : null}
-            {adapter.origins && adapter.origins[0] && !needsPerm ? (
-              <button
-                type="button"
-                class="btn btn-sm"
-                onClick={() => actions.open(`${adapter.origins[0]}/`)}
-              >
-                <ExternalLinkIcon size={13} /> Open site
-              </button>
-            ) : null}
-            {st && !needsPerm ? (
-              <button
-                type="button"
-                class="btn btn-sm btn-ghost"
-                onClick={() => {
-                  if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
-                    actions.clearSource(adapter.id);
-                  }
-                }}
-              >
-                <TrashIcon size={13} /> Clear data
-              </button>
-            ) : null}
-          </div>
-        </>
+      {shown.detail ? <p class="source-detail">{shown.detail}</p> : null}
+      {missing.map((g) => (
+        <AllowSourceButton key={g} sourceId={g} label={`Allow ${GROUP_LABELS[g] || g}`} />
+      ))}
+
+      <Segmented options={SEGMENTS} value={segment} onChange={setSegment} ariaLabel={`${adapter.label} sections`} />
+
+      {segment === "picked" ? (
+        <PickedUp sourceId={adapter.id} state={state} actions={actions} now={now} />
+      ) : segment === "setup" ? (
+        Setup ? (
+          <Setup state={state} actions={actions} />
+        ) : (
+          <EmptyState
+            icon={SettingsIcon}
+            title="Setup is in Settings"
+            text={`${adapter.label} options live in the Settings page for now.`}
+          >
+            <OpenOptionsLink hash="#sources" />
+          </EmptyState>
+        )
+      ) : (
+        <Check sourceId={adapter.id} state={state} actions={actions} now={now} />
       )}
-    </section>
+
+      {enabled ? (
+        <div class="source-actions">
+          {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
+            <button type="button" class="btn btn-sm" onClick={() => actions.sync(adapter.id)}>
+              <RefreshIcon size={13} /> Sync now
+            </button>
+          ) : null}
+          {adapter.origins && adapter.origins[0] && !needsPerm ? (
+            <button type="button" class="btn btn-sm" onClick={() => actions.open(`${adapter.origins[0]}/`)}>
+              <ExternalLinkIcon size={13} /> Open site
+            </button>
+          ) : null}
+          {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
+          {adapter.id === "outlook" && !needsPerm ? <EmailScanControls st={st} /> : null}
+          {st && !needsPerm ? (
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              onClick={() => {
+                if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
+                  actions.clearSource(adapter.id);
+                }
+              }}
+            >
+              <TrashIcon size={13} /> Clear data
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Settings link that works in preview (hash nav) and the real extension. */
+function OpenOptionsLink({ hash }) {
+  const open = () => {
+    const url = IS_PREVIEW ? `/src/options/options.html${hash}` : chrome.runtime.getURL(`src/options/options.html${hash}`);
+    try {
+      if (!IS_PREVIEW && chrome.tabs) {
+        chrome.tabs.create({ url });
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    window.open(url, "_blank");
+  };
+  return (
+    <button type="button" class="btn btn-sm" onClick={open}>
+      <SettingsIcon size={13} /> Open Settings
+    </button>
   );
 }
 
 /**
- * Discord sweep controls. Everything is click-driven — the adapter never
- * navigates on its own. State lives in sourceState.discord.state.
+ * Discord sweep controls (kept on the source page's action row until W3's
+ * Check segment lands). Everything is click-driven — the adapter never
+ * navigates on its own.
  * @param {{st: any}} p
  */
 function DiscordControls({ st }) {
   const [copied, setCopied] = useState(false);
   const state = (st && st.state) || {};
   const queue = Array.isArray(state.sweepQueue) ? state.sweepQueue : [];
-  const unread = Array.isArray(state.unreadWatched) ? state.unreadWatched : [];
   const next = queue[0] || null;
 
-  // Reuse an open Discord tab when there is one; otherwise open a new one.
   const openChannel = async (url) => {
     if (IS_PREVIEW) return;
     try {
@@ -306,7 +338,6 @@ function DiscordControls({ st }) {
       if (tab) await chrome.tabs.update(tab.id, { url, active: true });
       else await chrome.tabs.create({ url });
     } catch {
-      /* no tabs permission path — try a plain window open */
       window.open(url, "_blank");
     }
   };
@@ -322,50 +353,31 @@ function DiscordControls({ st }) {
   };
 
   return (
-    <div class="discord-controls">
-      {unread.length ? (
-        <div class="discord-unread">
-          <p class="source-detail">
-            {unread.length} watched channel{unread.length === 1 ? "" : "s"} have new messages
-          </p>
-          {unread.map((ch) => (
-            <button
-              key={ch.channelId}
-              type="button"
-              class="btn btn-sm btn-ghost discord-channel"
-              onClick={() => openChannel(ch.url)}
-            >
-              #{ch.name} · {ch.guildName}
-            </button>
-          ))}
-        </div>
+    <>
+      <button type="button" class="btn btn-sm" onClick={() => send({ type: UI.DISCORD_SWEEP })}>
+        <RefreshIcon size={13} /> Start sweep
+      </button>
+      {next ? (
+        <button
+          type="button"
+          class="btn btn-sm"
+          title={`${next.url} · ${queue.length} left`}
+          onClick={() => openChannel(next.url)}
+        >
+          <ArrowRightIcon size={13} /> #{next.name} · {next.guildName} ({queue.length} left)
+        </button>
       ) : null}
-      <div class="source-actions">
-        <button type="button" class="btn btn-sm" onClick={() => send({ type: UI.DISCORD_SWEEP })}>
-          <RefreshIcon size={13} /> Start sweep
-        </button>
-        {next ? (
-          <button
-            type="button"
-            class="btn btn-sm"
-            title={`${next.url} · ${queue.length} left`}
-            onClick={() => openChannel(next.url)}
-          >
-            <ArrowRightIcon size={13} /> #{next.name} · {next.guildName} ({queue.length} left)
-          </button>
-        ) : null}
-        <button type="button" class="btn btn-sm btn-ghost" onClick={copyReport}>
-          <ClipboardCheckIcon size={13} /> {copied ? "Copied" : "Copy Discord report"}
-        </button>
-      </div>
-    </div>
+      <button type="button" class="btn btn-sm btn-ghost" onClick={copyReport}>
+        <ClipboardCheckIcon size={13} /> {copied ? "Copied" : "Copy report"}
+      </button>
+    </>
   );
 }
 
 /**
- * Guided mail-scan progress. While sourceState.outlook.state.scan is set,
- * the next queued subject is a click-through into the user's own mail tab;
- * Stop clears the scan. Nothing navigates without a click.
+ * Guided mail-scan progress (kept on the source page's action row). While
+ * sourceState.outlook.state.scan is set, the next queued subject is a
+ * click-through into the user's own mail tab; Stop clears the scan.
  * @param {{st: any}} p
  */
 function EmailScanControls({ st }) {
@@ -376,10 +388,8 @@ function EmailScanControls({ st }) {
   if (!scan) return null;
 
   const providerLabel = scan.provider === "gmail" ? "Gmail" : "Outlook";
-  const hostPatterns =
-    /** @type {Record<string, string[]>} */ (OPTIONAL_PERMISSION_GROUPS)[scan.provider] || [];
+  const hostPatterns = /** @type {Record<string, string[]>} */ (OPTIONAL_PERMISSION_GROUPS)[scan.provider] || [];
 
-  /** Open a queued thread in the provider's existing mail tab, else a new tab. */
   const openQueued = async (url) => {
     if (IS_PREVIEW || !url) return;
     try {
@@ -393,31 +403,30 @@ function EmailScanControls({ st }) {
   };
 
   return (
-    <div class="mail-scan-controls">
-      <p class="source-detail">
-        Mail scan running — {providerLabel}, last {scan.days} days.
-      </p>
-      <div class="source-actions">
-        {next ? (
-          <button
-            type="button"
-            class="btn btn-sm"
-            title={next.url}
-            onClick={() => openQueued(next.url)}
-          >
-            <ArrowRightIcon size={13} /> Next ({queue.length} left): {next.subject}
-          </button>
-        ) : (
-          <span class="source-detail">Queue empty — open the search results to feed it.</span>
-        )}
+    <>
+      {next ? (
         <button
           type="button"
-          class="btn btn-sm btn-ghost"
-          onClick={() => send({ type: UI.MAIL_SCAN_STOP })}
+          class="btn btn-sm"
+          title={`Mail scan — ${next.url}`}
+          onClick={() => openQueued(next.url)}
         >
-          Stop
+          <ArrowRightIcon size={13} /> Mail scan ({queue.length} left): {next.subject}
         </button>
-      </div>
-    </div>
+      ) : (
+        <span class="source-detail">Mail scan running — {providerLabel}, queue empty.</span>
+      )}
+      <button type="button" class="btn btn-sm btn-ghost" onClick={() => send({ type: UI.MAIL_SCAN_STOP })}>
+        Stop scan
+      </button>
+    </>
   );
+}
+
+function query0(name) {
+  try {
+    return new URLSearchParams(location.search).get(name);
+  } catch {
+    return null;
+  }
 }

@@ -12,6 +12,12 @@ import { findClashes } from "../../core/clashes.js";
 import { priorityOf } from "../../core/priority.js";
 import { estimateSumMin } from "./itemsheet.js";
 import { archivedProjectItem } from "../../core/projects.js";
+import { startOfDay, fmtTime, fmtDate as fmtDay } from "../../core/dates.js";
+import { isKeyEvent } from "../../ui/dateLabel.js";
+
+// The display formatters live in core/dates.js (one canonical set); callers
+// that imported them from here keep working via these re-exports.
+export { startOfDay, fmtTime, fmtDay };
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -19,33 +25,7 @@ const DAY = 86400000;
 const COUNTDOWN_MS = 3 * HOUR;
 const DONE_RECENT_MS = 7 * DAY;
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 /* ------------------------------- date helpers ------------------------------ */
-
-/** @param {Date|number|string} d */
-export function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-/** "12:30 PM" / "1:20 PM" — drops the minutes' leading zero, keeps AM/PM. */
-export function fmtTime(d) {
-  const x = new Date(d);
-  let h = x.getHours();
-  const m = String(x.getMinutes()).padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
-
-/** "Sat, Sep 26" */
-export function fmtDay(d) {
-  const x = new Date(d);
-  return `${WEEKDAYS[x.getDay()]}, ${MONTHS[x.getMonth()]} ${x.getDate()}`;
-}
 
 /** "Saturday, September 26" */
 export function fmtLongDay(d) {
@@ -175,6 +155,23 @@ export function rowView(item, now) {
 /* --------------------------------- buildAgenda ------------------------------ */
 
 /**
+ * Was this item picked up by `source`? Matches item.source and every
+ * seenIn[*].source entry.
+ * @param {any} item
+ * @param {string} source
+ */
+function itemHitsSource(item, source) {
+  if (item.source === source) return true;
+  if (Array.isArray(item.seenIn)) {
+    for (const e of item.seenIn) {
+      const s = e && typeof e === "object" ? e.source : e;
+      if (s === source) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * @param {Object} p
  * @param {Record<string, any>} p.items       merged items map
  * @param {Record<string, any>} p.userState
@@ -182,12 +179,13 @@ export function rowView(item, now) {
  * @param {Date} p.now
  * @param {string} [p.filter]                 "all"|deadlines|classes|exams|meetings|coop
  * @param {string|null} [p.org]               restrict to one org (normalised compare)
+ * @param {string|null} [p.source]            restrict to one source (source or seenIn)
  * @param {string} [p.q]                      free-text match on title/org/location
  * @param {any[]} [p.projects]               project items of archived projects are hidden
  * @returns {{summary: any, nextClass: any, nextUp: any[], clashes: any[],
  *   clashById: Map<string, any[]>, groups: any[]}}
  */
-export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, q = "", projects = [] }) {
+export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, source = null, q = "", projects = [] }) {
   const today = startOfDay(now);
   const tomorrow = new Date(today.getTime() + DAY);
   const dayAfter = new Date(today.getTime() + 2 * DAY);
@@ -258,6 +256,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     }
 
     if (normOrg && normCourseCode(item.org) !== normOrg) continue;
+    if (source && !itemHitsSource(item, source)) continue;
     if (
       needle &&
       !`${item.title} ${item.org || ""} ${item.location || ""}`.toLowerCase().includes(needle)
@@ -308,6 +307,11 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     }
 
     if (aMs < today.getTime()) push("overdue", item);
+    // Today's classes fold into their own collapsible "Classes today" group —
+    // unless the user explicitly asked for the Classes filter, where they
+    // stay inline with everything else.
+    else if (classish && aMs < tomorrow.getTime() && filter !== "classes" && filter !== "clash")
+      push("classes-today", item);
     else if (aMs < tomorrow.getTime()) push("today", item);
     else if (aMs < dayAfter.getTime()) push("tomorrow", item);
     else if (aMs < weekEnd.getTime()) push(`day:${new Date(aMs).toDateString()}`, item);
@@ -333,10 +337,11 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   };
 
   emit("overdue", "Overdue", { tone: "danger" });
-  emit("today", "Today");
-  emit("tomorrow", "Tomorrow");
+  emit("today", `Today — ${fmtLongDay(today)}`);
+  emit("classes-today", "Classes today", { collapsed: true });
+  emit("tomorrow", `Tomorrow — ${fmtLongDay(tomorrow)}`);
 
-  // The rest of this week, one group per day.
+  // The rest of this week, one group per day, full-date headers.
   for (let t = dayAfter.getTime(); t < weekEnd.getTime(); t += DAY) {
     const key = `day:${new Date(t).toDateString()}`;
     const rows = buckets.get(key);
@@ -344,7 +349,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
       const estMin = estimateSumMin(rows, userState);
       groups.push({
         id: key,
-        label: fmtDay(t),
+        label: fmtLongDay(t),
         count: rows.length,
         estMin: estMin || null,
         collapsedByDefault: false,
@@ -403,6 +408,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
       org: it.org || "",
       anchor: anchor(it),
       priority: priorityOf(it, now),
+      key: isKeyEvent(it),
     })),
     clashes,
     clashById,

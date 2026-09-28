@@ -71,9 +71,10 @@ async function copyStatic() {
 }
 
 /**
- * dist/vendor/pdf.worker.min.mjs — pdfjs's web worker, loaded by the options
- * page via chrome.runtime.getURL (only options imports pdfjs; the worker file
- * itself must ship unbundled).
+ * dist/vendor/pdf.worker.min.mjs — pdfjs's web worker, loaded via
+ * chrome.runtime.getURL by options/pdf-text.js. pdfjs itself is always a
+ * dynamic import (no bundle embeds it), so only the worker file ships
+ * unbundled here.
  */
 async function copyVendor() {
   const src = path.join(REPO, "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs");
@@ -130,7 +131,9 @@ const shared = {
 };
 
 const configs = [
-  { ...shared, format: "esm", entryPoints: ESM_ENTRIES.map((e) => path.join(SRC, e)) },
+  // splitting: lazy dynamic-import chunks (pdfjs stays out of the panel
+  // bundle) plus shared code chunks across the four ESM entries.
+  { ...shared, format: "esm", splitting: true, entryPoints: ESM_ENTRIES.map((e) => path.join(SRC, e)) },
   { ...shared, format: "iife", entryPoints: IIFE_ENTRIES.map((e) => path.join(SRC, e)) },
 ];
 

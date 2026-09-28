@@ -1,16 +1,15 @@
-// Panel shell: sticky header with the brand lockup + sync controls, the
-// Agenda | Calendar | Co-op | Courses segmented tabs, the sources/review/
-// updates overlays, and keyboard shortcuts.
+// Panel shell (v2): sticky header (logo · search · quick add · Review inbox ·
+// Updates bell · gear), the Upcoming | To-do | Calendar | Sources strip with
+// the More dropdown, the review/updates/item/quick-add/check-readers
+// overlays, and keyboard shortcuts.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, query, IS_PREVIEW } from "./data.js";
-import { storeSyncSummary } from "./model/sources.js";
-import { visibleTabs } from "./model/tabs.js";
-import { ADAPTERS, stageForAdapter } from "../core/registry.js";
+import { primaryTabs, moreTabs, migrateTabId } from "./model/tabs.js";
 import { BrandMark } from "../ui/brand.jsx";
-import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, BellOffIcon, ArrowLeftIcon, PlusIcon, ClipboardCheckIcon } from "../ui/icons.jsx";
+import { SettingsIcon, InboxIcon, BellIcon, BellOffIcon, ArrowLeftIcon, PlusIcon, SearchIcon, ChevronDownIcon } from "../ui/icons.jsx";
 import { pauseEndMs } from "../core/pause.js";
-import { Agenda } from "./views/Agenda.jsx";
+import { Upcoming } from "./views/Upcoming.jsx";
 import { Todo } from "./views/Todo.jsx";
 import { CalendarView } from "./views/Calendar.jsx";
 import { Coop } from "./views/Coop.jsx";
@@ -27,7 +26,6 @@ import { CheckReaders } from "./views/CheckReaders.jsx";
 const OVERLAY_TITLES = {
   review: "Review",
   updates: "Updates",
-  sources: "Sources",
   item: "Item",
   quickadd: "Quick add",
   checkreaders: "Check readers",
@@ -56,11 +54,15 @@ function unreadCount(updates, seenAt) {
 
 export function App() {
   const state = useStore();
-  const tabs = useMemo(() => visibleTabs(state.settings), [state.settings]);
+  const tabs = useMemo(() => primaryTabs(state.settings), [state.settings]);
+  const more = useMemo(() => moreTabs(state.settings), [state.settings]);
   const [tab, setTab] = useState(() => {
     const t = query.get("tab");
-    return t || "agenda";
+    if (t) return migrateTabId(t);
+    // ?view=sources was the old overlay link; it's a tab now.
+    return query.get("view") === "sources" ? "sources" : "upcoming";
   });
+  const [moreOpen, setMoreOpen] = useState(() => query.get("more") === "1");
   const tabsNav = useRef(/** @type {any} */ (null));
   const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [qaEditId, setQaEditId] = useState(() => null);
@@ -71,15 +73,9 @@ export function App() {
     const v = query.get("view");
     return v && OVERLAY_TITLES[v] ? v : null;
   });
-  const [syncing, setSyncing] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [toast, setToast] = useState(/** @type {{text: string, action?: {label: string, run: () => void}} | null} */ (null));
   const toastTimer = useRef(/** @type {any} */ (null));
-
-  const summary = useMemo(
-    () => storeSyncSummary(ADAPTERS, state.sourceState, stageForAdapter, now),
-    [state.sourceState, now]
-  );
 
   const reviewCount = useMemo(
     () => pendingCount(state.items, state.userState),
@@ -130,14 +126,6 @@ export function App() {
     [state.actions]
   );
 
-  const refresh = () => {
-    if (syncing) return;
-    setSyncing(true);
-    state.actions.sync();
-    // The sync lands via storage changes; give the spin a bounded life.
-    setTimeout(() => setSyncing(false), 3000);
-  };
-
   const openSettings = () => {
     try {
       if (!IS_PREVIEW && chrome.runtime && chrome.runtime.openOptionsPage) {
@@ -155,10 +143,20 @@ export function App() {
     return () => clearInterval(tick);
   }, []);
 
-  // A hidden current tab (via Settings → Panel tabs) falls back to Agenda.
+  // An unknown/saved-elsewhere current tab falls back to Upcoming.
   useEffect(() => {
-    if (tabs.length && !tabs.some((t) => t.id === tab)) setTab("agenda");
-  }, [tabs, tab]);
+    if (tabs.length && !tabs.some((t) => t.id === tab) && !more.some((t) => t.id === tab)) {
+      setTab("upcoming");
+    }
+  }, [tabs, more, tab]);
+
+  // Close the More dropdown on any outside click.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = () => setMoreOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [moreOpen]);
 
   // Keep the active tab in view when the strip scrolls horizontally.
   useEffect(() => {
@@ -172,32 +170,35 @@ export function App() {
     }
   }, [tab, tabs.length]);
 
+  const goSearch = () => {
+    setOverlay(null);
+    setTab("upcoming");
+    requestAnimationFrame(() => {
+      const el = document.getElementById("upcoming-search");
+      if (el) el.focus();
+    });
+  };
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-      if (e.key === "r") refresh();
       if (e.key === "Escape" && overlay) {
         setOverlay(null);
         return;
       }
-      const digit = ["1", "2", "3", "4", "5", "6", "7"].indexOf(e.key);
+      const digit = ["1", "2", "3", "4"].indexOf(e.key);
       if (digit >= 0 && digit < tabs.length) {
         setOverlay(null);
         setTab(tabs[digit].id);
       }
       if (e.key === "/") {
         e.preventDefault();
-        setOverlay(null);
-        setTab("agenda");
-        requestAnimationFrame(() => {
-          const el = document.getElementById("agenda-search");
-          if (el) el.focus();
-        });
+        goSearch();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [syncing, overlay, tabs]);
+  }, [overlay, tabs]);
 
   /** Known orgs for quick-add: course codes + watched Discord team names. */
   const orgs = useMemo(() => {
@@ -235,16 +236,15 @@ export function App() {
           </div>
         </div>
         <div class="header-actions">
-          {overlay === "sources" ? (
-            <button
-              type="button"
-              class="btn btn-sm"
-              title="Check readers — verify each source sees what it expects"
-              onClick={() => setOverlay("checkreaders")}
-            >
-              <ClipboardCheckIcon size={13} /> Check readers
-            </button>
-          ) : null}
+          <button
+            type="button"
+            class="btn-icon"
+            aria-label="Search"
+            title="Search (/)"
+            onClick={goSearch}
+          >
+            <SearchIcon size={17} />
+          </button>
           <button
             type="button"
             class="btn-icon"
@@ -257,21 +257,6 @@ export function App() {
           >
             <PlusIcon size={17} />
           </button>
-          {overlay ? null : (
-            <button
-              type="button"
-              class={`sync-pill tone-${summary.tone}`}
-              onClick={() => setOverlay("sources")}
-              title={syncing ? "Syncing…" : summary.label}
-              aria-label={`Sources — ${syncing ? "Syncing…" : summary.label}`}
-            >
-              <span class="sync-dot" aria-hidden="true" />
-              <span class="sync-pill-text">{syncing ? "Syncing…" : summary.label}</span>
-              <span class="sync-pill-short" aria-hidden="true">
-                {syncing ? "…" : summary.short}
-              </span>
-            </button>
-          )}
           <button
             type="button"
             class="btn-icon has-badge"
@@ -299,15 +284,6 @@ export function App() {
             {remindersPaused ? <BellOffIcon size={17} /> : <BellIcon size={17} />}
             {updateCount ? <span class="icon-badge">{updateCount}</span> : null}
           </button>
-          <button
-            type="button"
-            class="btn-icon"
-            aria-label="Sync all sources"
-            onClick={refresh}
-            disabled={syncing}
-          >
-            <RefreshIcon size={17} />
-          </button>
           <button type="button" class="btn-icon" aria-label="Settings" onClick={openSettings}>
             <SettingsIcon size={17} />
           </button>
@@ -329,12 +305,47 @@ export function App() {
                 {t.label}
               </button>
             ))}
+            {more.length ? (
+              <div class="more-wrap">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={more.some((t) => t.id === tab)}
+                  aria-expanded={moreOpen}
+                  aria-haspopup="menu"
+                  class={`more-btn${more.some((t) => t.id === tab) ? " active" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMoreOpen(!moreOpen);
+                  }}
+                >
+                  {(more.find((t) => t.id === tab) || {}).label || "More"} <ChevronDownIcon size={12} />
+                </button>
+                {moreOpen ? (
+                  <div class="more-menu" role="menu">
+                    {more.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="menuitem"
+                        aria-selected={tab === t.id}
+                        onClick={() => {
+                          setMoreOpen(false);
+                          setTab(t.id);
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </nav>
       )}
 
       <main class="panel-body" role="tabpanel">
-        {syncing ? <span class="sr-only" role="status">Syncing sources…</span> : null}
         {!overlay && state.lastAudit && state.lastAudit.errors > 0 ? (
           <button
             type="button"
@@ -379,28 +390,18 @@ export function App() {
             now={now}
             onGoAgenda={() => {
               setOverlay(null);
-              setTab("agenda");
-            }}
-          />
-        ) : overlay === "sources" ? (
-          <Sources
-            state={state}
-            actions={actions}
-            now={now}
-            onGoCourses={() => {
-              setOverlay(null);
-              setTab("courses");
+              setTab("upcoming");
             }}
           />
         ) : overlay === "checkreaders" ? (
           <CheckReaders state={state} actions={actions} now={now} />
-        ) : tab === "agenda" ? (
-          <Agenda
+        ) : tab === "sources" ? (
+          <Sources
             state={state}
             actions={actions}
             now={now}
-            onGoSources={() => setOverlay("sources")}
-            onGoCalendar={() => setTab("calendar")}
+            onGoCourses={() => setTab("courses")}
+            onOpenCheck={() => setOverlay("checkreaders")}
           />
         ) : tab === "todo" ? (
           <Todo state={state} actions={actions} now={now} orgs={orgs} />
@@ -417,8 +418,16 @@ export function App() {
             now={now}
             onOpenReview={(org) => actions.openReviewOrg(org)}
           />
-        ) : (
+        ) : tab === "courses" ? (
           <Courses state={state} actions={actions} now={now} />
+        ) : (
+          <Upcoming
+            state={state}
+            actions={actions}
+            now={now}
+            onGoSources={() => setTab("sources")}
+            onGoCalendar={() => setTab("calendar")}
+          />
         )}
       </main>
 
