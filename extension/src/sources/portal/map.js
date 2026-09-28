@@ -525,6 +525,8 @@ export function mapEvents(rows, { scope, at }) {
   const items = [];
   /** @type {Map<number, any>} */
   const terms = new Map();
+  /** Which term-code's readingWeek came from an exact "reading week" title. */
+  const termMeta = new Map();
   for (const row of rows || []) {
     if (row.isEventCancelled) continue;
     const title = String(row.summary || row.name || "").trim();
@@ -575,7 +577,7 @@ export function mapEvents(rows, { scope, at }) {
     };
     items.push(item);
 
-    if (isTerm) collectTerm(terms, title, startDay, endDayInclusive(row, startDay));
+    if (isTerm) collectTerm(terms, title, startDay, endDayInclusive(row, startDay), termMeta);
   }
   return { items, terms: [...terms.values()] };
 }
@@ -612,24 +614,49 @@ export function termWeeks(start, end) {
   return weeks;
 }
 
+/** Range rank: a multi-day span outranks a single day, a range outranks a hole. */
+const spanRank = (r) => (r && r.end && r.start && r.end > r.start ? 2 : r && (r.start || r.end) ? 1 : 0);
+
 /** Fold a term-date title into a TermInfo patch keyed by termCode. */
-function collectTerm(terms, title, startDay, endDay) {
+function collectTerm(terms, title, startDay, endDay, meta) {
   const t = title.toLowerCase();
   const termCode = termCodeFor(new Date(`${startDay}T12:00:00Z`));
   const p = terms.get(termCode) || { termCode };
+  const m = (meta && meta.get(termCode)) || {};
   if (/reading week|fall break|study (day|break)/.test(t)) {
-    p.readingWeek = { start: startDay, end: endDay || startDay };
+    // "Study day"/"study break" rows are single-day pre-exam pauses — they
+    // are not the reading week and must never overwrite it.
+    if (!/study (day|break)/.test(t)) {
+      const next = { start: startDay, end: endDay || startDay };
+      const exact = /reading week/.test(t);
+      // An exact "reading week" title always wins; at equal rank the wider
+      // span wins and the first writer keeps ties.
+      if (
+        !p.readingWeek ||
+        (exact && !m.rwExact) ||
+        (exact === !!m.rwExact && spanRank(next) > spanRank(p.readingWeek))
+      ) {
+        p.readingWeek = next;
+        m.rwExact = exact;
+      }
+    }
   } else if (/mid-?term/.test(t)) {
-    p.midtermWeek = { start: startDay, end: endDay || startDay };
+    const next = { start: startDay, end: endDay || startDay };
+    if (!p.midtermWeek || spanRank(next) > spanRank(p.midtermWeek)) p.midtermWeek = next;
   } else if (/(exam(ination)?s? (period|begin|start))/.test(t)) {
-    p.examPeriod = { ...(p.examPeriod || {}), start: startDay };
-    if (/period/.test(t) && endDay && endDay > startDay) p.examPeriod.end = endDay;
+    const period = /period/.test(t) && endDay && endDay > startDay;
+    const prev = p.examPeriod || {};
+    // A "begin" row never pulls the start of an established period range.
+    p.examPeriod = { ...prev, start: prev.start && prev.end && !period ? prev.start : startDay };
+    if (period) p.examPeriod.end = endDay;
   } else if (/exam(ination)?s? end/.test(t)) {
-    p.examPeriod = { ...(p.examPeriod || {}), end: endDay || startDay };
+    const prev = p.examPeriod || {};
+    p.examPeriod = { ...prev, end: prev.end || endDay || startDay };
   } else if (/(lectures?|classes) (begin|start)|first day of (lectures|classes)/.test(t)) {
     p.start = startDay;
   } else if (/(lectures?|classes) end|last day of (lectures|classes)/.test(t)) {
     p.end = endDay || startDay;
   }
+  if (meta) meta.set(termCode, m);
   terms.set(termCode, p);
 }

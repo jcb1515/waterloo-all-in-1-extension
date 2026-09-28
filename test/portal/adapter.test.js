@@ -404,6 +404,73 @@ test("DailyEventsV2 -> term-dates, campus events, TermInfo, skips", async () => 
   assert.deepEqual(weeks[13], { n: 14, start: "2026-12-07", end: "2026-12-07" });
 });
 
+test("a pre-exam study day never overwrites the reading week", async () => {
+  // Live bug: DailyEventsV2 also carries a 1-day pre-exam "Study day"; it
+  // matched the reading-week regex and overwrote the real Oct 10-18 break.
+  /** @param {string} summary @param {string} startDate @param {string} endDate @param {string} key */
+  const row = (summary, startDate, endDate, key) => ({
+    summary,
+    name: "Important dates",
+    allDay: true,
+    startDate,
+    endDate,
+    key,
+    isEventCancelled: false,
+  });
+  const readingWeek = row(
+    "Reading Week",
+    "2026-10-10T00:00:00",
+    "2026-10-19T00:00:00", // 00:00 end is already exclusive -> Oct 18
+    "cal-term-reading-week-1269",
+  );
+  const studyDay = row(
+    "Study day",
+    "2026-12-09T00:00:00",
+    "2026-12-09T23:59:00",
+    "cal-term-study-day-1269",
+  );
+  const eventsBody = (/** @type {any[]} */ data) =>
+    JSON.stringify({ meta: { status: 200, type: "success" }, data });
+
+  for (const data of [
+    [readingWeek, studyDay],
+    [studyDay, readingWeek],
+  ]) {
+    const res = await adapter.observe.parse(payload(URLS.events, eventsBody(data)), ctx());
+    const term = res.terms.find((t) => t.termCode === 1269);
+    assert.deepEqual(term.readingWeek, { start: "2026-10-10", end: "2026-10-18" });
+  }
+
+  // Across observes too: a later payload's 1-day break row can't shrink it.
+  const r1 = await adapter.observe.parse(
+    payload(URLS.events, eventsBody([readingWeek])),
+    ctx(),
+  );
+  const r2 = await adapter.observe.parse(
+    payload(URLS.events, eventsBody([studyDay])),
+    ctx(r1.state),
+  );
+  const term = r2.terms.find((t) => t.termCode === 1269);
+  assert.deepEqual(term.readingWeek, { start: "2026-10-10", end: "2026-10-18" });
+});
+
+test("an exact reading-week title wins over a vaguer break row", async () => {
+  const row = (/** @type {string} */ summary, /** @type {string} */ startDate, /** @type {string} */ endDate) => ({
+    summary,
+    name: "Important dates",
+    allDay: true,
+    startDate,
+    endDate,
+    isEventCancelled: false,
+  });
+  const fallBreak = row("Fall break", "2026-10-10T00:00:00", "2026-10-10T23:59:00");
+  const readingWeek = row("Reading Week", "2026-10-10T00:00:00", "2026-10-19T00:00:00");
+  const body = JSON.stringify({ meta: { status: 200, type: "success" }, data: [fallBreak, readingWeek] });
+  const res = await adapter.observe.parse(payload(URLS.events, body), ctx());
+  const term = res.terms.find((t) => t.termCode === 1269);
+  assert.deepEqual(term.readingWeek, { start: "2026-10-10", end: "2026-10-18" });
+});
+
 test("courses and terms accumulate across observes", async () => {
   const r1 = await adapter.observe.parse(payload(URLS.enrollments, json("enrollments")), ctx());
   const r2 = await adapter.observe.parse(payload(URLS.exams, json("exams")), ctx(r1.state));
