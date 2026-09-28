@@ -20,6 +20,13 @@ import {
   RANKINGS_CLOSED_RE,
   LOGGED_OUT_PATH_RE,
   LOGGED_OUT_TEXT_RE,
+  DASHBOARD_PATH_RE,
+  DASHBOARD_CONTAINER_SELECTOR,
+  DASH_ACTIONS_SELECTOR,
+  DASH_RANKINGS_HEADING_RE,
+  SCHEDULE_INTERVIEW_RE,
+  NEW_MESSAGES_LABEL_RE,
+  WEBCAM_LABEL_RE,
   COOP_DETAILS_SELECTOR,
   COOP_SUMMARY_SELECTOR,
   COOP_MONTH_HEADING_RE,
@@ -331,6 +338,62 @@ const isPosting = (doc) => {
 
 const isRankings = (doc) => Boolean(findTextElement(doc, RANKINGS_HEADING_RE));
 
+// --- dashboard detection -----------------------------------------------------
+
+/**
+ * The dashboard's "Your Upcoming Schedule" table: Time/Type/Name/Status
+ * headers, day carried by a <strong> above the table.
+ * @param {any} doc
+ */
+const hasScheduleTable = (doc) => {
+  for (const table of uniqueTables(doc)) {
+    const labels = headerLabels(table);
+    if (
+      labels.length &&
+      TABLE_RULES.schedule.every((label) => labels.includes(label))
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * A day-grouped upcoming-events table: a lone <th colspan> header cell whose
+ * text is a date ("Monday, September 28, 2026"). colspan >= 2 keeps the
+ * single-th day headers of interview-detail slot tables out.
+ * @param {any} table
+ */
+function isDashEventTable(table) {
+  const header = headerRowOf(table);
+  if (!header || header.cells.length !== 1) return false;
+  const cell = header.cells[0];
+  if (cell.tagName !== "TH") return false;
+  const span = parseInt(cell.getAttribute("colspan") || "1", 10);
+  if (!Number.isFinite(span) || span < 2) return false;
+  return Boolean(parseWwDate(cleanText(cell)));
+}
+
+/** @param {any} doc */
+const hasDashEventTable = (doc) => uniqueTables(doc).some(isDashEventTable);
+
+/**
+ * The Orbis dashboard is a multi-module page (schedule, events, messages,
+ * rankings, sequence). Detected by URL — snapshots and recorder fragments
+ * always carry the page URL — or, on a full DOM, by its wrapper or modules.
+ * @param {any} doc
+ * @param {string} [url]
+ */
+export function isDashboard(doc, url = "") {
+  if (DASHBOARD_PATH_RE.test(pathOf(url))) return true;
+  try {
+    if (doc.querySelector(DASHBOARD_CONTAINER_SELECTOR)) return true;
+  } catch {
+    // querySelector may be absent on garbage docs — fall through.
+  }
+  return hasScheduleTable(doc) || hasDashEventTable(doc);
+}
+
 /**
  * @param {any} doc
  * @param {{url?: string}} [opts]
@@ -346,6 +409,9 @@ export function detectPage(doc, opts = {}) {
   if (isMessageDetail(doc)) return "message-detail";
   if (isPosting(doc)) return "posting";
   if (isRankings(doc)) return "rankings";
+  // Last: a recognised single-purpose page keeps its name; the dashboard is
+  // the multi-module catch-all (its own tables match nothing above).
+  if (isDashboard(doc, url)) return "dashboard";
   return "unknown";
 }
 
@@ -820,6 +886,169 @@ export function parseCoopDates(doc) {
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard
+
+/**
+ * The dashboard is multi-module: day-grouped "Your Upcoming Schedule" tables
+ * (day in a <strong> above each table), day-grouped "Upcoming Events /
+ * Workshops" tables (day in a lone colspan'd th), message/webcam count tables
+ * and the "Rank and Match" rankings notice.
+ *
+ * A document-order scan of <strong> + <table> pairs each schedule table with
+ * the date-strong above it; this works on the live DOM and on content.js's
+ * flattened snapshots alike (elements keep document order there). Sections
+ * are emitted only when their structure is present — the adapter treats
+ * presence as "that module was read".
+ * @param {any} doc
+ * @returns {{ok: boolean, schedule?: {tables: number, rows: any[]},
+ *   events?: {tables: number, rows: any[]}, newMessages?: number,
+ *   webcamAppointments?: number,
+ *   rankings?: {term: string|undefined, open: boolean, note: string|undefined}}}
+ */
+export function parseDashboard(doc) {
+  /** @type {{tables: number, rows: any[]}|undefined} */
+  let schedule;
+  /** @type {{tables: number, rows: any[]}|undefined} */
+  let events;
+  /** @type {number|undefined} */
+  let newMessages;
+  /** @type {number|undefined} */
+  let webcamAppointments;
+  /** @type {{term: string|undefined, open: boolean, note: string|undefined}|undefined} */
+  let rankings;
+
+  // Interview-detail slot tables also open with a single-th date row; the
+  // colspan guard plus this check keep them out of the events parse.
+  const detailPage = isInterviewDetail(doc);
+  /** @type {string|undefined} current day for schedule tables */
+  let day;
+  for (const el of doc.querySelectorAll("strong, table")) {
+    if (el.tagName === "STRONG") {
+      const text = cleanText(el);
+      if (text && parseWwDate(text)) day = text;
+      continue;
+    }
+    // TABLE — a day-grouped events table carries its own date.
+    if (!detailPage && isDashEventTable(el)) {
+      const header = headerRowOf(el);
+      const dayText = header ? cleanText(header.cells[0]) : "";
+      if (!events) events = { tables: 0, rows: [] };
+      events.tables++;
+      for (const tr of tableRows(el)) {
+        const cells = cellElements(tr);
+        if (cells.length < 2 || cells[0].tagName === "TH") continue;
+        // Cell 1: a <div> holding "11:30 AM ET - 01:30 PM ET", then the
+        // event category as loose text. Find the line that parses as a
+        // range; everything else in the cell is the category.
+        const lines = cleanLines(cells[0]);
+        /** @type {{startAt: string, endAt: string}|null} */
+        let range = null;
+        let categoryLines = lines;
+        for (let i = 0; i < lines.length; i++) {
+          const found = parseWwTimeRange(dayText, lines[i]);
+          if (found) {
+            range = found;
+            categoryLines = lines.slice(0, i).concat(lines.slice(i + 1));
+            break;
+          }
+        }
+        // Cell 2: <b> event name, optional .label registration badge and a
+        // <small> location.
+        const nameEl = cells[1].querySelector("b");
+        const small = cells[1].querySelector("small");
+        const labelEl = cells[1].querySelector(".label");
+        events.rows.push({
+          dayText,
+          date: parseWwDate(dayText) || undefined,
+          startAt: range ? range.startAt : undefined,
+          endAt: range ? range.endAt : undefined,
+          category: categoryLines.join(" ").trim() || undefined,
+          name: nameEl ? cleanText(nameEl) : cleanText(cells[1]),
+          location: small ? cleanText(small) || undefined : undefined,
+          registration: labelEl ? cleanText(labelEl) || undefined : undefined,
+        });
+      }
+      continue;
+    }
+    const labels = headerLabels(el);
+    if (
+      labels.length &&
+      TABLE_RULES.schedule.every((label) => labels.includes(label))
+    ) {
+      if (!schedule) schedule = { tables: 0, rows: [] };
+      schedule.tables++;
+      for (const obj of rowsAsObjects(el, "schedule")) {
+        const name = obj.nameText || "";
+        const match = SCHEDULE_INTERVIEW_RE.exec(name);
+        const range = day ? parseWwTimeRange(day, obj.timeText || "") : null;
+        schedule.rows.push({
+          dayText: day,
+          date: day ? parseWwDate(day) || undefined : undefined,
+          startAt: range ? range.startAt : undefined,
+          endAt: range ? range.endAt : undefined,
+          entryType: obj.entryType || undefined,
+          name,
+          jobId: match ? match[2] : undefined,
+          jobTitle: match ? match[1].trim() : undefined,
+          status: obj.statusText || undefined,
+          conflicts: obj.conflictsText ? obj.conflictsText.trim() : undefined,
+        });
+      }
+      continue;
+    }
+    // Count tables: a row names the metric, a .value cell holds the number
+    // ("New Messages", "Webcam Appointments").
+    for (const tr of tableRows(el)) {
+      const cells = cellElements(tr);
+      if (cells.length < 2) continue;
+      const text = cleanText(cells[1]);
+      const valueCell = cells.find(
+        (cell) => cell.classList && cell.classList.contains("value")
+      );
+      const count = valueCell ? parseInt(cleanText(valueCell), 10) : NaN;
+      if (!Number.isFinite(count)) continue;
+      if (NEW_MESSAGES_LABEL_RE.test(text)) newMessages = count;
+      else if (WEBCAM_LABEL_RE.test(text)) webcamAppointments = count;
+    }
+  }
+
+  // "Rank and Match": .orbis-posting-actions holds "RANKING (term)" and the
+  // open/closed notice text.
+  for (const block of doc.querySelectorAll(DASH_ACTIONS_SELECTOR)) {
+    const heading = block.querySelector("strong, b");
+    const match = heading
+      ? DASH_RANKINGS_HEADING_RE.exec(cleanText(heading))
+      : null;
+    const note = findTextElement(block, RANKINGS_CLOSED_RE);
+    if (match || note) {
+      rankings = {
+        term: match ? match[1].trim() : undefined,
+        open: !note,
+        note: note ? cleanText(note) : undefined,
+      };
+    }
+  }
+
+  const ok = Boolean(
+    schedule ||
+      events ||
+      rankings ||
+      newMessages !== undefined ||
+      webcamAppointments !== undefined
+  );
+  /** @type {any} */
+  const out = { ok };
+  if (schedule) out.schedule = schedule;
+  if (events) out.events = events;
+  if (newMessages !== undefined) out.newMessages = newMessages;
+  if (webcamAppointments !== undefined) {
+    out.webcamAppointments = webcamAppointments;
+  }
+  if (rankings) out.rankings = rankings;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * Detect the page then run every parser whose structure is present — one
@@ -843,5 +1072,7 @@ export function parseAll(doc, opts = {}) {
   if (isMessageDetail(doc)) out["message-detail"] = parseMessageDetail(doc);
   if (isPosting(doc)) out.posting = parsePosting(doc);
   if (isRankings(doc)) out.rankings = parseRankings(doc);
+  const dashboard = parseDashboard(doc);
+  if (dashboard.ok) out.dashboard = dashboard;
   return out;
 }

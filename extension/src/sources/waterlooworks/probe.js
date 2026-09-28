@@ -15,6 +15,7 @@ import {
   parseInterviewDetail,
   parseMessageDetail,
   parseRankings,
+  parseDashboard,
 } from "./parsers.js";
 
 /** @typedef {{page: string, counts: Record<string, number>, ok: boolean, hints: string[]}} ProbeResult */
@@ -130,7 +131,8 @@ export function probe(doc, href) {
         };
       }
       case "events": {
-        // The events table lives on the dashboard.
+        // The registrations grid — either its own page or an older dashboard
+        // layout (both report as the dashboard checklist entry).
         const res = parseEventRegistrations(doc);
         const counts = { eventRows: res.rows.length };
         const ok = counts.eventRows > 0;
@@ -139,6 +141,29 @@ export function probe(doc, href) {
           counts,
           ok,
           hints: ok ? [] : ["Open the WaterlooWorks dashboard."],
+        };
+      }
+      case "dashboard": {
+        const res = parseDashboard(doc);
+        const counts = {
+          scheduleTables: res.schedule?.tables ?? 0,
+          scheduleRows: res.schedule?.rows.length ?? 0,
+          eventDays: res.events?.tables ?? 0,
+          eventRows: res.events?.rows.length ?? 0,
+          newMessages: res.newMessages ?? 0,
+          webcamToday: res.webcamAppointments ?? 0,
+          rankingsNotice: res.rankings?.note ? 1 : 0,
+        };
+        const ok = counts.scheduleRows + counts.eventRows > 0;
+        return {
+          page: "dashboard",
+          counts,
+          ok,
+          hints: ok
+            ? []
+            : [
+                "Nothing dated was readable — reopen the dashboard once its modules have loaded.",
+              ],
         };
       }
       case "messages": {

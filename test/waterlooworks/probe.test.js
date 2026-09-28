@@ -96,6 +96,38 @@ test("dashboard counts event rows", () => {
   assert.deepEqual(probe(doc("events.html"), "").counts, { eventRows: 3 });
 });
 
+test("the live dashboard layout counts every module", () => {
+  const r = probe(
+    doc("dashboard-live.html"),
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(r.page, "dashboard");
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.counts, {
+    scheduleTables: 1,
+    scheduleRows: 2,
+    eventDays: 2,
+    eventRows: 5,
+    newMessages: 2,
+    webcamToday: 0,
+    rankingsNotice: 1,
+  });
+  assert.deepEqual(r.hints, []);
+  // The content.js snapshot of the same page reads the same way.
+  const snap = probe(doc("dashboard-snapshot.html"), "");
+  assert.deepEqual(snap.counts, r.counts);
+});
+
+test("a dashboard with nothing dated is not ok", () => {
+  const r = probe(
+    doc("applications-missing.html"),
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(r.page, "dashboard");
+  assert.equal(r.ok, false);
+  assert.ok(r.hints.length > 0);
+});
+
 test("messages inbox and message detail", () => {
   const inbox = probe(doc("messages.html"), `${WW}/messages.htm`);
   assert.equal(inbox.page, "messages");
@@ -155,6 +187,8 @@ test("probe output carries no page text — counts only", () => {
     "message-detail.html",
     "messages.html",
     "dashboard.html",
+    "dashboard-live.html",
+    "dashboard-snapshot.html",
   ]) {
     const r = probe(doc(name), "");
     const json = JSON.stringify(r);
@@ -166,6 +200,9 @@ test("probe output carries no page text — counts only", () => {
       "Casey Advisor",
       "confidential",
       "Virtual Room",
+      "Initech",
+      "Umbrella",
+      "Tatham",
     ]) {
       assert.ok(!json.includes(secret), `${name} leaked "${secret}"`);
     }

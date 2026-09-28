@@ -26,8 +26,9 @@ const NUMERIC_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*([
 const TIME = /(\d{1,2}):(\d{2})\s*([ap])\.?m\.?/i;
 // "Oct 2, 2026 from 4:00 PM ET to 4:30 PM ET"
 const RANGE = /^(.*?)\s+from\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s+to\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s*$/i;
-// "12:30 PM ET to 01:00 PM ET" (slot rows carry their date in a day header)
-const TIME_RANGE = /(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s+to\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?/i;
+// "12:30 PM ET to 01:00 PM ET" (slot rows carry their date in a day header);
+// the dashboard's schedule/events modules use "11:30 AM ET - 01:30 PM ET".
+const TIME_RANGE = /(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s*(?:to|[-–—])\s*(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?/i;
 
 /** @typedef {{y: number, m: number, d: number, h?: number, mi?: number}} DateParts */
 
