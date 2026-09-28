@@ -26,6 +26,7 @@ import {
   resolveTarget,
   canTouch,
   extPageUrl,
+  checkRunDone,
 } from "../../tools/live/cdp.mjs";
 
 const TOOLS_LIVE = path.resolve(
@@ -330,4 +331,18 @@ test("canTouch trusts only ids recorded in .opened.json", () => {
   assert.equal(canTouch("A1", []), false);
   assert.equal(canTouch("A1", undefined), false);
   assert.equal(canTouch("", opened), false);
+});
+
+test("checkRunDone returns only a terminal entry for the exact runId", () => {
+  const runs = {
+    learn: { runId: "r1", status: "running" },
+    outline: { runId: "r2", status: "ok", checked: 4, newItems: 1 },
+    gmail: { runId: "r3", status: "failed", reason: "timeout" },
+  };
+  assert.equal(checkRunDone(runs, "learn", "r1"), null, "still running");
+  assert.equal(checkRunDone(runs, "learn", "other"), null, "stale runId");
+  assert.deepEqual(checkRunDone(runs, "outline", "r2"), runs.outline);
+  assert.equal(checkRunDone(runs, "gmail", "r3").reason, "timeout");
+  assert.equal(checkRunDone(runs, "portal", "r2"), null);
+  assert.equal(checkRunDone(null, "learn", "r1"), null);
 });

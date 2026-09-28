@@ -291,6 +291,18 @@ export function canTouch(targetId, opened) {
   );
 }
 
+/**
+ * checkRuns[source] entry for `runId`, only once it reaches a terminal
+ * state — null while the run is still in flight or a different/stale run
+ * occupies the slot.
+ * @param {any} checkRuns @param {string} source @param {string} runId
+ */
+export function checkRunDone(checkRuns, source, runId) {
+  const r = (checkRuns && checkRuns[source]) || null;
+  if (!r || r.runId !== runId || r.status === "running") return null;
+  return r;
+}
+
 /* ---------------------------- extension pages ---------------------------- */
 
 const EXT_ID_RE = /^[a-p]{32}$/;
@@ -1104,6 +1116,86 @@ async function cmdScreenshot(extPath, opts = {}) {
   }
 }
 
+/**
+ * check-now: fire UI.CHECK_NOW through runtime.sendMessage from one of our
+ * OWN extension pages (a page wakes the MV3 worker; sendMessage from the
+ * service worker itself never loops back to it). If no extension page is
+ * live, the panel is opened in a tool-owned tab and closed afterwards.
+ * Then polls checkRuns[source] until the run terminates or 100 s pass.
+ * @param {string} source @param {string|null} extId
+ */
+async function cmdCheckNow(source, extId) {
+  const id = String(extId || process.env.WA1_EXT_ID || "");
+  if (!id) die("usage: check-now <source> [--ext <id>] — or set WA1_EXT_ID.");
+  const src = String(source || "");
+
+  const targets = await listTargets();
+  let page = extPageTargets(targets, id).find((t) => t.webSocketDebuggerUrl);
+  let wakeTabId = null;
+  if (!page) {
+    const url = extPageUrl(id, "src/panel/panel.html");
+    if (!url) die(`cannot build a wake page for extension "${id}".`);
+    const browser = await browserCdp();
+    try {
+      const created = await browser.send("Target.createTarget", { url });
+      wakeTabId = created && created.targetId;
+    } finally {
+      browser.close();
+    }
+    if (!wakeTabId) die("Target.createTarget returned no tab id.");
+    writeOpened([
+      ...readOpened(),
+      {
+        targetId: String(wakeTabId),
+        url,
+        source: "extension",
+        rowId: "page",
+        openedAt: new Date().toISOString(),
+      },
+    ]);
+    console.log(`wake tab ${wakeTabId}\t${hostPathOf(url)} (closing after)`);
+  }
+
+  const cdp = await connectTabById(page ? page.id : wakeTabId);
+  const started = Date.now();
+  try {
+    const res = await cdp.eval(
+      `chrome.runtime.sendMessage({ type: "wa1:check-now-request", source: ${JSON.stringify(src)} })`,
+      { awaitPromise: true },
+    );
+    if (!res || res.accepted !== true) {
+      console.log(
+        `${src}\trejected\t${JSON.stringify(res && res.reason ? res.reason : res ?? "no answer")}`,
+      );
+      return;
+    }
+    console.log(`${src}\taccepted\trunId=${res.runId}`);
+    const deadline = Date.now() + 100000;
+    for (;;) {
+      const got = await cdp
+        .eval('chrome.storage.local.get("checkRuns")', { awaitPromise: true })
+        .catch(() => null);
+      const done = checkRunDone(got && got.checkRuns, src, res.runId);
+      if (done) {
+        const secs = ((Date.now() - started) / 1000).toFixed(1);
+        console.log(
+          `${src}\t${done.status}${done.reason ? `\t${done.reason}` : ""}` +
+            `\tchecked=${done.checked ?? "-"}\tnewItems=${done.newItems ?? "-"}\t${secs}s`,
+        );
+        return;
+      }
+      if (Date.now() >= deadline) {
+        console.log(`${src}\tno result within 100s (checkRuns may still say running)`);
+        return;
+      }
+      await sleep(1000);
+    }
+  } finally {
+    cdp.close();
+    if (wakeTabId) await closeTargetQuiet(wakeTabId);
+  }
+}
+
 async function cmdWatch(sourceId, secs, extId) {
   const until = Date.now() + secs * 1000;
   /** @type {string|null} */
@@ -1166,6 +1258,7 @@ async function main() {
   storage [key] [--source id]     read chrome.storage.local (SW target)
   watch [--source id] [--secs n]  poll storage every 2s, print changes
   reload-ext [--ext id]           reload our own extension (its SW only)
+  check-now <source> [--ext id]   wa1:check-now-request, then poll checkRuns
   screenshot <extPath> [opts]     PNG of an extension page -> captures/live/
                                   opts: --width 360 --height 900 --name x --ext id
 
@@ -1208,6 +1301,9 @@ close/scroll only reach tool-opened tabs; discord.com is always refused.`);
       );
     case "reload-ext":
       return cmdReloadExt(argValue(rest, "--ext"));
+    case "check-now":
+      if (!rest[0] || rest[0].startsWith("--")) die("usage: check-now <source> [--ext id]");
+      return cmdCheckNow(rest[0], argValue(rest, "--ext"));
     case "screenshot":
       if (!rest[0] || rest[0].startsWith("--")) {
         die("usage: screenshot <extPath> [--width n] [--height n] [--name x] [--ext id]");
@@ -1219,7 +1315,7 @@ close/scroll only reach tool-opened tabs; discord.com is always refused.`);
         name: argValue(rest, "--name"),
       });
     default:
-      die(`unknown command "${cmd}" — try: tabs, open, close, scroll, dump, probe, storage, watch, reload-ext, screenshot`);
+      die(`unknown command "${cmd}" — try: tabs, open, close, scroll, dump, probe, storage, watch, reload-ext, check-now, screenshot`);
   }
 }
 

@@ -72,6 +72,7 @@ npm run live -- storage sourceState         # per-source status/lastOk/lastRun/e
 npm run live -- watch --source waterlooworks --secs 120
 npm run live -- reload-ext                  # chrome.runtime.reload() in our SW
 npm run live -- reload-ext --ext <id>       # or WA1_EXT_ID=<id>
+npm run live -- check-now learn             # wa1:check-now-request, then poll checkRuns
 npm run live -- screenshot src/panel/panel.html?more=1 --name more-360
 npm run live -- screenshot src/options/options.html --width 400 --height 800
 ```
@@ -109,6 +110,16 @@ sleep — it first tries to wake the extension by evaluating
 loading `src/panel/panel.html` in a tool-created tab (closed once the worker
 answers, on success or failure). No page outside that extension id is
 touched.
+
+`check-now <source>` sends `wa1:check-now-request` via
+`chrome.runtime.sendMessage` evaluated inside one of the extension's own
+pages — `sendMessage` can only reach the service worker from a page, never
+from the worker itself. With no live extension page it opens
+`src/panel/panel.html` in a tool-created tab and closes it afterwards. The
+command polls `checkRuns[source]` (through the same page) until the run
+leaves `running` or 100 s pass, then prints status/reason/checked/newItems.
+Any tab the orchestrator itself opens (an inactive site tab for a source
+with none open) is created and closed by the extension, not the tool.
 
 `screenshot` needs an extension page path relative to the extension root
 (`src/panel/panel.html`, `src/options/options.html`, query strings allowed).
