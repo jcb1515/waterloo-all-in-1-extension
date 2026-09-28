@@ -166,6 +166,58 @@ test("sync disabled -> failed disabled", async () => {
   assert.equal(run.reason, "disabled");
 });
 
+test("already-running sync: waits for the concurrent run's stamp", async () => {
+  const deps = fakeDeps({
+    runSync: async () => ({ ok: false, reason: "already-running" }),
+  });
+  const origGet = deps.store.getLocal;
+  deps.store.getLocal = async (/** @type {string} */ k) => {
+    // the in-flight sync lands ~5 virtual seconds after our check started
+    if (k === "sourceState" && deps.now() >= T0 + 5000 && !deps.data.sourceState.learn) {
+      deps.data.sourceState.learn = {
+        lastRunAt: new Date(deps.now()).toISOString(),
+        session: "signed-in",
+      };
+    }
+    return origGet(k);
+  };
+  startCheck("learn", deps);
+  const run = await settle(deps, "learn");
+  assert.equal(run.status, "ok");
+  assert.equal(deps.calls.stamp.length, 1);
+});
+
+test("already-running sync landing signed-out -> failed signed-out", async () => {
+  const deps = fakeDeps({
+    runSync: async () => ({ ok: false, reason: "already-running" }),
+  });
+  const origGet = deps.store.getLocal;
+  deps.store.getLocal = async (/** @type {string} */ k) => {
+    if (k === "sourceState" && deps.now() >= T0 + 2000 && !deps.data.sourceState.learn) {
+      deps.data.sourceState.learn = {
+        lastRunAt: new Date(deps.now()).toISOString(),
+        session: "signed-out",
+      };
+    }
+    return origGet(k);
+  };
+  startCheck("learn", deps);
+  const run = await settle(deps, "learn");
+  assert.equal(run.status, "failed");
+  assert.equal(run.reason, "signed-out");
+  assert.equal(deps.calls.stamp.length, 0);
+});
+
+test("already-running sync that never stamps -> failed error at the deadline", async () => {
+  const deps = fakeDeps({
+    runSync: async () => ({ ok: false, reason: "already-running" }),
+  });
+  startCheck("learn", deps);
+  const run = await settle(deps, "learn");
+  assert.equal(run.status, "failed");
+  assert.equal(run.reason, "error");
+});
+
 test("newItems counts only this source's new ids in the raw record", async () => {
   const deps = fakeDeps({
     runSync: async () => {

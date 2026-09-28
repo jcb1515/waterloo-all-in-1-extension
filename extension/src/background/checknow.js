@@ -169,24 +169,43 @@ async function runCheck(source, run, deps) {
 
 async function runSyncCheck(source, adapterId, run, deps) {
   const res = await deps.runSync(adapterId, "manual");
-  if (!res || !res.ok) {
-    return { ok: false, reason: res && res.reason === "disabled" ? "disabled" : "error" };
+  if (res && res.ok === false) {
+    if (res.reason === "disabled") return { ok: false, reason: "disabled" };
+    // already-running means a sync is doing the read we asked for — wait
+    // for its fresh sourceState stamp and take the verdict from that.
+    if (res.reason !== "already-running") return { ok: false, reason: "error" };
+  } else if (!res || !res.ok) {
+    return { ok: false, reason: "error" };
   }
   // runSync reports {ok:true} even for a signed-out/no-tab adapter result;
-  // the session it just stamped on sourceState is the real verdict.
-  try {
-    const states = (await deps.store.getLocal("sourceState")) || {};
-    const st = states[adapterId];
-    const lastRun = st && st.lastRunAt ? Date.parse(st.lastRunAt) : 0;
-    if (st && lastRun >= run.startedAtMs) {
-      if (st.session === "signed-out") return { ok: false, reason: "signed-out" };
-      if (st.session === "no-tab") return { ok: false, reason: "not-on-page" };
-      if (st.error) return { ok: false, reason: "error" };
-    }
-  } catch {
-    /* fall through to ok */
-  }
+  // the session it stamps on sourceState is the real verdict. The stamp's
+  // lastRunAt must be from this run (or the concurrent one), not stale.
+  const st = await freshSourceState(adapterId, run, deps);
+  if (!st) return res && res.ok === true ? { ok: true } : { ok: false, reason: "error" };
+  if (st.session === "signed-out") return { ok: false, reason: "signed-out" };
+  if (st.session === "no-tab") return { ok: false, reason: "not-on-page" };
+  if (st.error) return { ok: false, reason: "error" };
   return { ok: true };
+}
+
+/**
+ * sourceState[adapterId] once it carries a stamp from this run
+ * (lastRunAt >= startedAt). A finishing sync always writes lastRunAt; the
+ * poll stops at the run deadline.
+ */
+async function freshSourceState(adapterId, run, deps) {
+  while (deps.now() - run.startedAtMs < CHECK_TIMEOUT_MS) {
+    try {
+      const states = (await deps.store.getLocal("sourceState")) || {};
+      const st = states[adapterId];
+      const lastRun = st && st.lastRunAt ? Date.parse(st.lastRunAt) : 0;
+      if (st && lastRun >= run.startedAtMs) return st;
+    } catch {
+      /* keep polling */
+    }
+    await deps.sleep(1000);
+  }
+  return null;
 }
 
 async function runTabCheck(source, run, deps) {
