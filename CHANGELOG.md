@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.4.0 — 2026-09-28
+
+### Check now that actually checks
+
+- **Check now on every source** (Sources tiles and source pages). It reads
+  the site right away and then says what happened: "Checked 50 · 3 new ·
+  just now", "Signed out of Outlook — Open", or "Open Portal to check".
+  If no tab for that site is open, the extension opens one in the
+  background and closes it when it's done. Discord is never opened for
+  you.
+- **Fixes "Check again does nothing" after an update.** Pages that were
+  already open used to lose their connection to the extension until you
+  reloaded them. The extension now reconnects to open tabs after it
+  installs, updates or starts.
+- A successful check ticks off that source's "Get set up" rows straight
+  away.
+- Every **Open** button in Sources opens the right page (for example your
+  Outlook inbox) in a new tab.
+
+### Add what the extension found
+
+- **Add to calendar** from any item: open an event, email deadline,
+  Discord event or WaterlooWorks info session and add it. It shows in
+  Upcoming and goes to your Google Calendar. **Remove from calendar** takes
+  it back off. Items already on your Google Calendar say so.
+- **Edit & add**: fix the title or time before adding.
+- **Add to To-do / Remove from To-do** on any dated item.
+- **Found, not added yet** in Upcoming lists what the extension found in
+  the next three weeks but hasn't added, with Add, Add to To-do and
+  Dismiss on each row.
+- Deadlines from Gmail, Outlook, Discord and WaterlooWorks now appear in
+  To-do once they're added, like Learn deadlines. An email deadline and
+  the same email's "fill in this form" to-do show as one row.
+
+### Sources and reading
+
+- **Email:** Gmail reads your inbox page exactly as your tab shows it (no
+  more tab jumping to a search). Outlook reads your newest 50/100/200
+  messages. Every dated email find can now be added, and trusted senders'
+  clear dates are added automatically.
+- **Google Calendar duplicate check** recognises classes that are already
+  on your calendar from UW Flow or Quest schedules. On one real schedule
+  that kept about 230 classes from being published twice. Your
+  subscription to this extension is never counted as a duplicate.
+- **WaterlooWorks and Discord** answer Check now: WaterlooWorks runs a full
+  refresh, and Discord re-reads what's on screen (still passive).
+
 ## 1.3.0 — 2026-09-28
 
 ### To-dos from everywhere
