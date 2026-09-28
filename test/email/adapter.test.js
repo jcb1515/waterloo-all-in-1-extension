@@ -366,6 +366,43 @@ test("outlook invite card -> meeting item", async () => {
   assert.equal(i.review, "auto");
 });
 
+test("outlook co-op 'select an interview time slot' -> book-call task", async () => {
+  const { document } = parseHTML(html("outlook-coop-slot"));
+  const out = extractFor(document, "https://outlook.cloud.microsoft/mail/inbox/id/conv-coop-1");
+  assert.equal(out.view, "message");
+  const m = out.messages[0];
+  // The reading-pane header has no span[title*="@"]: name from the "From:"
+  // aria-label, address from the "Name<addr>" text inside it.
+  assert.equal(m.from, "Co-op Office");
+  assert.equal(m.fromEmail, "coop@uwaterloo.ca");
+  assert.match(m.body || "", /Select your interview time slot/);
+
+  const res = await adapter.observe.parse(payload("outlook", out), ctx({}));
+  const task = res.items.find((i) => i.type === "task");
+  assert.ok(task, "expected a book-call task");
+  assert.equal(task.category, "book-call");
+  assert.equal(task.title, "Select interview time slot — Co-op Office");
+  assert.equal(task.status, "open");
+});
+
+test("outlook list row preview with slot wording -> book-call task", async () => {
+  const { document } = parseHTML(
+    `<html><body><div role="listbox" data-folder-name="inbox">` +
+      `<div role="option" data-convid="conv-coop-9" data-item-index="0">` +
+      `<span title="coop@uwaterloo.ca">Co-op Office</span>` +
+      `<div>You have been selected for an interview (Co-op message)</div>` +
+      `<div>Fri Sep 25</div>` +
+      `<div>Next step: Select your interview time slot in WorkHub.</div>` +
+      `</div></div></body></html>`,
+  );
+  const out = extractFor(document, "https://outlook.cloud.microsoft/mail/inbox");
+  assert.equal(out.view, "list");
+  const res = await adapter.observe.parse(payload("outlook", out), ctx({}));
+  const task = res.items.find((i) => i.type === "task");
+  assert.ok(task, "expected a book-call task from the row preview");
+  assert.equal(task.category, "book-call");
+});
+
 test("rsvp-by keyword -> pending deadline", () => {
   const [i] = items(
     msg({

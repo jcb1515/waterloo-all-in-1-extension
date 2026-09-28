@@ -387,7 +387,13 @@ export function senderGate(msg, { courses = [], settings = {}, applications } = 
   const subject = String(msg.subject || "");
   const fromLine = `${msg.from || ""} ${email}`.toLowerCase();
 
-  if (isCoopSender(msg)) return { ok: true, coop: true };
+  if (isCoopSender(msg)) {
+    return {
+      ok: true,
+      coop: true,
+      employer: String(msg.from || "").trim() || undefined,
+    };
+  }
   if (/learn|d2l/i.test(email)) return { ok: true };
 
   for (const c of courses) {
