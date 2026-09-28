@@ -6,9 +6,12 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
 import { fmtEstimate } from "../model/itemsheet.js";
 import { attentionSource } from "../model/sources.js";
+import { onboardingRows, nudges as visitNudges } from "../model/onboarding.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../../ui/ItemRow.jsx";
+import { OnboardingCard, NudgeCard } from "../../ui/Onboarding.jsx";
+import { IS_PREVIEW } from "../data.js";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { normCourseCode } from "../../core/contract.js";
 import { orgStyle } from "../../ui/colors.js";
@@ -131,8 +134,31 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
       ? state.calendarFeed.error || "Calendar publish failed"
       : null;
 
+  // "Get set up" card + "Needs a visit" nudges (panel/model/onboarding.js).
+  const onboarding = onboardingRows(state, now);
+  const onboardingDone = onboarding.length > 0 && onboarding.every((r) => r.done);
+  const onboardingHidden =
+    !onboarding.length ||
+    onboardingDone ||
+    !!(state.userState && state.userState.onboardingDismissedAt);
+  const visits = nudges(state, now);
+  const openUrl = (url) => {
+    if (IS_PREVIEW) {
+      window.open(url, "_blank");
+      return;
+    }
+    try {
+      chrome.tabs.create({ url });
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
   return (
     <div class="agenda">
+      {onboardingHidden ? null : (
+        <OnboardingCard rows={onboarding} onOpen={openUrl} onDismiss={actions.dismissOnboarding} />
+      )}
       {calErr ? (
         <button type="button" class="attention-strip" onClick={onGoCalendar}>
           <AlertTriangleIcon size={14} /> Calendar: {calErr}
@@ -144,6 +170,7 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
           {troubled.adapter.label}: {troubled.text}
         </button>
       ) : null}
+      <NudgeCard nudges={visits} limit={2} onOpen={openUrl} onSnooze={actions.snoozeNudge} />
 
       <section class="card summary-card" aria-label="Today">
         <h2 class="summary-date">{s.dateLabel}</h2>

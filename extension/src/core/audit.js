@@ -72,6 +72,8 @@ function userStateActivity(us) {
 
 const SOURCE_SET = new Set(SOURCE_IDS);
 const TYPE_SET = new Set(ITEM_TYPES);
+/** userState keys that are app-level records, not per-item rows. */
+const USERSTATE_META_KEYS = new Set(["onboardingDismissedAt", "nudgeSnooze"]);
 
 /**
  * @param {Record<string, any>} snapshot  the whole of chrome.storage.local
@@ -257,9 +259,32 @@ export function auditStore(snapshot = {}, now = new Date()) {
 
   /* --------------------------------- orphans -------------------------------- */
 
+  // App-level userState records are known keys — validate their dates and
+  // keep them out of the per-item orphan scan below.
+  /** @type {string[]} */
+  const badOnboarding = [];
+  if (userState.onboardingDismissedAt != null && parseMs(userState.onboardingDismissedAt) == null) {
+    badOnboarding.push("onboardingDismissedAt");
+  }
+  if (userState.nudgeSnooze != null) {
+    if (!isObj(userState.nudgeSnooze)) {
+      badOnboarding.push("nudgeSnooze");
+    } else {
+      for (const [k, v] of Object.entries(userState.nudgeSnooze)) {
+        if (parseMs(v) == null) badOnboarding.push(`nudgeSnooze.${k}`);
+      }
+    }
+  }
+  if (badOnboarding.length) {
+    issue("userstate-onboarding-bad", "warn", "userState",
+      `${badOnboarding.length} onboarding userState value(s) are missing or unparseable dates`,
+      { count: badOnboarding.length, fixable: true, sample: badOnboarding });
+  }
+
   /** @type {string[]} */
   const usOrphans = [];
   for (const [id, us] of Object.entries(userState)) {
+    if (USERSTATE_META_KEYS.has(id)) continue;
     if (liveIds.has(id)) continue;
     const at = userStateActivity(us);
     if (at == null || at < t - ORPHAN_USERSTATE_MS) usOrphans.push(id);
@@ -423,9 +448,27 @@ export function applySafeFixes(snapshot = {}, issueIds, now = new Date()) {
     const live = new Set([...Object.keys(items), ...Object.keys(todos), ...manual.map((i) => i && i.id)]);
     const us = { ...(isObj(snapshot.userState) ? snapshot.userState : {}) };
     for (const id of Object.keys(us)) {
+      if (USERSTATE_META_KEYS.has(id)) continue;
       if (live.has(id)) continue;
       const at = userStateActivity(us[id]);
       if (at == null || at < t - ORPHAN_USERSTATE_MS) delete us[id];
+    }
+    patches.userState = us;
+  }
+
+  if (has("userstate-onboarding-bad")) {
+    const us = isObj(patches.userState)
+      ? /** @type {Record<string, any>} */ (patches.userState)
+      : { ...(isObj(snapshot.userState) ? snapshot.userState : {}) };
+    if (us.onboardingDismissedAt != null && parseMs(us.onboardingDismissedAt) == null) {
+      delete us.onboardingDismissedAt;
+    }
+    if (us.nudgeSnooze != null && !isObj(us.nudgeSnooze)) {
+      delete us.nudgeSnooze;
+    } else if (isObj(us.nudgeSnooze)) {
+      us.nudgeSnooze = Object.fromEntries(
+        Object.entries(us.nudgeSnooze).filter(([, v]) => parseMs(v) != null)
+      );
     }
     patches.userState = us;
   }

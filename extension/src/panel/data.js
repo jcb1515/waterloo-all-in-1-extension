@@ -8,7 +8,7 @@
 */
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { applySettingsPatch, resolveSettings, SETTINGS_KEY, setLocal, setSettings } from "../core/store.js";
+import { applySettingsPatch, mutateKey, resolveSettings, SETTINGS_KEY, setLocal, setSettings } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
 
@@ -204,6 +204,41 @@ export function useStore() {
           userState: { ...s.userState, [id]: { ...(s.userState[id] || {}), ...patch } },
         }));
         return send({ type: UI.SET_USER_STATE, id, patch });
+      },
+      /**
+       * "Get set up" card Dismiss — a top-level userState scalar, not an
+       * item row, so it writes the userState key directly through the
+       * store queue (same path the background's patchUserState serialises
+       * on). No raw chrome.storage.
+       */
+      dismissOnboarding() {
+        const at = new Date().toISOString();
+        setState((s) => ({ ...s, userState: { ...s.userState, onboardingDismissedAt: at } }));
+        if (IS_PREVIEW) return;
+        mutateKey("userState", (cur) => ({
+          ...(isObj(cur) ? cur : {}),
+          onboardingDismissedAt: at,
+        })).catch(() => {});
+      },
+      /**
+       * "Needs a visit" Snooze — userState.nudgeSnooze["<source>:<rowId>"]
+       * = ISO end 7 days out. The map entry is a normal userState row, so
+       * the regular SET_USER_STATE patch path merges it.
+       */
+      snoozeNudge(key) {
+        const until = new Date(Date.now() + 7 * 86400000).toISOString();
+        setState((s) => ({
+          ...s,
+          userState: {
+            ...s.userState,
+            nudgeSnooze: {
+              ...(isObj(s.userState.nudgeSnooze) ? s.userState.nudgeSnooze : {}),
+              [key]: until,
+            },
+          },
+        }));
+        if (IS_PREVIEW) return;
+        send({ type: UI.SET_USER_STATE, id: "nudgeSnooze", patch: { [key]: until } });
       },
       /** Stamp updatesSeenAt = now (drives the bell's unread badge). */
       markUpdatesSeen() {
