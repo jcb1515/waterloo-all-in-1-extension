@@ -10,6 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import adapter from "../../extension/src/sources/portal/index.js";
 import { portalInstant, torontoDay } from "../../extension/src/sources/portal/map.js";
+import { recompute } from "../../extension/src/core/merge.js";
+import { buildFeedPayload } from "../../extension/src/calendar/payload.js";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "portal");
 const NOW = new Date("2026-09-27T16:00:00Z");
@@ -519,6 +521,162 @@ test("a pre-exam study day never overwrites the reading week", async () => {
   );
   const term = r2.terms.find((t) => t.termCode === 1269);
   assert.deepEqual(term.readingWeek, { start: "2026-10-10", end: "2026-10-18" });
+});
+
+test("DailyEventsV2: class/exam feeds are skipped, Learn mirrors become items", async () => {
+  /** @param {string} summary @param {any} extra */
+  const row = (summary, extra = {}) => ({
+    summary,
+    name: "Classes",
+    key: "class",
+    allDay: false,
+    startDate: "2026-10-20T08:30:00",
+    endDate: "2026-10-20T09:20:00",
+    isEventCancelled: false,
+    ...extra,
+  });
+  const body = JSON.stringify({ meta: { status: 200, type: "success" }, data: [
+    row("MATH 115 LEC 001"),
+    row("MATH 115 Midterm", { key: "exam", name: "Exams", startDate: "2026-10-22T19:00:00", endDate: "2026-10-22T20:30:00" }),
+    // Parenthesised TST title under a third-party feed: CLASS_ECHO safety net.
+    row("MATH 115 (TST)", { key: "other", name: "Other", startDate: "2026-10-22T19:00:00", endDate: "2026-10-22T20:30:00" }),
+    { summary: "Reading Week", name: "Important dates", key: "importantDate", allDay: true,
+      startDate: "2026-10-12T00:00:00", endDate: "2026-10-16T23:59:00", isEventCancelled: false },
+  ] });
+  const res = await adapter.observe.parse(payload(URLS.events, body), ctx());
+  assert.equal(res.items.length, 1);
+  assert.equal(res.items[0].title, "Reading Week");
+  assert.equal(res.items[0].type, "term-date");
+});
+
+const learnRow = (/** @type {string} */ summary, /** @type {string} */ startDate, /** @type {string} */ endDate, /** @type {any} */ extra = {}) => ({
+  summary, name: "Learn", key: "learn", allDay: false, startDate, endDate,
+  isEventCancelled: false, feedId: 4, ...extra,
+});
+const eventsJson = (/** @type {any[]} */ data) =>
+  JSON.stringify({ meta: { status: 200, type: "success" }, data });
+const eventsParse = (/** @type {any[]} */ data, state = {}) =>
+  adapter.observe.parse(payload(URLS.events, eventsJson(data)), ctx(state));
+
+test("DailyEventsV2 Learn feed: same-day zero-duration rows get distinct ids", async () => {
+  const res = await eventsParse([
+    learnRow("WHMIS Completion", "2026-09-30T08:30:00", "2026-09-30T08:30:00"),
+    learnRow("Syllabus & Assignment Outline Quiz", "2026-09-30T23:59:00", "2026-09-30T23:59:00"),
+    learnRow("Lab safety acknowledgement", "2026-09-30T12:00:00", "2026-09-30T12:00:00"),
+  ]);
+  assert.equal(res.items.length, 3);
+  const ids = res.items.map((i) => i.id);
+  assert.equal(new Set(ids).size, 3);
+  for (const id of ids) {
+    assert.ok(id.startsWith("portal:learn:"));
+    assert.ok(id.endsWith(":2026-09-30"));
+  }
+  const whmis = res.items.find((i) => i.title === "WHMIS Completion");
+  assert.equal(whmis.type, "deadline");
+  assert.equal(whmis.dueAt, "2026-09-30T12:30:00.000Z"); // 8:30 EDT
+  assert.equal(whmis.startAt, undefined);
+  assert.equal(whmis.endAt, undefined);
+  assert.equal(whmis.confidence, "tentative");
+  assert.equal(whmis.review, "auto");
+  assert.equal(whmis.meta.feed, "Learn");
+  const quiz = res.items.find((i) => /Quiz/.test(i.title));
+  assert.equal(quiz.type, "quiz");
+  const lab = res.items.find((i) => /safety/.test(i.title));
+  assert.equal(lab.type, "deadline");
+});
+
+test("DailyEventsV2 Learn feed: a single-day allDay row dues at 23:59 Toronto", async () => {
+  const res = await eventsParse([
+    learnRow("Online orientation module", "2026-10-05T00:00:00", "2026-10-05T23:59:00", { allDay: true }),
+  ]);
+  assert.equal(res.items.length, 1);
+  const it = res.items[0];
+  assert.equal(it.type, "deadline");
+  assert.equal(it.dueAt, "2026-10-06T03:59:00.000Z"); // Oct 5 23:59 EDT
+  assert.equal(it.allDay, true);
+  assert.equal(it.startAt, undefined);
+});
+
+test("DailyEventsV2 Learn feed: a timed exam title maps to a tentative exam", async () => {
+  const res = await eventsParse([
+    learnRow("ECE190 midterm test", "2026-10-21T15:00:00", "2026-10-21T16:00:00"),
+  ]);
+  assert.equal(res.items.length, 1);
+  const it = res.items[0];
+  assert.equal(it.type, "exam");
+  assert.equal(it.category, "midterm");
+  assert.equal(it.title, "Midterm");
+  assert.equal(it.org, "ECE 190");
+  assert.equal(it.meta.rawTitle, "ECE190 midterm test");
+  assert.equal(it.meta.feed, "Learn");
+  assert.equal(it.startAt, "2026-10-21T19:00:00.000Z"); // 15:00 EDT
+  assert.equal(it.endAt, "2026-10-21T20:00:00.000Z");
+  assert.equal(it.confidence, "tentative");
+  assert.equal(it.review, "auto");
+});
+
+test("DailyEventsV2 Learn feed: a timed non-exam row stays a pending event", async () => {
+  const res = await eventsParse([
+    learnRow("Co-op panel booth", "2026-10-05T14:00:00", "2026-10-05T15:00:00"),
+  ]);
+  assert.equal(res.items.length, 1);
+  const it = res.items[0];
+  assert.equal(it.type, "event");
+  assert.equal(it.review, "pending");
+  assert.ok(it.id.startsWith("portal:learn:"));
+});
+
+test("merge: a portal Learn-mirror deadline joins the Learn item", async () => {
+  const res = await eventsParse([
+    learnRow("WHMIS Completion", "2026-09-30T08:30:00", "2026-09-30T08:30:00"),
+  ]);
+  const mirror = res.items[0];
+  const learnItem = {
+    id: "learn:ECE198:dropbox:whmis",
+    source: "learn",
+    type: "deadline",
+    title: "WHMIS Completion",
+    org: "ECE 198",
+    dueAt: mirror.dueAt,
+    status: "open",
+    confidence: "exact",
+    review: "auto",
+    seenIn: [{ source: "learn", key: "k", scope: "learn:ece198", at: NOW.toISOString() }],
+    evidence: { method: "api" },
+  };
+  const out = recompute({
+    raws: {
+      portal: { items: [mirror], updatedAt: NOW.toISOString() },
+      learn: { items: [learnItem], updatedAt: NOW.toISOString() },
+    },
+    now: NOW,
+  });
+  assert.equal(Object.keys(out.items).length, 1);
+  const canon = Object.values(out.items)[0];
+  assert.equal(canon.title, "WHMIS Completion");
+});
+
+test("merge: the Learn-mirror exam never merges portal-vs-portal but the feed collapses it", async () => {
+  const exams = await adapter.observe.parse(payload(URLS.exams, eventsJson([
+    { title: "ECE 190 Midterm", startDate: "2026-10-21T15:00:00", endDate: "2026-10-21T16:00:00",
+      location: "MC 2034", seatCode: null, seatInstructions: null },
+  ])), ctx());
+  const portalExam = exams.items.find((i) => i.org === "ECE 190");
+  assert.equal(portalExam.id, "portal:exam:ECE190:midterm");
+  const res = await eventsParse([
+    learnRow("ECE190 midterm test", "2026-10-21T15:00:00", "2026-10-21T16:00:00"),
+  ]);
+  const mirror = res.items[0];
+  const out = recompute({
+    raws: { portal: { items: [portalExam, mirror], updatedAt: NOW.toISOString() } },
+    now: NOW,
+  });
+  // Same-source raws never merge — the core rule is deliberate. The feed's
+  // publish guard still collapses the pair into one calendar event.
+  assert.equal(Object.keys(out.items).length, 2);
+  const feed = buildFeedPayload(out.items, {}, {}, NOW, { acceptPending: true });
+  assert.equal(feed.count, 1);
+  assert.equal(feed.collapsed, 1);
 });
 
 test("an exact reading-week title wins over a vaguer break row", async () => {
