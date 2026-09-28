@@ -1813,3 +1813,31 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+/* --------------------------- reminder pause row --------------------------- */
+
+.updates-rem-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  margin-bottom: var(--sp-3);
+}
+.updates-rem-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.updates-rem-acts {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  margin-left: auto;
+}

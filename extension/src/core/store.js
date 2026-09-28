@@ -103,6 +103,9 @@ export const DEFAULT_SETTINGS = {
     briefing: { enabled: true, time: "08:00" },
     digest: { enabled: true, day: "sun", time: "18:00" },
     includeTentative: false,
+    // "Pause reminders until" — an ISO string or null. Deferred reminders
+    // fire at pause end; ones whose event passed are dropped.
+    pausedUntil: null,
   },
   calendar: {
     enabled: false,

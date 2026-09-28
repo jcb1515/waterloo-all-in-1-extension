@@ -3,8 +3,12 @@
 
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { fmtAgo, fmtDay, fmtTime, startOfDay } from "../model/agenda.js";
+import { pauseEndMs, pauseUntilTomorrow } from "../../core/pause.js";
+import { send } from "../data.js";
+import { UI } from "../../core/messages.js";
 import {
   BellIcon,
+  BellOffIcon,
   SparklesIcon,
   ArrowRightIcon,
   XIcon,
@@ -63,6 +67,65 @@ function UpdateRow({ update, item, now, onOpenItem }) {
 }
 
 /**
+ * Reminder quick actions: pause for an hour / until tomorrow 8 AM Toronto,
+ * resume, and a test notification. Paused reminders defer like quiet hours.
+ * @param {{rem: any, actions: any, now: Date}} p
+ */
+function ReminderRow({ rem, actions, now }) {
+  const end = pauseEndMs(rem, now);
+  const paused = end != null;
+  const [testMsg, setTestMsg] = useState("");
+
+  const pause = (until) => actions.saveSettings({ reminders: { pausedUntil: until } });
+  const testNotify = () => {
+    send({ type: UI.TEST_NOTIFY });
+    setTestMsg("Test sent");
+    setTimeout(() => setTestMsg(""), 3000);
+  };
+
+  return (
+    <div class="updates-rem-row">
+      {paused ? (
+        <span class="updates-rem-status" title={rem.pausedUntil}>
+          <BellOffIcon size={14} /> Paused until {fmtDay(new Date(end))} {fmtTime(new Date(end))}
+        </span>
+      ) : (
+        <span class="updates-rem-status">
+          <BellIcon size={14} /> Reminders on
+        </span>
+      )}
+      <span class="updates-rem-acts">
+        {paused ? (
+          <button type="button" class="btn btn-sm" onClick={() => pause(null)}>
+            Resume
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              class="btn btn-sm"
+              onClick={() => pause(new Date(now.getTime() + 3600000).toISOString())}
+            >
+              Pause 1 hour
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              onClick={() => pause(pauseUntilTomorrow(now))}
+            >
+              Pause until tomorrow
+            </button>
+          </>
+        )}
+        <button type="button" class="btn btn-sm btn-ghost" onClick={testNotify}>
+          {testMsg || "Send test notification"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
  * @param {{state: any, actions: any, now: Date, onGoAgenda: () => void}} props
  */
 export function Updates({ state, actions, now, onGoAgenda }) {
@@ -95,6 +158,11 @@ export function Updates({ state, actions, now, onGoAgenda }) {
 
   return (
     <div class="updates">
+      <ReminderRow
+        rem={(state.settings && state.settings.reminders) || {}}
+        actions={actions}
+        now={now}
+      />
       {!updates.length ? (
         <div class="card empty-card">
           <BellIcon size={20} />

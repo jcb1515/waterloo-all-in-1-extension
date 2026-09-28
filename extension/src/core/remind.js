@@ -7,6 +7,7 @@
 */
 
 import { zonedParts, zonedIso } from "../lib/textdates/index.js";
+import { pauseEndMs } from "./pause.js";
 import { effectiveItem, isVisible } from "./effective.js";
 import { findClashes } from "./clashes.js";
 import {
@@ -138,6 +139,20 @@ export function quietEndMs(now, quiet) {
   if (!inside) return null;
   const dayOffset = wrap && t >= sm ? 1 : 0;
   return Date.parse(zonedIso(p.y, p.m, p.d + dayOffset, e[0], e[1], TZ));
+}
+
+/**
+ * The earliest instant a reminder may fire right now: the later of the
+ * quiet-hours end and the reminders pause (reminders.pausedUntil). Null when
+ * neither holds — a reminder due at `now` may go out.
+ * @param {number} nowMs
+ * @param {any} rem `settings.reminders`
+ */
+export function reminderHoldEnd(nowMs, rem) {
+  const q = quietEndMs(nowMs, (rem || {}).quietHours) || 0;
+  const p = pauseEndMs(rem, nowMs) || 0;
+  const end = Math.max(q, p);
+  return end || null;
 }
 
 /** "in 1 hour" / "in 2 days" / "in 15 min". */
@@ -372,7 +387,7 @@ export async function rescheduleReminders(deps = {}) {
 }
 
 /** Arm `wa1:briefing` at the next Toronto occurrence of the briefing time. */
-async function rescheduleBriefing(settings, deps = {}) {
+export async function rescheduleBriefing(settings, deps = {}) {
   const alarm =
     deps.alarm ||
     ((name, at) => {
@@ -389,15 +404,18 @@ async function rescheduleBriefing(settings, deps = {}) {
     alarm(BRIEFING_ALARM, null);
     return;
   }
-  const now = new Date();
+  const now = deps.now ? new Date(deps.now) : new Date();
   const p = zonedParts(now, TZ);
+  // During a reminders pause the first briefing after the pause end wins.
+  const floor = Math.max(now.getTime(), (pauseEndMs(settings.reminders, now) || 0) - 1);
+  let add = 0;
   let at = Date.parse(zonedIso(p.y, p.m, p.d, t[0], t[1], TZ));
-  if (at <= now.getTime()) at = Date.parse(zonedIso(p.y, p.m, p.d + 1, t[0], t[1], TZ));
+  while (at <= floor) at = Date.parse(zonedIso(p.y, p.m, p.d + ++add, t[0], t[1], TZ));
   alarm(BRIEFING_ALARM, at);
 }
 
 /** Arm `wa1:digest` at the next Toronto occurrence of the digest day/time. */
-async function rescheduleDigest(settings, deps = {}) {
+export async function rescheduleDigest(settings, deps = {}) {
   const alarm =
     deps.alarm ||
     ((name, at) => {
@@ -415,11 +433,15 @@ async function rescheduleDigest(settings, deps = {}) {
     alarm(DIGEST_ALARM, null);
     return;
   }
-  const now = new Date();
+  const now = deps.now ? new Date(deps.now) : new Date();
   const p = zonedParts(now, TZ);
+  const floor = Math.max(now.getTime(), (pauseEndMs(settings.reminders, now) || 0) - 1);
   let delta = (dow - p.weekday + 7) % 7;
   let at = Date.parse(zonedIso(p.y, p.m, p.d + delta, t[0], t[1], TZ));
-  if (at <= now.getTime()) at = Date.parse(zonedIso(p.y, p.m, p.d + delta + 7, t[0], t[1], TZ));
+  while (at <= floor) {
+    delta += 7;
+    at = Date.parse(zonedIso(p.y, p.m, p.d + delta, t[0], t[1], TZ));
+  }
   alarm(DIGEST_ALARM, at);
 }
 
@@ -470,6 +492,9 @@ export async function fireDueReminders() {
 
   const markSent = {};
   const snoozePatch = {};
+  // Quiet hours and the reminders pause defer to whichever ends later; a
+  // reminder whose event has already passed by then is dropped.
+  const holdEnd = reminderHoldEnd(Date.now(), rem);
   for (const r of due) {
     const eff = effectiveItem(
       mv.items[r.itemId] || (mv.todos || {})[r.itemId],
@@ -487,11 +512,9 @@ export async function fireDueReminders() {
       markSent[r.key] = new Date().toISOString();
       continue;
     }
-    // Quiet hours: defer to the end if the anchor outlives it, else drop.
-    const qEnd = quietEndMs(Date.now(), rem.quietHours);
-    if (qEnd) {
-      if (anchorMs > qEnd) {
-        snoozePatch[r.key] = new Date(qEnd).toISOString();
+    if (holdEnd) {
+      if (anchorMs > holdEnd) {
+        snoozePatch[r.key] = new Date(holdEnd).toISOString();
       } else {
         markSent[r.key] = new Date().toISOString();
       }
@@ -528,6 +551,11 @@ export async function sendBriefing() {
   const briefing = settings && settings.reminders && settings.reminders.briefing;
   if (!briefing || briefing.enabled === false) return;
   const now = new Date();
+  // The briefing is skipped during a reminders pause — re-arm past it.
+  if (pauseEndMs(settings.reminders, now)) {
+    await rescheduleBriefing(settings);
+    return;
+  }
   const p = zonedParts(now, TZ);
   const dayKey = `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
   const last = await getLocal(BRIEFING_KEY);
@@ -558,6 +586,11 @@ export async function sendDigest() {
   const digest = settings && settings.reminders && settings.reminders.digest;
   if (!digest || digest.enabled === false) return;
   const now = new Date();
+  // The digest is skipped during a reminders pause — re-arm past it.
+  if (pauseEndMs(settings.reminders, now)) {
+    await rescheduleDigest(settings);
+    return;
+  }
   const p = zonedParts(now, TZ);
   const dayKey = `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
   const last = await getLocal(DIGEST_KEY);
