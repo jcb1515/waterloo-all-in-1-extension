@@ -1,0 +1,53 @@
+<!-- Synthetic My Jobs folder view (jobs.htm card list + applied "Folders:
+     My Saved" pill). Card markup mirrors the live Vue list; fake jobIds
+     (15xxxx), synthetic titles/employers/cities only. Three cards: one
+     qualifying future deadline, one "do not qualify", one past deadline. -->
+<html data-wa1-complete="1">
+<body>
+<div class="tag-rail">
+  <button type="button" class="btn__default pill btn--default">All Jobs</button>
+  <button type="button" class="btn__default pill">Advanced Filters</button>
+</div>
+<div class="tag-rail__list--container">
+  <ul class="tag-rail__list list--plain">
+    <li><button type="button" class="btn__default btn--info pill drop-down__btn">New <i class="material-icons">keyboard_arrow_down</i></button></li>
+    <li><button type="button" class="btn__small btn--default outline pill"><span>Folders: My Saved</span><i class="material-icons">close</i></button></li>
+  </ul>
+</div>
+<div class="doc-viewer__results">
+  <div class="doc-viewer__pagination--data">3 results</div>
+  <ul class="doc-viewer__card-list list--plain">
+    <li id="doc-viewer-card-151111"><div class="doc-viewer__card">
+      <h3 class="h5"><a href="javascript:void(0)">Firmware Engineering Co-op</a></h3>
+      <p class="label">Northbay  Software</p>
+      <p class="label">Waterloo</p>
+      <p class="label">Application Deadline: Oct 15, 2026 9:00 AM</p>
+      <input name="dataViewerSelection" type="checkbox" value="151111">
+      <button aria-label="Save to My Jobs Folder" type="button"><i>create_new_folder</i></button>
+      <button aria-label="Remove from search results" type="button"><i>do_not_disturb</i></button>
+      <button aria-label="Apply" type="button"><i>playlist_add</i></button>
+    </div></li>
+    <li id="doc-viewer-card-151112"><div class="doc-viewer__card">
+      <h3 class="h5"><a href="javascript:void(0)">Backend Developer Intern</a></h3>
+      <p class="label">Acme Robotics</p>
+      <p class="label">Toronto</p>
+      <p class="label">Application Deadline: Oct 5, 2026 9:00 AM</p>
+      <input name="dataViewerSelection" type="checkbox" value="151112">
+      <button aria-label="Save to My Jobs Folder" type="button"><i>create_new_folder</i></button>
+      <button aria-label="Remove from search results" type="button"><i>do_not_disturb</i></button>
+      <button aria-label="You do not qualify to apply for this job" type="button" class="action--placeholder"><i>playlist_add</i></button>
+    </div></li>
+    <li id="doc-viewer-card-151113"><div class="doc-viewer__card">
+      <h3 class="h5"><a href="javascript:void(0)">Expired Posting Example</a></h3>
+      <p class="label">Globex</p>
+      <p class="label">Ottawa</p>
+      <p class="label">Application Deadline: Sep 1, 2026 9:00 AM</p>
+      <input name="dataViewerSelection" type="checkbox" value="151113">
+      <button aria-label="Save to My Jobs Folder" type="button"><i>create_new_folder</i></button>
+      <button aria-label="Remove from search results" type="button"><i>do_not_disturb</i></button>
+      <button aria-label="Apply" type="button"><i>playlist_add</i></button>
+    </div></li>
+  </ul>
+</div>
+</body>
+</html>

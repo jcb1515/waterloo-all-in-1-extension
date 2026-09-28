@@ -1,7 +1,7 @@
 // @ts-check
 // Shared task seam: meta.action / meta.employer on derived to-dos —
 // timeslot booking, respond-to-offer message dates, submit-rankings,
-// shortlist apply deadlines and dashboard submit-document notices.
+// My Jobs folder apply deadlines and dashboard submit-document notices.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -285,44 +285,55 @@ test("the undated rankings anchor is first-seen-open, not the latest read", () =
   assert.equal(first[0].dueAt, "2026-09-17T21:00:00.000Z");
 });
 
-// --- shortlist / apply --------------------------------------------------
+// --- My Jobs folder / apply ---------------------------------------------
 
-test("parseShortlist reads the shortlist grid under its own marker", () => {
-  const parsed = parsers.parseAll(doc("shortlist.html"), {
+test("parseJobsFolder reads the card list under a Folders pill", () => {
+  const parsed = parsers.parseAll(doc("jobs-folder.html"), {
     url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm",
   });
-  assert.equal(parsed.page, "shortlist");
-  assert.equal(parsed.shortlist.rows.length, 4);
-  assert.equal(parsed.shortlist.rows[0].jobId, "161616");
-  assert.equal(parsed.shortlist.rows[0].employer, "Northbay Software");
-  assert.match(parsed.shortlist.rows[0].appDeadline || "", /^2026-09-30/);
+  assert.equal(parsed.page, "jobs-folder");
+  assert.deepEqual(parsed["jobs-folder"].folders, ["My Saved"]);
+  assert.equal(parsed["jobs-folder"].rows.length, 3);
+  const [first] = parsed["jobs-folder"].rows;
+  assert.equal(first.jobId, "151111");
+  assert.equal(first.employer, "Northbay Software");
+  assert.equal(first.city, "Waterloo");
+  assert.equal(first.qualifies, true);
+  assert.match(first.appDeadline || "", /^2026-10-15T13:00/);
+  assert.equal(parsed["jobs-folder"].rows[1].qualifies, false);
 });
 
-test("a generic job grid with an inactive Shortlist tab yields nothing", () => {
-  const parsed = parsers.parseAll(doc("job-search-not-shortlist.html"), {
+test("the same cards without a Folders pill (All Jobs) yield nothing", () => {
+  const parsed = parsers.parseAll(doc("jobs-alljobs.html"), {
     url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm",
   });
-  assert.notEqual(parsed.page, "shortlist");
-  assert.equal(parsed.shortlist, undefined);
-  assert.equal(parsers.parseShortlist(doc("job-search-not-shortlist.html")).rows.length, 0);
+  assert.notEqual(parsed.page, "jobs-folder");
+  assert.equal(parsed["jobs-folder"], undefined);
+  const folder = parsers.parseJobsFolder(doc("jobs-alljobs.html"));
+  assert.equal(folder.ok, false);
+  // The cards themselves still parse — only the folder gate drops them.
+  assert.equal(parsers.parseJobCards(doc("jobs-alljobs.html")).length, 3);
 });
 
-test("applyItems: future deadlines only, applied jobs skipped", () => {
-  const rows = parsers.parseShortlist(doc("shortlist.html")).rows;
-  const items = applyItems(rows, [{ jobId: "161619", status: "applied" }], NOW);
-  assert.deepEqual(
-    items.map((i) => i.meta.jobId),
-    ["161616", "161617"]
-  );
+test("applyItems: future + qualifies only, applied jobs skipped", () => {
+  const rows = parsers.parseJobCards(doc("jobs-folder.html"));
+  const items = applyItems(rows, [], NOW, { folder: "My Saved" });
+  // 151112 do-not-qualify, 151113 past deadline → only 151111.
+  assert.deepEqual(items.map((i) => i.meta.jobId), ["151111"]);
   const [first] = items;
-  assert.equal(first.id, "waterlooworks:apply:161616");
+  assert.equal(first.id, "waterlooworks:apply:151111");
   assert.equal(first.type, "deadline");
-  // The student shortlisted it and the deadline is structured grid data.
   assert.equal(first.review, "auto");
   assert.equal(first.meta.category, "apply");
   assert.equal(first.meta.action, "apply");
+  assert.equal(first.meta.folder, "My Saved");
   assert.equal(first.title, "Apply: Firmware Engineering Co-op — Northbay Software");
   assert.equal(first.meta.employer, "Northbay Software"); // collapsed space
+  // An applied jobId is skipped too.
+  assert.equal(
+    applyItems(rows, [{ jobId: "151111", status: "applied" }], NOW).length,
+    0
+  );
 });
 
 // --- dashboard notices: submit-document --------------------------------
@@ -365,7 +376,7 @@ test("notice negatives: video post, study-term alert, rankings closed", () => {
   assert.equal(items.length, 0);
 });
 
-// --- adapter-level: notices + shortlist + readOk scopes ------------------
+// --- adapter-level: notices + jobs-folder + readOk scopes ----------------
 
 const AT = NOW_ISO;
 function makeCtx(state = {}) {
@@ -403,21 +414,18 @@ test("complete dashboard snapshot stores notice items + page readOk scope", asyn
   assert.equal(notice.title, "Work Term Report");
 });
 
-test("shortlist snapshot emits apply deadlines, hides applied + superseded posting deadline", async () => {
+test("folder snapshot emits apply deadlines, hides applied + superseded posting deadline", async () => {
   const ctx = makeCtx({
-    applications: [
-      { id: "waterlooworks:161619", jobId: "161619", status: "applied" },
-    ],
     lastGood: {
       posting: {
         items: [
           {
-            id: "waterlooworks:deadline:161616",
+            id: "waterlooworks:deadline:151111",
             source: "waterlooworks",
             type: "deadline",
             title: "Posting deadline",
-            dueAt: "2026-09-30T04:00:00.000Z",
-            meta: { jobId: "161616" },
+            dueAt: "2026-10-15T04:00:00.000Z",
+            meta: { jobId: "151111" },
           },
         ],
         at: AT,
@@ -426,21 +434,43 @@ test("shortlist snapshot emits apply deadlines, hides applied + superseded posti
   });
   const result = await adapter.observe.parse(
     domPayload(
-      "shortlist.html",
+      "jobs-folder.html",
       "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm"
     ),
     ctx
   );
-  assert.ok(result.readOk.includes("waterlooworks:shortlist"));
-  const applyIds = result.items
-    .filter((i) => i.meta?.action === "apply")
-    .map((i) => i.meta.jobId)
-    .sort();
-  assert.deepEqual(applyIds, ["161616", "161617"]); // 161618 past, 161619 applied
-  // The viewed-posting deadline for 161616 is superseded by the apply task.
+  assert.ok(result.readOk.includes("waterlooworks:jobs-folder"));
+  const applys = result.items.filter((i) => i.meta?.action === "apply");
+  assert.deepEqual(
+    applys.map((i) => i.meta.jobId),
+    ["151111"] // 151112 do-not-qualify, 151113 past
+  );
+  assert.equal(applys[0].meta.folder, "My Saved");
+  // The viewed-posting deadline for 151111 is superseded by the apply task.
   assert.equal(
-    result.items.find((i) => i.id === "waterlooworks:deadline:161616"),
+    result.items.find((i) => i.id === "waterlooworks:deadline:151111"),
     undefined
+  );
+});
+
+test("a folder view with no cards still reports its page scope", async () => {
+  const result = await adapter.observe.parse(
+    {
+      source: "waterlooworks",
+      kind: "dom",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm",
+      body: `<html data-wa1-complete="1"><body>
+        <ul class="tag-rail__list"><li><button>Folders: cycle 1<i>close</i></button></li></ul>
+        <div class="note">There are no results to display</div>
+      </body></html>`,
+      at: AT,
+    },
+    makeCtx()
+  );
+  assert.ok(result.readOk.includes("waterlooworks:jobs-folder"));
+  assert.equal(
+    result.items.filter((i) => i.meta?.action === "apply").length,
+    0
   );
 });
 

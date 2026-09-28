@@ -1030,14 +1030,15 @@ export function rankingsTaskItems(input, now) {
 }
 
 /**
- * Shortlist grid rows -> "Apply" deadlines, future postings only and never
- * for a job the applications list already shows.
- * @param {any[]} rows  parseShortlist rows
+ * My Jobs folder card rows -> "Apply" deadlines: future postings the student
+ * can still apply to, never a job the applications list already shows.
+ * @param {any[]} rows  parseJobCards rows
  * @param {any[]} applications  stored apps
  * @param {Date} now
+ * @param {{folder?: string}} [opts]  folder name(s) for meta.folder
  * @returns {Item[]}
  */
-export function applyItems(rows, applications, now) {
+export function applyItems(rows, applications, now, opts = {}) {
   const applied = new Set(
     arr(applications)
       .map((app) => app && app.jobId)
@@ -1049,6 +1050,7 @@ export function applyItems(rows, applications, now) {
   for (const row of arr(rows)) {
     const jobId = row && row.jobId;
     if (!jobId || applied.has(jobId)) continue;
+    if (row.qualifies === false) continue; // WW itself blocks the apply
     const dueMs = Date.parse(row.appDeadline || "");
     if (!Number.isFinite(dueMs) || dueMs <= nowMs) continue; // future only
     const employer = normEmployer(row.employer);
@@ -1064,8 +1066,8 @@ export function applyItems(rows, applications, now) {
       org: employer,
       dueAt: row.appDeadline,
       status: "open",
-      // Structured grid data the student shortlisted themselves — straight
-      // to the feed, no Review stop.
+      // Structured card data the student saved to a folder themselves —
+      // straight to the feed, no Review stop.
       review: "auto",
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       evidence: { method: "html" },
@@ -1074,6 +1076,7 @@ export function applyItems(rows, applications, now) {
         employer,
         jobId,
         category: "apply",
+        folder: opts.folder || undefined,
         facts: factsOf([
           [
             "Job",

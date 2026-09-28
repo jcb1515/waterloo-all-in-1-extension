@@ -30,8 +30,10 @@ import {
   DASH_ACTIONS_SELECTOR,
   DASH_NOTICE_SELECTOR,
   DASH_RANKINGS_HEADING_RE,
-  SHORTLIST_MARKER_SELECTOR,
-  SHORTLIST_MARKER_RE,
+  FOLDER_PILL_SELECTOR,
+  FOLDER_PILL_RE,
+  JOB_CARD_LIST_SELECTOR,
+  JOB_CARD_ID_RE,
   SCHEDULE_INTERVIEW_RE,
   NEW_MESSAGES_LABEL_RE,
   WEBCAM_LABEL_RE,
@@ -417,7 +419,7 @@ export function detectPage(doc, opts = {}) {
   if (isMessageDetail(doc)) return "message-detail";
   if (isPosting(doc)) return "posting";
   if (isRankings(doc)) return "rankings";
-  if (isShortlist(doc) && tableOfKind(doc, "shortlist")) return "shortlist";
+  if (isJobsFolder(doc)) return "jobs-folder";
   // Last: a recognised single-purpose page keeps its name; the dashboard is
   // the multi-module catch-all (its own tables match nothing above).
   if (isDashboard(doc, url)) return "dashboard";
@@ -538,40 +540,90 @@ export function parseMessages(doc) {
 }
 
 /**
- * The page positively identifies as the Shortlist only through its own
- * heading / breadcrumb / fieldset legend / active nav tab — a plain "Shortlist"
- * tab LINK next to the job-search grid must not count, so generic job grids
- * ("deadlines in the next 10 days", search results) yield nothing.
+ * The My Jobs folder names the current view is filtered to — every applied
+ * "Folders: <name>" pill in the filter rails. The plain "All Jobs" list and
+ * every other filter (New, Deadline, keyword) yield no pill, so a generic
+ * job-search page is never a folder view.
  * @param {any} doc
+ * @returns {string[]}
  */
-export function isShortlist(doc) {
+export function jobsFolderNames(doc) {
+  /** @type {string[]} */
+  const names = [];
   try {
-    for (const el of doc.querySelectorAll(SHORTLIST_MARKER_SELECTOR)) {
-      if (SHORTLIST_MARKER_RE.test(cleanText(el))) return true;
+    for (const btn of doc.querySelectorAll(FOLDER_PILL_SELECTOR)) {
+      const m = FOLDER_PILL_RE.exec(cleanText(btn));
+      if (m && m[1] && !names.includes(m[1])) names.push(m[1]);
     }
   } catch {
-    // garbage doc — not a shortlist
+    // garbage doc — no folders
   }
-  return false;
+  return names;
 }
 
-export function parseShortlist(doc) {
-  const table = isShortlist(doc) ? tableOfKind(doc, "shortlist") : null;
-  if (!table) return { ok: false, rows: [] };
+/**
+ * The page positively identifies as a My Jobs folder view only through an
+ * applied "Folders: …" pill — the same card list without the pill (the
+ * student's "All Jobs" search results) yields nothing.
+ * @param {any} doc
+ */
+export function isJobsFolder(doc) {
+  return jobsFolderNames(doc).length > 0;
+}
+
+/**
+ * The jobs.htm card list — parsed whether or not a folder pill is present,
+ * so callers can count cards on any search view; only the folder view turns
+ * rows into apply deadlines.
+ * @param {any} doc
+ */
+export function parseJobCards(doc) {
+  /** @type {any[]} */
   const rows = [];
-  for (const obj of rowsAsObjects(table, "shortlist")) {
-    if (!obj.jobId) continue;
-    rows.push({
-      jobId: obj.jobId,
-      jobTitle: obj.jobTitle || "",
-      employer: obj.employer || "",
-      division: obj.division || undefined,
-      term: obj.term || undefined,
-      location: obj.location || undefined,
-      appDeadline: parseWwDate(obj.appDeadline || ""),
-    });
+  try {
+    for (const li of doc.querySelectorAll(JOB_CARD_LIST_SELECTOR)) {
+      const jobId =
+        (JOB_CARD_ID_RE.exec(String(li.id || "")) || [])[1] ||
+        String(
+          li.querySelector?.('input[name="dataViewerSelection"]')?.value || ""
+        ) ||
+        undefined;
+      if (!jobId) continue;
+      const labels = [...li.querySelectorAll("p.label")].map(cleanText);
+      const deadlineLabel = labels.find((t) =>
+        /^application deadline\s*:/i.test(t)
+      );
+      const fields = labels.filter(
+        (t) => !/^application deadline\s*:/i.test(t)
+      );
+      const qualifies = ![...li.querySelectorAll("button[aria-label]")].some(
+        (b) => /do not qualify/i.test(String(b.getAttribute("aria-label") || ""))
+      );
+      rows.push({
+        jobId,
+        jobTitle: cleanText(
+          li.querySelector?.("h3 a") || li.querySelector?.("h3")
+        ),
+        employer: fields[0] || "",
+        city: fields[1] || undefined,
+        appDeadline: deadlineLabel
+          ? parseWwDate(
+              deadlineLabel.slice(deadlineLabel.indexOf(":") + 1).trim()
+            )
+          : null,
+        qualifies,
+      });
+    }
+  } catch {
+    // garbage doc — no cards
   }
-  return { ok: true, rows };
+  return rows;
+}
+
+export function parseJobsFolder(doc) {
+  const folders = jobsFolderNames(doc);
+  if (!folders.length) return { ok: false, folders: [], rows: [] };
+  return { ok: true, folders, rows: parseJobCards(doc) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1211,8 +1263,7 @@ export function parseAll(doc, opts = {}) {
   if (isMessageDetail(doc)) out["message-detail"] = parseMessageDetail(doc);
   if (isPosting(doc)) out.posting = parsePosting(doc);
   if (isRankings(doc)) out.rankings = parseRankings(doc);
-  if (isShortlist(doc) && tableOfKind(doc, "shortlist"))
-    out.shortlist = parseShortlist(doc);
+  if (isJobsFolder(doc)) out["jobs-folder"] = parseJobsFolder(doc);
   const landing = landingKind(doc);
   if (landing) out.landing = { kind: landing };
   const dashboard = parseDashboard(doc, { notices: page === "dashboard" });

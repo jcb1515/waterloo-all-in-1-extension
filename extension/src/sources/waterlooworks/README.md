@@ -109,7 +109,7 @@ tables → plain replace.
   applications: Application[],         // after diffApplications
   // item scopes, keyed by detectPage names:
   lastGood:    { interviews, "interview-detail", events, posting,
-                 "message-dates", "coop-dates":
+                 "message-dates", "coop-dates", "jobs-folder":
                    { items: Item[], at: string } },
   coopDates:   { fetchedAt },          // 24 h throttle for the public page
   needsUpdate: { [section]: true },    // expected section missing on a loaded page
