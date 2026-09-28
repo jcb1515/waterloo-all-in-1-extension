@@ -598,7 +598,7 @@ export function previewState(nowD = new Date(), variants = {}) {
   const padd = (key, pid, f) =>
     add(`manual:proj:${key}`, {
       source: "manual",
-      org: projects.find((p) => p.id === pid).name,
+      org: (projects.find((p) => p.id === pid) || {}).name,
       confidence: "exact",
       evidence: { method: "manual" },
       meta: { projectId: pid },
