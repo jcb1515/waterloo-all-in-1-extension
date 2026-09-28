@@ -180,7 +180,8 @@ const adapter = {
         updates: updates.length ? updates : undefined,
         readOk: [code],
         scope: code,
-        session: "signed-in",
+        // No session on a successful read: the scheduler only refreshes
+        // lastOkAt/itemCount/complete when `session` is absent.
         state: { ...state, seenUrls: { ...(state.seenUrls || {}), [code]: payload.url }, courses: courseMap },
       };
     },

@@ -79,7 +79,7 @@ test("portalInstant rejects implausible years (.NET MinValue)", () => {
 test("CourseSchedule -> meeting items, TST midterm, course sections", async () => {
   const res = await adapter.observe.parse(payload(URLS.schedule, json("schedule")), ctx());
   assert.equal(res.complete, true);
-  assert.equal(res.session, "signed-in");
+  assert.ok(!("session" in res)); // success must not set session — it stalls the tile
   assert.equal(res.scope, "portal:schedule");
   assert.deepEqual(res.readOk, ["portal:schedule"]);
   assert.equal(res.items.length, 4);

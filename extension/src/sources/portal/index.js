@@ -186,7 +186,8 @@ const adapter = {
         complete: true,
         readOk: [scope],
         scope,
-        session: "signed-in",
+        // No session on a successful read: the scheduler only refreshes
+        // lastOkAt/itemCount/complete when `session` is absent.
         state,
       };
     },
