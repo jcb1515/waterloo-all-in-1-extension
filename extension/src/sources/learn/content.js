@@ -19,6 +19,10 @@ import { MSG } from "../../core/contract.js";
 import { readBodyInto } from "../../capture/fetch.js";
 
 (() => {
+  // Re-injected by W1 on install/update/startup — the second copy returns.
+  const g = /** @type {any} */ (globalThis);
+  if (g.__wa1_learn) return;
+  g.__wa1_learn = true;
   const isMock = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
   // Contract relay (T2): background asks an open Learn tab to run a GET with

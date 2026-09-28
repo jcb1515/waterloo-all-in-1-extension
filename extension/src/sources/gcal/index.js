@@ -7,26 +7,47 @@
   passive DOM extract (content.js → observe.parse), which is where
   subscribed calendars live. Secret iCal fallback URLs are used only when
   the export fails, are validated before fetch and never logged or stored.
-  W1's suppressAgainstCalendar reads state.events (own events only).
+  suppressAgainstCalendar reads state.events: own + subscribed events
+  suppress, "wa1" (our own feed) and "unknown" never do.
 */
 
-import { dedupeEvents } from "./dom.js";
+import { dedupeEvents, WA1_TITLE_RE } from "./dom.js";
 import { readZip } from "./zip.js";
 import { parseIcs } from "./ics.js";
 
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 
-const KINDS = ["own", "subscribed", "unknown"];
+const KINDS = ["own", "wa1", "subscribed", "unknown"];
 const EVENT_CAP = 3000;
 const PAST_MS = 7 * 24 * 60 * 60 * 1000;
 const FUTURE_MS = 120 * 24 * 60 * 60 * 1000;
 const EXPORT_URL = (account) => `https://calendar.google.com/calendar/u/${account}/exporticalzip`;
 const ICAL_URL_RE = /^https:\/\/calendar\.google\.com\/calendar\/ical\//;
 const SKIP_ENTRY_RE = /@import\.calendar\.google\.com|@group\.v\.calendar\.google\.com/i;
+// Our own feed's host (the build-time calendar service URL): an iCal
+// address pointing at it is our own subscription, never an "own" calendar.
+const FEED_HOST = (() => {
+  try {
+    const u =
+      typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
+    return u ? new URL(String(u)).host.toLowerCase() : "";
+  } catch {
+    return "";
+  }
+})();
 const MAX_ICAL_URLS = 5;
 
 const isoMs = (v) => (typeof v === "string" ? Date.parse(v) : NaN);
+
+/** The URL points at this extension's own feed server. */
+const isFeedUrl = (u) => {
+  try {
+    return !!FEED_HOST && new URL(String(u)).host.toLowerCase() === FEED_HOST;
+  } catch {
+    return false;
+  }
+};
 
 /** @param {string} b64 */
 const b64Bytes = (b64) => {
@@ -45,12 +66,19 @@ function validEvent(e) {
   if (e.endAt != null && Number.isNaN(isoMs(e.endAt))) return null;
   if (typeof e.allDay !== "boolean") return null;
   if (!KINDS.includes(e.calendarKind)) return null;
+  // Migration: events stored before the "wa1" kind existed carry our own
+  // feed as "subscribed" — a "<CODE> · <Label>" title reclassifies them so
+  // the feed never suppresses its own source items.
+  const calendarKind =
+    e.calendarKind === "subscribed" && WA1_TITLE_RE.test(e.title)
+      ? "wa1"
+      : e.calendarKind;
   /** @type {any} */
   const ev = {
     title: e.title,
     startAt: new Date(startMs).toISOString(),
     allDay: e.allDay,
-    calendarKind: e.calendarKind,
+    calendarKind,
   };
   if (e.endAt != null) ev.endAt = new Date(isoMs(e.endAt)).toISOString();
   return ev;
@@ -135,7 +163,7 @@ const adapter = {
     // export failed, only validated Google iCal URLs, never logged.
     if (!calendars.length) {
       const urls = (Array.isArray(settings.icalUrls) ? settings.icalUrls : [])
-        .filter((u) => typeof u === "string" && ICAL_URL_RE.test(u))
+        .filter((u) => typeof u === "string" && ICAL_URL_RE.test(u) && !isFeedUrl(u))
         .slice(0, MAX_ICAL_URLS);
       for (const u of urls) {
         try {

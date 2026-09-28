@@ -1,6 +1,6 @@
 // Email setup blocks for the Sources card: the per-provider read toggles
-// (each asks for its own host group on click) and the backfill status line
-// with a "Check again now" button.
+// (each asks for its own host group on click) and the per-provider check
+// status line with a "Check again now" button.
 // Moved from the old options Sources section — `save` writes the
 // sources.outlook settings slice via actions.saveSettings.
 
@@ -10,7 +10,8 @@ import {
   OPTIONAL_PERMISSION_GROUPS,
   requestSourceAccess,
 } from "../../core/permissions.js";
-import { IS_PREVIEW } from "../data.js";
+import { IS_PREVIEW, send } from "../data.js";
+import { UI } from "../../core/messages.js";
 import { fmtAgo } from "../model/agenda.js";
 
 const PROVIDER_LABEL = { gmail: "Gmail", outlook: "Outlook" };
@@ -64,30 +65,70 @@ export function EmailProviders({ src, save }) {
 }
 
 /**
- * Per-provider backfill status from sourceState.outlook.state.backfill:
- * "Last 30 days · 265 messages checked · last run 4m ago", a "Check again
- * now" button that pings every open non-discarded tab of that provider,
- * and — when no tab is open — an Open button to the provider's inbox.
+ * Per-provider check status from sourceState.outlook.check[provider] (or,
+ * until W1's writer hoists it, sourceState.outlook.state.check[provider]):
+ * "Last checked N messages · <ago>", "Checking… N so far" while a run is in
+ * flight, or "Not read yet — open Gmail/Outlook once". The button goes
+ * through W1's UI.CHECK_NOW when that message exists; until then it pings
+ * every open non-discarded tab of that provider with wa1:check-now and
+ * shows the reply (accepted / not-on-page / signed-out) inline.
  * @param {{src: any, st: any, now?: Date}} p
  */
 export function EmailBackfill({ src, st, now }) {
-  const state = (st && st.state) || {};
-  const backfill = state.backfill || {};
-  const lookback = Math.max(7, Math.min(90, Math.round(Number(src.lookbackDays) || 30)));
+  const [reply, setReply] = useState(/** @type {Record<string, string>} */ ({}));
+  const check =
+    (st && st.check) || ((st && st.state && st.state.check) || {});
   const enabled = ["gmail", "outlook"].filter((prov) => src[prov] !== false);
   if (!enabled.length) return null;
 
-  /** Ping every open non-discarded tab of the provider for an immediate read. */
+  /** Force a read: UI.CHECK_NOW when wired, else wa1:check-now per tab. */
   const checkNow = async (/** @type {string} */ prov) => {
     if (IS_PREVIEW) return;
+    const runId = `${prov}-${Date.now().toString(36)}`;
+    const CHECK_NOW = /** @type {any} */ (UI).CHECK_NOW;
+    if (CHECK_NOW) {
+      send({ type: CHECK_NOW, source: prov }).catch(() => {});
+      setReply((r) => ({ ...r, [prov]: "Checking…" }));
+      return;
+    }
     try {
       const patterns = /** @type {Record<string, string[]>} */ (
         OPTIONAL_PERMISSION_GROUPS
       )[prov];
       const tabs = patterns ? await chrome.tabs.query({ url: patterns }) : [];
+      let answered = false;
       for (const t of tabs || []) {
         if (t.id == null || t.discarded) continue;
-        chrome.tabs.sendMessage(t.id, { type: "wa1:mail-check-now" }).catch(() => {});
+        try {
+          const res = await chrome.tabs.sendMessage(t.id, {
+            type: "wa1:check-now",
+            source: prov,
+            runId,
+          });
+          if (res && res.accepted) {
+            setReply((r) => ({ ...r, [prov]: "Checking…" }));
+          } else {
+            const why = res && res.reason;
+            setReply((r) => ({
+              ...r,
+              [prov]:
+                why === "not-on-page"
+                  ? `Open ${PROVIDER_LABEL[prov]} to the inbox first`
+                  : why === "signed-out"
+                    ? `Sign in to ${PROVIDER_LABEL[prov]} first`
+                    : why === "disabled"
+                      ? `${PROVIDER_LABEL[prov]} reading is off`
+                      : "Not available on that page",
+            }));
+          }
+          answered = true;
+          break;
+        } catch {
+          /* tab has no listener — try the next one */
+        }
+      }
+      if (!answered) {
+        setReply((r) => ({ ...r, [prov]: `No ${PROVIDER_LABEL[prov]} tab is open` }));
       }
     } catch {
       /* no tabs API (preview) */
@@ -107,20 +148,24 @@ export function EmailBackfill({ src, st, now }) {
     <div class="src-sub">
       <span class="label">Automatic read</span>
       <p class="help">
-        While a mail tab is open, new mail is checked every 30 minutes; a full pass over
-        the lookback window runs at most every 6 hours.
+        While a mail tab is open, the inbox is checked every 30 minutes.
       </p>
       {enabled.map((prov) => {
-        const b = backfill[prov];
+        const c = check[prov];
+        const running = c && c.running;
         return (
           <div class="mail-backfill" key={prov}>
             <p class="source-detail">
               <strong>{PROVIDER_LABEL[prov]}</strong>
               {" — "}
-              {b ? (
+              {running ? (
+                <>Checking… {running.checked || 0} so far</>
+              ) : c ? (
                 <>
-                  Last {b.lookbackDays || lookback} days · {b.checked || 0} messages
-                  checked · last run {fmtAgo(b.lastRunAt, now || new Date())}
+                  Last checked {c.checked || 0} messages
+                  {" · "}
+                  {fmtAgo(c.at, now || new Date())}
+                  {c.ok === false && c.reason === "signed-out" ? " · signed out" : null}
                 </>
               ) : (
                 `Not read yet — open ${PROVIDER_LABEL[prov]} once`
@@ -130,7 +175,7 @@ export function EmailBackfill({ src, st, now }) {
               <button type="button" class="btn btn-sm" onClick={() => checkNow(prov)}>
                 Check again now
               </button>
-              {!b ? (
+              {!c ? (
                 <button
                   type="button"
                   class="btn btn-sm btn-ghost"
@@ -140,6 +185,7 @@ export function EmailBackfill({ src, st, now }) {
                 </button>
               ) : null}
             </div>
+            {reply[prov] ? <p class="help">{reply[prov]}</p> : null}
           </div>
         );
       })}
@@ -153,10 +199,10 @@ const list = (/** @type {string} */ s) =>
 
 /**
  * The filter block: who counts (allow), who never does (block, wins over
- * allow), extra keywords, the Sent opt-in, the lookback window, the Gmail
- * invites flag and the course/co-op preset. Everything saves under
- * sources.outlook — the adapter and the mail tabs' content scripts read it
- * from there.
+ * allow), extra keywords, the Sent opt-in, how much Outlook mail a run
+ * reads, the Gmail invites flag and the course/co-op preset. Everything
+ * saves under sources.outlook — the adapter and the mail tabs' content
+ * scripts read it from there.
  * @param {{src: any, save: (patch: any) => void}} p
  */
 export function EmailFilters({ src, save }) {
@@ -168,11 +214,9 @@ export function EmailFilters({ src, save }) {
         ? [...new Set([...folders, "sent"])]
         : folders.filter((f) => String(f).toLowerCase() !== "sent"),
     });
-  const lookback = Math.max(7, Math.min(90, Math.round(Number(src.lookbackDays) || 30)));
-  const onLookback = (/** @type {any} */ e) => {
-    const n = Math.round(Number(e.target.value));
-    if (Number.isFinite(n)) save({ lookbackDays: Math.max(7, Math.min(90, n)) });
-  };
+  const count = [50, 100, 200].includes(Number(src.outlookCount))
+    ? Number(src.outlookCount)
+    : 100;
   return (
     <div class="src-sub">
       <span class="label">Filters</span>
@@ -195,19 +239,21 @@ export function EmailFilters({ src, save }) {
           />
         ) : null}
       </div>
-      <Field
-        label="Days to look back"
-        help="How far the automatic read goes on a full pass (7–90)."
-      >
-        <input
-          class="input"
-          type="number"
-          min="7"
-          max="90"
-          defaultValue={lookback}
-          onBlur={onLookback}
-        />
-      </Field>
+      {src.outlook !== false ? (
+        <Field label="Messages to check" help="Outlook reads the newest this many inbox messages. Gmail reads the first inbox page (50).">
+          <select
+            class="input"
+            defaultValue={String(count)}
+            onChange={(e) =>
+              save({ outlookCount: Number(/** @type {any} */ (e.target).value) })
+            }
+          >
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </Field>
+      ) : null}
       <Field
         label="Always count (allow list)"
         help="Comma-separated addresses or domains — a domain also covers its subdomains."

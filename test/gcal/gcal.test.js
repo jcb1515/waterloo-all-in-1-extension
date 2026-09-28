@@ -69,9 +69,11 @@ test("gcal week view: chips, kinds, range and the merged detail popup", () => {
   assert.equal(chat.endAt, "2026-09-29T17:30:00.000Z");
   assert.equal(chat.allDay, false);
 
-  // No aria-label: the hidden leaf span carries the description.
+  // No aria-label: the hidden leaf span carries the description. Its
+  // "Calendar: Waterloo All-in-1" label (and the " · " feed title) mark it
+  // wa1 — our own feed, never a suppressor.
   const lec = find(ex.events, "ECE 105 · Lecture");
-  assert.equal(lec.calendarKind, "subscribed");
+  assert.equal(lec.calendarKind, "wa1");
   assert.equal(lec.startAt, "2026-09-30T18:30:00.000Z");
   assert.equal(lec.endAt, "2026-09-30T19:20:00.000Z");
 

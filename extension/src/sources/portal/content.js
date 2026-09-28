@@ -127,6 +127,7 @@ const frozen = (env) => (typeof env.isFrozen === "function" ? !!env.isFrozen() :
  *   setRoundSummary?: (summary: any) => void,
  *   isFrozen?: () => boolean,
  *   now?: Date,
+ *   force?: boolean,
  * }} env
  */
 export async function portalRound(env) {
@@ -145,7 +146,7 @@ export async function portalRound(env) {
 
   if (!pending) {
     const last = Number(env.getLast()) || 0;
-    if (last && now.getTime() - last < ROUND_MIN_GAP_MS) {
+    if (!env.force && last && now.getTime() - last < ROUND_MIN_GAP_MS) {
       // A round with failures retries early; a clean round waits the full gap.
       const summary = env.getRoundSummary ? env.getRoundSummary() : null;
       const failed =
@@ -283,8 +284,16 @@ async function replay(env, url, res) {
 
 /* ------------------------------ live wiring ------------------------------ */
 
+const CHECK_NOW = "wa1:check-now";
+const CHECK_DONE = "wa1:check-done";
+
 (() => {
   try {
+    // W1 re-injects content scripts into open tabs on install/update/startup
+    // — the second copy returns before registering anything.
+    const g = /** @type {any} */ (globalThis);
+    if (g.__wa1_portal) return;
+    g.__wa1_portal = true;
     if (
       typeof location === "undefined" ||
       location.hostname !== "portal.uwaterloo.ca" ||
@@ -357,11 +366,62 @@ async function replay(env, url, res) {
       isFrozen: () => frozenNow,
     };
     let frozenNow = false;
+    /** In-flight round promise — a check-now during one joins it. */
+    /** @type {Promise<any>|null} */
+    let roundP = null;
+    const run = (/** @type {boolean} */ force) => {
+      if (!roundP) {
+        roundP = portalRound({ ...env, force, now: new Date() })
+          .catch(() => ({ error: "run" }))
+          .finally(() => {
+            roundP = null;
+          });
+      }
+      return roundP;
+    };
     const tick = () => {
-      portalRound(env).catch(() => {});
+      run(false).catch(() => {});
     };
     tick(); // this load
     setInterval(tick, ROUND_INTERVAL_MS); // hourly while the tab stays open
+    try {
+      // "Check again now" (panel → background → tab): reply accepted at
+      // once — signed-out when the page holds no token — then run a forced
+      // round (the 30-min gap bypassed, the 401 stop not) and report
+      // check-done when it lands.
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (!msg || msg.type !== CHECK_NOW) return false;
+        if (String(msg.source || "") !== "portal") return false;
+        if (!env.getToken()) {
+          sendResponse({ accepted: false, reason: "signed-out" });
+          return false;
+        }
+        sendResponse({ accepted: true });
+        run(true)
+          .then((res) => {
+            const r = res && typeof res === "object" ? res : {};
+            const skip = String(r.skipped || "");
+            const done = r.stale || skip === "frozen" || r.paused
+              ? { ok: false, reason: "timeout" }
+              : r.error || skip === "no-token"
+                ? { ok: false, reason: skip === "no-token" ? "signed-out" : "error" }
+                : skip
+                  ? { ok: false, reason: "error" }
+                  : { ok: true };
+            env.sendMessage({
+              type: CHECK_DONE,
+              source: "portal",
+              runId: String(msg.runId || ""),
+              checked: Number(r.results) || Number(r.sent) || 0,
+              ...done,
+            });
+          })
+          .catch(() => {});
+        return false;
+      });
+    } catch {
+      /* older runtimes */
+    }
     try {
       // Page Lifecycle: a freeze makes every in-flight fetch stale (the
       // generation bump); resume/visibility-change clear the flag and

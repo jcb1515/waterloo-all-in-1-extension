@@ -131,6 +131,7 @@ export function probe(doc, href) {
       decodedIds,
       own: ex.events.filter((e) => e.calendarKind === "own").length,
       subscribed: ex.events.filter((e) => e.calendarKind === "subscribed").length,
+      wa1: ex.events.filter((e) => e.calendarKind === "wa1").length,
       unknown: ex.events.filter((e) => e.calendarKind === "unknown").length,
       detailPopup,
       account,

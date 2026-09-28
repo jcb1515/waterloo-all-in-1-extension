@@ -1,8 +1,10 @@
 // @ts-check
-// Email backfill: scheduling (full/incremental/6h cap/lock), the rate cap,
-// batching, freeze drops, failure retries, gated body selection, the Gmail
-// iframe + print-view parse, the Outlook MSAL REST read, payload->adapter
-// integration (scope/readOk/threadMap/backfill state/Atom mapping), and the
+// Email mail read: the 30-min auto gate + forced bypass + lock join, the
+// rate cap, batching, freeze drops, failure retries, gated body selection,
+// the Gmail tab-DOM list + print-view parse, the Outlook MSAL REST read,
+// the check-now protocol (accepted/not-on-page/signed-out/disabled +
+// check-done + in-flight join), the injection guard, payload->adapter
+// integration (scope/readOk/threadMap/check state/Atom mapping), and the
 // structural read-only rules over the content-side files.
 
 import test from "node:test";
@@ -14,16 +16,20 @@ import { parseHTML } from "linkedom";
 import {
   backfillRound,
   backfillFreeze,
-  decideRun,
-  clampLookback,
+  clampOutlookCount,
+  checkNowDecision,
+  doneFromResult,
+  gmailOnInbox,
+  injectOnce,
+  makeRunBox,
   makeRate,
   BF_MAX_PAGES,
+  CHECK_NOW,
   __resetBackfill,
 } from "../../extension/src/sources/email/backfill.js";
 import {
   gmailBackfill,
-  gmailListQuery,
-  gmailSearchPath,
+  gmailPrintPath,
   printViewParts,
 } from "../../extension/src/sources/email/gmail-backfill.js";
 import {
@@ -51,65 +57,110 @@ const before = (t) => {
   t.after(__resetBackfill);
 };
 
-/* ------------------------------ decideRun ------------------------------ */
+/* ------------------------- scheduling + protocol ----------------------- */
 
-test("lookback clamps to 7..90, defaults 30", () => {
-  assert.equal(clampLookback(undefined), 30);
-  assert.equal(clampLookback(3), 7);
-  assert.equal(clampLookback(400), 90);
-  assert.equal(clampLookback("45"), 45);
+test("outlookCount: 50/100/200 only, default 100", () => {
+  assert.equal(clampOutlookCount(undefined), 100);
+  assert.equal(clampOutlookCount(50), 50);
+  assert.equal(clampOutlookCount(200), 200);
+  assert.equal(clampOutlookCount(37), 100);
+  assert.equal(clampOutlookCount("100"), 100);
 });
 
-test("decideRun: first run full, then 30-min incrementals; no periodic fulls", () => {
-  const s = {};
-  assert.equal(decideRun(null, s, NOW_MS).kind, "full");
-  const prev = {
-    v: 2,
-    lastFullAt: new Date(NOW_MS - 2 * 3600e3).toISOString(), // 2h ago
-    lastRunAt: new Date(NOW_MS - 10 * 60e3).toISOString(), // 10m ago
-    lookbackDays: 30,
-    newestAt: "2026-09-30T12:00:00.000Z",
-  };
-  // An entry stamped by the old ruleset (no v:2) counts as never-ran: one
-  // full — still at least 6 h after its lastFullAt.
-  const { v: _v, ...stale } = prev;
-  assert.equal(decideRun(stale, s, NOW_MS).kind, "skip"); // inside 6h, tick not due
-  const staleOld = {
-    ...stale,
-    lastFullAt: new Date(NOW_MS - 7 * 3600e3).toISOString(),
-    lastRunAt: new Date(NOW_MS - 40 * 60e3).toISOString(),
-  };
-  assert.equal(decideRun(staleOld, s, NOW_MS).kind, "full");
-  assert.equal(decideRun(prev, s, NOW_MS).kind, "skip"); // 10m < 30m
-  const due = decideRun(
-    { ...prev, lastRunAt: new Date(NOW_MS - 31 * 60e3).toISOString() },
-    s,
-    NOW_MS,
+test("gmailOnInbox: only the first inbox page", () => {
+  assert.equal(gmailOnInbox(""), true);
+  assert.equal(gmailOnInbox("#inbox"), true);
+  assert.equal(gmailOnInbox("#inbox?compose=new"), true);
+  assert.equal(gmailOnInbox("#inbox/p2"), false);
+  assert.equal(gmailOnInbox("#inbox/18fa1a2b3c4d5e6f"), false);
+  assert.equal(gmailOnInbox("#sent"), false);
+  assert.equal(gmailOnInbox("#search/in:inbox"), false);
+});
+
+test("injectOnce: the second copy returns false (no listeners)", () => {
+  const key = `test-${Date.now()}`;
+  assert.equal(injectOnce(key), true);
+  assert.equal(injectOnce(key), false);
+});
+
+test("checkNowDecision: own provider or 'email', else null", () => {
+  const msg = { type: CHECK_NOW, source: "gmail", runId: "r1" };
+  assert.deepEqual(checkNowDecision(msg, "gmail"), { accepted: true });
+  assert.equal(checkNowDecision(msg, "outlook"), null);
+  assert.deepEqual(checkNowDecision({ ...msg, source: "email" }, "outlook"), {
+    accepted: true,
+  });
+  assert.equal(checkNowDecision({ type: "other" }, "gmail"), null);
+  assert.equal(checkNowDecision(null, "gmail"), null);
+});
+
+test("checkNowDecision: not-on-page, signed-out, disabled", () => {
+  const msg = { type: CHECK_NOW, source: "gmail" };
+  assert.deepEqual(
+    checkNowDecision(msg, "gmail", { onPage: () => false }),
+    { accepted: false, reason: "not-on-page" },
   );
-  assert.equal(due.kind, "incremental");
-  assert.equal(due.since, "2026-09-30T12:00:00.000Z");
-  // A lookback INCREASE wants a full — but inside 6h it defers to the next
-  // incremental tick once the 6h mark passes.
-  assert.equal(decideRun(prev, { lookbackDays: 60 }, NOW_MS).kind, "skip");
-  const nearEdge = {
-    ...prev,
-    lastFullAt: new Date(NOW_MS - 5 * 3600e3 - 58 * 60e3).toISOString(),
-    lastRunAt: new Date(NOW_MS - 3 * 3600e3).toISOString(),
-  };
-  const deferred = decideRun(nearEdge, { lookbackDays: 60 }, NOW_MS);
-  assert.equal(deferred.kind, "incremental");
-  const pastEdge = {
-    ...prev,
-    lastFullAt: new Date(NOW_MS - 7 * 3600e3).toISOString(),
-    lastRunAt: new Date(NOW_MS - 40 * 60e3).toISOString(),
-  };
-  assert.equal(decideRun(pastEdge, { lookbackDays: 60 }, NOW_MS).kind, "full");
-  // A lookback DECREASE just filters — never refetches.
-  assert.equal(decideRun(pastEdge, { lookbackDays: 7 }, NOW_MS).kind, "incremental");
-  // Past 6h with an unchanged lookback there is NO periodic full.
-  assert.equal(decideRun(pastEdge, s, NOW_MS).kind, "incremental");
-  // "Check again now" forces an incremental, never a 2nd full inside 6h.
-  assert.equal(decideRun(prev, s, NOW_MS, { force: true }).kind, "incremental");
+  assert.deepEqual(
+    checkNowDecision(msg, "gmail", { hasToken: () => false }),
+    { accepted: false, reason: "signed-out" },
+  );
+  assert.deepEqual(
+    checkNowDecision(msg, "gmail", { disabled: () => true }),
+    { accepted: false, reason: "disabled" },
+  );
+});
+
+test("doneFromResult: ok/signed-out/disabled/timeout/error", () => {
+  assert.deepEqual(doneFromResult({ listed: 12 }), { ok: true, checked: 12 });
+  assert.deepEqual(doneFromResult({ skipped: "no-token" }), {
+    ok: false,
+    reason: "signed-out",
+    checked: 0,
+  });
+  assert.deepEqual(doneFromResult({ skipped: "off" }), {
+    ok: false,
+    reason: "disabled",
+    checked: 0,
+  });
+  assert.deepEqual(doneFromResult({ skipped: "not-on-page" }), {
+    ok: false,
+    reason: "not-on-page",
+    checked: 0,
+  });
+  assert.deepEqual(doneFromResult({ stale: true, listed: 4 }), {
+    ok: false,
+    reason: "timeout",
+    checked: 4,
+  });
+  assert.deepEqual(doneFromResult({ error: "http", listed: 9 }), {
+    ok: false,
+    reason: "error",
+    checked: 9,
+  });
+});
+
+test("makeRunBox: a check-now during a run joins it (one start)", async () => {
+  let started = 0;
+  let release;
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  const box = makeRunBox(async () => {
+    started++;
+    await gate;
+    return { listed: 7 };
+  });
+  const a = box.run(true);
+  const b = box.run(true); // joins the in-flight run
+  assert.equal(started, 1);
+  assert.equal(box.running, true);
+  /** @type {any} */ (release)();
+  assert.equal((await a).listed, 7);
+  assert.equal((await b).listed, 7);
+  assert.equal(started, 1);
+  assert.equal(box.running, false);
+  await box.run(false); // a later run starts fresh
+  assert.equal(started, 2);
 });
 
 test("rate gate: the 21st request in a minute waits", () => {
@@ -125,31 +176,24 @@ test("rate gate: the 21st request in a minute waits", () => {
 /* --------------------------- gmail fake env ---------------------------- */
 
 /**
- * A fake Gmail page env: makeFrame returns a fake iframe whose doc is the
- * search fixture (or empty), fetchImpl returns the print-view fixture for
- * view=pt urls and records every request.
+ * A fake Gmail page env: doc() returns the inbox fixture (the search
+ * fixture's tr.zA rows stand in for inbox rows — same markup), fetchImpl
+ * returns the print-view fixture for view=pt urls and records requests.
  */
-const gmailEnv = ({ searchDoc, printDoc, prev = null, settings = {}, locked = 0, frozen = () => false } = {}) => {
+const gmailEnv = ({ searchDoc, printDoc, prev = null, settings = {}, locked = 0, onInbox = true, frozen = () => false } = {}) => {
   const { document: sdoc } = parseHTML(searchDoc != null ? searchDoc : html("gmail-search"));
   const { document: pdoc } = parseHTML(printDoc != null ? printDoc : html("gmail-print"));
-  /** @type {string[]} */
-  const navigations = [];
   /** @type {{url: string, init: any}[]} */
   const fetches = [];
   /** @type {any[]} */
   const messages = [];
   let lock = locked;
   let fail = 0;
-  const frame = {
-    navigate: (/** @type {string} */ u) => navigations.push(u),
-    doc: () => sdoc,
-    href: () => "https://mail.google.com/mail/u/0/#search/q",
-    remove: () => { frame.removed = true; },
-    removed: false,
-  };
   const env = {
     now: NOW,
     account: 0,
+    doc: () => sdoc,
+    onInbox: () => onInbox,
     fetchImpl: async (/** @type {string} */ url, /** @type {any} */ init) => {
       fetches.push({ url, init });
       return {
@@ -168,27 +212,21 @@ const gmailEnv = ({ searchDoc, printDoc, prev = null, settings = {}, locked = 0,
     clearLock: async () => { lock = 0; },
     getFail: async () => fail,
     setFail: async (/** @type {number} */ at) => { fail = at; },
-    makeFrame: () => frame,
     sleep: async () => {},
-    settleMs: 0,
-    pollMs: 1,
     isFrozen: frozen,
     pageUrl: "https://mail.google.com/mail/u/0/#inbox",
   };
-  return { env, frame, navigations, fetches, messages, getLock: () => lock, getFail: () => fail };
+  return { env, fetches, messages, getLock: () => lock, getFail: () => fail };
 };
 
 const payloadsOf = (messages) =>
   messages.map((m) => JSON.parse(m.payload.body));
 
-test("gmail full run: iframe list, gated bodies, backfill payloads", async (t) => {
+test("gmail run: tab inbox DOM, gated bodies, check payloads", async (t) => {
   before(t);
-  const { env, navigations, fetches, messages, frame } = gmailEnv();
+  const { env, fetches, messages } = gmailEnv();
   const r = await backfillRound(env, gmailBackfill);
-  assert.equal(r.sent, 2); // one page batch + the empty final marker
-  assert.equal(navigations.length, 1);
-  assert.match(navigations[0], /^\/mail\/u\/0\/#search\/in%3Ainbox%20newer_than%3A30d$/);
-  assert.equal(frame.removed, true); // the iframe is ours and we clean it up
+  assert.equal(r.sent, 2); // one batch + the empty final marker
 
   const bodies = payloadsOf(messages);
   const listed = bodies.find((b) => b.messages.length);
@@ -196,11 +234,13 @@ test("gmail full run: iframe list, gated bodies, backfill payloads", async (t) =
   assert.equal(listed.folder, "inbox");
   assert.equal(listed.provider, "gmail");
   assert.equal(listed.messages.length, 3);
-  assert.equal(listed.backfill.full, true);
-  assert.equal(listed.backfill.lookbackDays, 30);
-  assert.equal(listed.backfill.final, false);
-  assert.equal(bodies[bodies.length - 1].backfill.final, true);
-  assert.equal(bodies[bodies.length - 1].backfill.checked, 3);
+  assert.equal(listed.check.final, false);
+  assert.equal(listed.check.checked, 3);
+  const fin = bodies[bodies.length - 1];
+  assert.equal(fin.check.final, true);
+  assert.equal(fin.check.checked, 3);
+  assert.equal(fin.check.ok, true);
+  assert.ok(fin.check.runId);
   // lastMessageId -> threadId map (row 2's ids differ, row 1+3 don't).
   assert.deepEqual(listed.threadMap, { "17fb2c3d4e5f6a99": "17fb2c3d4e5f6a7b" });
   // The unread row keeps its flag.
@@ -216,6 +256,7 @@ test("gmail full run: iframe list, gated bodies, backfill payloads", async (t) =
     gated.sort(),
     ["17fb2c3d4e5f6a7b", "18fa1a2b3c4d5e6f"].sort(),
   );
+  // Only view=pt print-view GETs — the list itself comes from the DOM.
   assert.equal(fetches.length, 2);
   for (const f of fetches) {
     assert.match(f.url, /^\/mail\/u\/0\/\?view=pt&search=all&th=/);
@@ -228,41 +269,35 @@ test("gmail full run: iframe list, gated bodies, backfill payloads", async (t) =
   assert.match(thr.body || "", /lab meeting/);
 });
 
-test("gmail incremental run uses the cursor as after:<epoch>", async (t) => {
+test("gmail: a fresh check.at skips the auto tick; force bypasses", async (t) => {
   before(t);
-  const { env, navigations } = gmailEnv({
-    prev: {
-      lastFullAt: new Date(NOW_MS - 2 * 3600e3).toISOString(),
-      lastRunAt: new Date(NOW_MS - 40 * 60e3).toISOString(),
-      lookbackDays: 30,
-      newestAt: "2026-09-30T12:00:00.000Z",
-    },
-  });
-  await backfillRound(env, gmailBackfill);
-  const epoch = Math.floor(Date.parse("2026-09-30T12:00:00.000Z") / 1000);
-  assert.match(navigations[0], new RegExp(`after%3A${epoch}`));
-});
-
-test("gmail: a recent full inside 6h and a fresh lastRun skip the tick", async (t) => {
-  before(t);
-  const { env, navigations } = gmailEnv({
-    prev: {
-      lastFullAt: new Date(NOW_MS - 2 * 3600e3).toISOString(),
-      lastRunAt: new Date(NOW_MS - 10 * 60e3).toISOString(),
-      lookbackDays: 30,
-    },
+  const { env, fetches } = gmailEnv({
+    prev: { at: new Date(NOW_MS - 10 * 60e3).toISOString(), checked: 3, ok: true },
   });
   const r = await backfillRound(env, gmailBackfill);
   assert.equal(r.skipped, "throttled");
-  assert.equal(navigations.length, 0);
+  // A forced run (check-now) ignores the 30-min gate.
+  const forced = await backfillRound({ ...env, force: true }, gmailBackfill);
+  assert.ok(forced.sent >= 1);
 });
 
-test("gmail: another tab's lock stops this tab's round", async (t) => {
+test("gmail: the lock gates automatic runs only, not check-now", async (t) => {
   before(t);
-  const { env, navigations } = gmailEnv({ locked: NOW_MS - 60e3 });
+  const { env, messages } = gmailEnv({ locked: NOW_MS - 60e3 });
   const r = await backfillRound(env, gmailBackfill);
   assert.equal(r.skipped, "locked");
-  assert.equal(navigations.length, 0);
+  const forced = await backfillRound({ ...env, force: true }, gmailBackfill);
+  assert.equal(forced.sent, 2);
+  assert.equal(payloadsOf(messages).at(-1).check.ok, true);
+});
+
+test("gmail: not on the inbox -> skip as not-on-page, no requests", async (t) => {
+  before(t);
+  const { env, fetches, messages } = gmailEnv({ onInbox: false });
+  const r = await backfillRound(env, gmailBackfill);
+  assert.equal(r.skipped, "not-on-page");
+  assert.equal(fetches.length, 0);
+  assert.equal(messages.length, 0);
 });
 
 test("gmail: a body fetch that is not 200/html aborts and retries in 5m", async (t) => {
@@ -272,16 +307,23 @@ test("gmail: a body fetch that is not 200/html aborts and retries in 5m", async 
   const r = await backfillRound(env, gmailBackfill);
   assert.equal(r.error, "http");
   assert.ok(getFail() > 0);
+  // The failed run still lands a final marker with ok:false — Setup must
+  // not sit on "Checking…".
+  const fin = payloadsOf(messages).at(-1);
+  assert.equal(fin.check.final, true);
+  assert.equal(fin.check.ok, false);
+  assert.equal(fin.check.reason, "error");
   const again = await backfillRound(env, gmailBackfill);
   assert.equal(again.skipped, "retry");
-  assert.ok(!payloadsOf(messages).some((b) => b.backfill && b.backfill.final));
 });
 
 test("gmail: a frozen tab drops the round mid-flight", async (t) => {
   before(t);
   let frozen = false;
   const { env } = gmailEnv({ frozen: () => frozen });
-  env.settleMs = 5;
+  env.sleep = async () => {
+    frozen = true;
+  };
   const p = backfillRound(env, gmailBackfill);
   await new Promise((r) => setTimeout(r, 10));
   frozen = true;
@@ -381,17 +423,17 @@ test("outlook token: only unexpired Mail.Read(Write) outlook.office.com", () => 
   assert.equal(outlookToken([tokenEntry(), later], NOW_MS), "newer");
 });
 
-test("outlook list path: full window vs incremental cursor", () => {
-  const full = outlookListPath("inbox", { lookbackDays: 30, since: null }, NOW);
-  assert.match(full, /^\/api\/v2\.0\/me\/mailfolders\/inbox\/messages\?/);
-  assert.match(full, /\$filter=ReceivedDateTime%20ge%202026-09-01/);
-  assert.match(full, /\$orderby=ReceivedDateTime%20desc/);
-  assert.match(full, /\$count=true/);
-  const inc = outlookListPath("inbox", { since: "2026-09-30T12:00:00.000Z", lookbackDays: 30 }, NOW);
-  assert.match(inc, /ReceivedDateTime%20gt%202026-09-30T12/);
-  const sent = outlookListPath("sent", { lookbackDays: 30, since: null }, NOW);
+test("outlook list path: newest N, no date filter", () => {
+  const inbox = outlookListPath("inbox");
+  assert.match(inbox, /^\/api\/v2\.0\/me\/mailfolders\/inbox\/messages\?/);
+  assert.match(inbox, /\$top=50/);
+  assert.match(inbox, /\$orderby=ReceivedDateTime%20desc/);
+  assert.match(inbox, /\$count=true/);
+  assert.ok(!/\$filter/.test(inbox));
+  const sent = outlookListPath("sent");
   assert.match(sent, /mailfolders\/sentitems\/messages/);
-  assert.match(sent, /SentDateTime%20ge/);
+  assert.match(sent, /\$orderby=SentDateTime%20desc/);
+  assert.ok(!/\$filter/.test(sent));
 });
 
 test("outlook nextLink strips to the same-origin /api path only", () => {
@@ -479,6 +521,38 @@ test("outlook: sent opt-in adds a sentitems pass that marks no items", async (t)
   assert.ok(fetches.some((f) => /sentitems/.test(f.url)));
   const folders = payloadsOf(messages).map((b) => b.folder);
   assert.ok(folders.includes("sent"));
+});
+
+test("outlook: reads the newest N — outlookCount 50/100/200", async (t) => {
+  before(t);
+  const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
+  // 250 fake inbox rows across pages that always offer a nextLink. The
+  // rows are deliberately ungated (bulk newsletter sender) so needsBody is
+  // false — otherwise 50 body fetches per page would engage the 20/min
+  // rate gate, which env.sleep resolves instantly against real Date.now.
+  const mkPage = (page) => ({
+    value: Array.from({ length: 50 }, (_, i) => ({
+      ...rest.value[0],
+      Id: `ID-${page}-${i}`,
+      ConversationId: `conv-${page}-${i}`,
+      Subject: "Weekly newsletter",
+      From: { EmailAddress: { Name: "Shop Deals", Address: "news@shop.example.com" } },
+      BodyPreview: "sale",
+    })),
+    "@odata.nextLink": `https://outlook.cloud.microsoft/api/v2.0/me/mailfolders/inbox/messages?$skip=${(page + 1) * 50}`,
+  });
+  for (const [count, pagesWanted] of [[50, 1], [100, 2], [200, 4]]) {
+    const { env, fetches, messages } = outlookEnv({
+      settings: { outlookCount: count },
+      pages: [mkPage(0), mkPage(1), mkPage(2), mkPage(3), mkPage(4)],
+    });
+    await backfillRound({ ...env, force: true }, outlookBackfill);
+    const listed = fetches.filter((f) => /mailfolders\/inbox/.test(f.url)).length;
+    assert.equal(listed, pagesWanted, `count=${count}`);
+    const fin = payloadsOf(messages).at(-1);
+    assert.equal(fin.check.final, true);
+    assert.equal(fin.check.checked, count);
+  }
 });
 
 test("outlook: no token -> silent skip, zero requests", async (t) => {
@@ -595,7 +669,7 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
       view: "backfill",
       messages: msgs,
       threadMap: { m1last: "thr1" },
-      backfill: { runId: "g1", full: true, lookbackDays: 30, since: null, batch: 0, final: true, checked: 2 },
+      check: { runId: "g1", since: NOW.toISOString(), batch: 0, final: true, checked: 2, ok: true },
     }),
     ctx({}),
   );
@@ -609,12 +683,48 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
   // applyResult consumes replaceScopes; until then additive like lists).
   assert.deepEqual(res.replaceScopes.sort(), ["email:gmail:thr1", "email:gmail:thr2"]);
   assert.equal(res.state.threadMap.m1last, "thr1");
-  assert.equal(res.state.backfill.gmail.v, 2);
-  assert.equal(res.state.backfill.gmail.lookbackDays, 30);
-  assert.equal(res.state.backfill.gmail.checked, 2);
-  assert.equal(res.state.backfill.gmail.newestAt, "2026-09-29T18:00:00.000Z");
+  // The final marker stamps check[provider] — Setup's status line and the
+  // content script's 30-min gate both read `at`.
+  assert.equal(res.state.check.gmail.checked, 2);
+  assert.equal(res.state.check.gmail.ok, true);
+  assert.equal(res.state.check.gmail.at, NOW.toISOString());
+  assert.ok(!res.state.backfill);
   assert.ok(res.items.length >= 1);
   assert.equal(res.items[0].source, "gmail");
+});
+
+test("adapter: a non-final batch marks check.running; final clears it", async () => {
+  const msg = { key: "k1", subject: "x", receivedAt: NOW.toISOString(), links: [] };
+  const batch = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [msg],
+      check: { runId: "g9", since: "2026-10-01T14:59:00.000Z", batch: 0, final: false, checked: 30 },
+    }),
+    ctx({}),
+  );
+  assert.equal(batch.state.check.gmail.running.checked, 30);
+  assert.equal(batch.state.check.gmail.running.since, "2026-10-01T14:59:00.000Z");
+  const fin = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [msg],
+      check: { runId: "g9", since: "2026-10-01T14:59:00.000Z", batch: 1, final: true, checked: 51, ok: true },
+    }),
+    ctx({}, { state: batch.state }),
+  );
+  assert.equal(fin.state.check.gmail.running, undefined);
+  assert.equal(fin.state.check.gmail.checked, 51);
+  // A replay marker never touches the check state.
+  const replay = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [msg],
+      check: { runId: "gmail-replay", batch: 0, final: true, checked: 1, ok: true, replay: true },
+    }),
+    ctx({}, { state: fin.state }),
+  );
+  assert.equal(replay.state.check.gmail.checked, 51);
 });
 
 test("adapter: a 50-message batch still readOks a single scope", async () => {
@@ -634,7 +744,7 @@ test("adapter: a 50-message batch still readOks a single scope", async () => {
       folder: "inbox",
       view: "backfill",
       messages: msgs,
-      backfill: { runId: "o1", full: true, lookbackDays: 30, since: null, batch: 0, final: true, checked: 50 },
+      check: { runId: "o1", since: NOW.toISOString(), batch: 0, final: true, checked: 50, ok: true },
     }),
     ctx({}),
   );
@@ -680,7 +790,7 @@ test("adapter: Atom ids map through threadMap so one message keeps one id", asyn
   const bfRes = await adapter.observe.parse(
     payload("gmail", {
       v: 1, provider: "gmail", folder: "inbox", view: "backfill", messages: [bfMsg],
-      backfill: { runId: "g2", full: false, lookbackDays: 30, batch: 0, final: true, checked: 1 },
+      check: { runId: "g2", since: NOW.toISOString(), batch: 0, final: true, checked: 1, ok: true },
     }),
     ctx({}, { courses }),
   );
@@ -708,7 +818,7 @@ test("adapter: a sent backfill pass never makes items, still closes replies", as
     payload("gmail", {
       v: 1, provider: "gmail", folder: "sent", view: "backfill",
       messages: [{ key: "thr9", from: "me", fromMe: true, subject: "Re: x", receivedAt: NOW.toISOString(), links: [] }],
-      backfill: { runId: "g3", full: false, lookbackDays: 30, batch: 0, final: true, checked: 1 },
+      check: { runId: "g3", since: NOW.toISOString(), batch: 0, final: true, checked: 1, ok: true },
     }),
     ctx({ folders: ["inbox", "sent"] }, { state: open }),
   );
@@ -722,7 +832,7 @@ test("adapter: gmail:false still short-circuits a backfill payload", async () =>
     payload("gmail", {
       v: 1, provider: "gmail", folder: "inbox", view: "backfill",
       messages: [{ key: "k1", subject: "x", links: [] }],
-      backfill: { runId: "g4", full: true, lookbackDays: 30, batch: 0, final: true, checked: 1 },
+      check: { runId: "g4", since: NOW.toISOString(), batch: 0, final: true, checked: 1, ok: true },
     }),
     ctx({ gmail: false }),
   );
@@ -743,7 +853,7 @@ test("gmail print-view parts: sender/date/body/links per table.message", () => {
   assert.equal(parts[1].receivedAt, "2026-09-29T19:05:00.000Z");
 });
 
-test("gmail search rows parse through the passive list path", async (t) => {
+test("gmail inbox rows parse through the passive list path", async (t) => {
   before(t);
   const { env, messages } = gmailEnv();
   await backfillRound(env, gmailBackfill);
@@ -768,10 +878,15 @@ test("email content-side files stay structurally read-only", () => {
     /document\.cookie/,
     /webpackChunk/,
     /\.click\s*\(/,
+    /\.focus\s*\(/,
     /location\.assign/,
     /location\.href\s*=(?![=])/,
     /location\.replace\s*\(/,
+    /location\.hash\s*=(?![=])/,
     /history\.pushState/,
+    /history\.replaceState/,
+    /createElement\(\s*["'`]iframe/i,
+    /<\s*iframe/i,
     /"POST"|"PATCH"|"PUT"|"DELETE"/,
     /sendmail|\/send\b|\/move\b|\/copy\b|\/reply\b|\/forward\b|createreply|markAsRead/i,
     /\bact=/,
