@@ -279,7 +279,8 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   /** @type {ReturnType<typeof setTimeout> | null} */
   let probeTimer = null;
 
-  function runProbe(minInterval = PROBE_MIN_INTERVAL_MS) {
+  /** @param {number} minInterval */
+  function runProbe(minInterval) {
     if (!probeFn) return;
     try {
       const res = probeFn(document, location.href);
@@ -302,14 +303,19 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
     }
   }
 
+  /** Probe at the normal interval — event-listener safe. */
+  function probeNow() {
+    runProbe(PROBE_MIN_INTERVAL_MS);
+  }
+
   function startProbe() {
     if (!probeFn) return;
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", runProbe, { once: true });
+      document.addEventListener("DOMContentLoaded", probeNow, { once: true });
     } else {
-      runProbe();
+      probeNow();
     }
-    window.addEventListener("load", runProbe, { once: true });
+    window.addEventListener("load", probeNow, { once: true });
     // One settled re-probe shortly after the 3 s completeness mark: SPAs
     // (WaterlooWorks) finish rendering after the load event, so the
     // load-time probe can read an empty shell. Mirrors the WW adapter's
@@ -334,7 +340,7 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
         if (!probeTimer) {
           probeTimer = setTimeout(() => {
             probeTimer = null;
-            runProbe();
+            runProbe(PROBE_MIN_INTERVAL_MS);
           }, PROBE_THROTTLE_MS);
         }
       }).observe(document.documentElement, { childList: true, subtree: true });
