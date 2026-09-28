@@ -931,6 +931,308 @@ test("privacy: my account address never leaves the page", async () => {
   assert.ok(!JSON.stringify(res.state).includes("jane.student@example.com"));
 });
 
+test("to-do seam: reply and book tasks carry meta.action", async () => {
+  const m1 = msg({
+    from: "Alex Kim",
+    fromEmail: "alex@robotics.example.org",
+    subject: "Robotics",
+    body: "Quick one — please reply when you can.",
+  });
+  const r1 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m1], "message", "inbox")),
+    ctx({}),
+  );
+  const reply = r1.items.find((i) => i.category === "reply");
+  assert.equal(reply.meta.action, "reply");
+  assert.equal(reply.type, "task");
+  assert.equal(reply.meta.undated, true); // no stated due -> taskDue fallback
+
+  const m2 = msg({ ...m1, key: "r2", body: "Quick one — please reply by October 5." });
+  const r2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m2], "message", "inbox")),
+    ctx({}),
+  );
+  const dated = r2.items.find((i) => i.category === "reply");
+  assert.equal(dated.type, "deadline"); // the message states a hard due
+  assert.equal(dated.dueAt, "2026-10-06T03:59:00.000Z");
+  assert.equal(dated.meta.undated, undefined);
+
+  // A booking link without interview context -> "other".
+  const m3 = msg({
+    key: "b1",
+    from: "Morgan Park",
+    fromEmail: "morgan@park.example.com",
+    subject: "Intro call",
+    body: "Feel free to book a time here: https://calendly.com/x/30min",
+    links: ["https://calendly.com/x/30min"],
+  });
+  const r3 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m3], "message", "inbox")),
+    ctx({}),
+  );
+  const book = r3.items.find((i) => i.category === "book-call");
+  assert.equal(book.meta.action, "other");
+
+  // CECA/WaterlooWorks slot wording -> "book-interview" with the employer.
+  const m4 = msg({
+    key: "b2",
+    from: "CECA",
+    fromEmail: "no-reply@waterlooworks.uwaterloo.ca",
+    subject: "Interview scheduling",
+    body: "Please select an interview time slot by October 6.",
+  });
+  const r4 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m4], "message", "inbox")),
+    ctx({}),
+  );
+  const slot = r4.items.find((i) => i.category === "book-call");
+  assert.equal(slot.meta.action, "book-interview");
+  assert.equal(slot.meta.employer, "CECA");
+  assert.equal(slot.type, "deadline");
+  assert.equal(slot.dueAt, "2026-10-07T03:59:00.000Z"); // Oct 6 23:59 ET
+  assert.equal(slot.title, "Select interview time slot — CECA");
+});
+
+test("respond-offer: an employer's offer becomes a deadline task", async () => {
+  const m = msg({
+    key: "o1",
+    from: "Acme Corp",
+    fromEmail: "jobs@acme.example.com",
+    subject: "Offer of employment — Firmware Co-op",
+    body: "We are pleased to offer you the Firmware Co-op position. Please accept the offer by October 10.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}, { applications: [{ employer: "Acme Corp" }] }),
+  );
+  const t = res.items.find((i) => i.meta && i.meta.action === "respond-offer");
+  assert.ok(t);
+  assert.equal(t.id, "gmail:task:respond-offer:o1");
+  assert.equal(t.title, "Respond to offer — Acme Corp");
+  assert.equal(t.type, "deadline");
+  assert.equal(t.dueAt, "2026-10-11T03:59:00.000Z"); // Oct 10 23:59 ET
+  assert.equal(t.meta.employer, "Acme Corp");
+  assert.equal(t.review, "auto"); // co-op gate
+});
+
+test("submit-form and rsvp: a form link plus an ask", async () => {
+  const courses = [
+    { code: "ECE 105", term: 1269, instructors: [{ name: "Jane Smith", email: "jsmith@uwaterloo.ca" }] },
+  ];
+  const m = msg({
+    key: "f1",
+    from: "Jane Smith",
+    fromEmail: "jsmith@uwaterloo.ca",
+    subject: "Course survey",
+    body: "Please fill out this survey by October 8.",
+    links: ["https://docs.google.com/forms/d/e/abc/viewform"],
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}, { courses }),
+  );
+  const t = res.items.find((i) => i.meta && i.meta.action === "submit-form");
+  assert.ok(t);
+  assert.equal(t.title, "Submit form: Course survey");
+  assert.equal(t.type, "deadline");
+  assert.equal(t.dueAt, "2026-10-09T03:59:00.000Z");
+  assert.equal(t.org, "ECE 105"); // course task carries the course code
+  assert.equal(t.review, "auto");
+
+  const rv = msg({
+    key: "f2",
+    from: "Jane Smith",
+    fromEmail: "jsmith@uwaterloo.ca",
+    subject: "Lab tour",
+    body: "RSVP for the lab tour using this form.",
+    links: ["https://forms.gle/abc123"],
+  });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [rv], "message", "inbox")),
+    ctx({}, { courses }),
+  );
+  const t2 = res2.items.find((i) => i.meta && i.meta.action === "rsvp");
+  assert.ok(t2);
+  assert.equal(t2.title, "RSVP: Lab tour");
+  assert.equal(t2.type, "task");
+  assert.equal(t2.meta.undated, true);
+});
+
+test("submit-document: a document ask without a form link", async () => {
+  const m = msg({
+    key: "d1",
+    from: "Co-op Office",
+    fromEmail: "coop@uwaterloo.ca",
+    subject: "Work term paperwork",
+    body: "Please submit the signed contract by October 9.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const t = res.items.find((i) => i.meta && i.meta.action === "submit-document");
+  assert.ok(t);
+  assert.equal(t.title, "Submit document: Work term paperwork");
+  assert.equal(t.type, "deadline");
+  assert.equal(t.dueAt, "2026-10-10T03:59:00.000Z");
+  assert.equal(t.review, "auto");
+});
+
+test("pay: a Waterloo fee notice, deadlines and receipts", async () => {
+  const m = msg({
+    key: "p1",
+    from: "Student Fees",
+    fromEmail: "fees@uwaterloo.ca",
+    subject: "Tuition statement",
+    body: "Your tuition fees for fall are now posted. Please pay your balance by October 15.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const t = res.items.find((i) => i.meta && i.meta.action === "pay");
+  assert.ok(t);
+  assert.equal(t.title, "Pay: Tuition statement");
+  assert.equal(t.type, "deadline");
+  assert.equal(t.dueAt, "2026-10-16T03:59:00.000Z");
+  assert.equal(t.review, "auto");
+
+  // A receipt never becomes a to-do.
+  const rc = msg({
+    key: "p2",
+    from: "Student Fees",
+    fromEmail: "fees@uwaterloo.ca",
+    subject: "Payment received",
+    body: "Your payment was received — thank you. Your balance is now $0.",
+  });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [rc], "message", "inbox")),
+    ctx({}),
+  );
+  assert.ok(res2.items.every((i) => !i.meta || i.meta.action !== "pay"));
+});
+
+test("submit-rankings and apply: co-op asks become to-dos", async () => {
+  const m = msg({
+    key: "rk1",
+    from: "CECA",
+    fromEmail: "no-reply@waterlooworks.uwaterloo.ca",
+    subject: "Ranking opens",
+    body: "Rank your matches in WaterlooWorks by October 12.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  const t = res.items.find((i) => i.meta && i.meta.action === "submit-rankings");
+  assert.ok(t);
+  assert.equal(t.type, "deadline");
+  assert.equal(t.dueAt, "2026-10-13T03:59:00.000Z");
+
+  const ap = msg({
+    key: "a1",
+    from: "Acme Corp",
+    fromEmail: "jobs@acme.example.com",
+    subject: "Firmware Co-op posting",
+    body: "Submit your application for the Firmware Co-op role by October 20.",
+  });
+  const res2 = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [ap], "message", "inbox")),
+    ctx({}, { applications: [{ employer: "Acme Corp" }] }),
+  );
+  const t2 = res2.items.find((i) => i.meta && i.meta.action === "apply");
+  assert.ok(t2);
+  assert.equal(t2.type, "deadline");
+  assert.equal(t2.dueAt, "2026-10-21T03:59:00.000Z");
+  assert.equal(t2.meta.employer, "Acme Corp");
+});
+
+test("to-do cap: at most two tasks per message", async () => {
+  // reply ask + booking wording + offer = 3 candidates, capped at 2.
+  const m = msg({
+    key: "cap1",
+    from: "Acme Corp",
+    fromEmail: "jobs@acme.example.com",
+    subject: "Offer and interview",
+    body:
+      "We are pleased to offer you the Firmware Co-op position. " +
+      "Please reply to confirm. Please select an interview time slot.",
+  });
+  const res = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}, { applications: [{ employer: "Acme Corp" }] }),
+  );
+  const tasks = res.items.filter((i) => i.type === "task" || i.type === "deadline");
+  assert.equal(tasks.length, 2);
+  // The reply and the interview booking win; the offer is the third.
+  assert.ok(tasks.some((i) => i.meta.action === "reply"));
+  assert.ok(tasks.some((i) => i.meta.action === "book-interview"));
+});
+
+test("to-do negatives stay silent", async () => {
+  const cases = [
+    // "Book now" — no booking link, no book-a-time wording.
+    msg({
+      key: "n1",
+      from: "Airline",
+      fromEmail: "deals@air.example.com",
+      subject: "Fly away",
+      body: "Book now — fares this low won't last.",
+    }),
+    // "Reply STOP to unsubscribe".
+    msg({
+      key: "n2",
+      from: "Promo",
+      fromEmail: "promo@shop.example.com",
+      subject: "Sale",
+      body: "Reply STOP to unsubscribe.",
+    }),
+    // Marketing "RSVP today!" from an ungated bulk sender, no link.
+    msg({
+      key: "n3",
+      from: "Fest",
+      fromEmail: "no-reply@fest.example.com",
+      subject: "Festival",
+      body: "RSVP today! Tickets are going fast.\nUnsubscribe.",
+    }),
+    // A newsletter carrying a Google Form link, ungated.
+    msg({
+      key: "n4",
+      from: "Weekly Digest",
+      fromEmail: "digest@club.example.org",
+      subject: "This week",
+      body: "Fill out our reader survey.\nUnsubscribe.",
+      links: ["https://docs.google.com/forms/d/e/abc/viewform"],
+    }),
+    // A shipping/"payment received" receipt from Waterloo itself.
+    msg({
+      key: "n5",
+      from: "W Store",
+      fromEmail: "wstore@uwaterloo.ca",
+      subject: "Order receipt",
+      body: "Your payment was received and your package has shipped.",
+    }),
+    // A fee notice from a non-Waterloo domain.
+    msg({
+      key: "n6",
+      from: "Bank",
+      fromEmail: "alerts@bank.example.com",
+      subject: "Payment due",
+      body: "Your payment of $100 is due. Please pay your balance by October 15.",
+    }),
+  ];
+  for (const m of cases) {
+    const res = await adapter.observe.parse(
+      payload("gmail", wrap("gmail", [m], "message", "inbox")),
+      ctx({}),
+    );
+    assert.ok(
+      res.items.every((i) => i.type !== "task" && !(i.type === "deadline" && i.meta && i.meta.action)),
+      `${m.key}: expected no derived to-dos, got ${JSON.stringify(res.items.map((i) => [i.type, i.meta && i.meta.action]))}`,
+    );
+  }
+});
+
 test("email sources contain no forbidden APIs", () => {
   const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "email");
   const FILES = [
