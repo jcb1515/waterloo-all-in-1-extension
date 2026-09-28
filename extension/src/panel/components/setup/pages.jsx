@@ -4,7 +4,7 @@
 // Profile's sections/groups editing lives on the Portal page (v2).
 
 import { SourceBasics } from "./SourceBasics.jsx";
-import { EmailProviders, EmailBackfill } from "../EmailSetup.jsx";
+import { EmailProviders, EmailBackfill, EmailFilters } from "../EmailSetup.jsx";
 import { DiscordWatched, DiscordChannels } from "../DiscordSetup.jsx";
 import { OutlineManager } from "../OutlineSetup.jsx";
 import { WaterlooworksRefreshToggle } from "../WaterlooworksSetup.jsx";
@@ -136,6 +136,7 @@ export function EmailSetupPage(p) {
     <SourceBasics sourceId="outlook" {...p}>
       <EmailProviders src={src} save={save} />
       <EmailBackfill src={src} st={st} now={p.state.now} />
+      <EmailFilters src={src} save={save} />
     </SourceBasics>
   );
 }

@@ -788,6 +788,122 @@ test("bulk senders make no reply or book tasks", async () => {
   assert.equal(r2.items.length, 0);
 });
 
+test("blockSenders silence a sender's items and tasks", async () => {
+  const m = msg({
+    from: "Co-op Office",
+    fromEmail: "coop@uwaterloo.ca",
+    subject: "Interview: Firmware Co-op",
+    body: "Please reply to book your interview on Thursday, October 8 at 2:00 PM.",
+  });
+  // Ungated on its own: an interview item and a reply task.
+  const open = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({}),
+  );
+  assert.ok(open.items.length > 0);
+
+  const blocked = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({ blockSenders: ["uwaterloo.ca"] }),
+  );
+  assert.equal(blocked.items.length, 0);
+  // itemsFromMessage short-circuits too — even an invite dies at the gate.
+  const inv = items(
+    msg({ fromEmail: "calendar-notification@google.example.com", subject: GCAL, links: [] }),
+    { settings: { blockSenders: ["google.example.com"] } },
+  );
+  assert.equal(inv.length, 0);
+  // And a block entry still passes parse without errors from another sender.
+  const ok = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [m], "message", "inbox")),
+    ctx({ blockSenders: ["somebody-else.example.com"] }),
+  );
+  assert.ok(ok.items.length > 0);
+});
+
+test("allowSenders gates a bulk or personal-domain sender", async () => {
+  const news = msg({
+    key: "al1",
+    from: "Club News",
+    fromEmail: "no-reply@club.example.org",
+    subject: "September social",
+    body: "Please reply to save your spot for the social on October 9 at 6 PM.\nUnsubscribe.",
+  });
+  const gated = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [news], "message", "inbox")),
+    ctx({ allowSenders: ["club.example.org"] }),
+  );
+  const reply = gated.items.find((i) => i.category === "reply");
+  assert.ok(reply, "allow-listed bulk sender gets a reply task");
+  assert.equal(reply.review, "auto");
+
+  const same = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [news], "message", "inbox")),
+    ctx({}),
+  );
+  assert.ok(same.items.every((i) => i.type !== "task"));
+
+  // A subdomain of the allow entry matches too.
+  const sub = await adapter.observe.parse(
+    payload(
+      "gmail",
+      wrap(
+        "gmail",
+        [{ ...news, key: "al2", fromEmail: "no-reply@lists.club.example.org" }],
+        "message",
+        "inbox",
+      ),
+    ),
+    ctx({ allowSenders: ["club.example.org"] }),
+  );
+  assert.ok(sub.items.some((i) => i.type === "task"));
+
+  // Block still wins over allow.
+  const veto = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [news], "message", "inbox")),
+    ctx({
+      allowSenders: ["club.example.org"],
+      blockSenders: ["no-reply@club.example.org"],
+    }),
+  );
+  assert.equal(veto.items.length, 0);
+});
+
+test("onlyCourseCoop silences senders outside the gate", async () => {
+  const friend = msg({
+    key: "p1",
+    from: "Pat",
+    fromEmail: "pat@example.org",
+    subject: "This week",
+    body: "Please reply — can you make the study group on October 9 at 2 PM?",
+  });
+  const preset = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [friend], "message", "inbox")),
+    ctx({ onlyCourseCoop: true }),
+  );
+  assert.equal(preset.items.length, 0);
+
+  const normal = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [friend], "message", "inbox")),
+    ctx({}),
+  );
+  assert.ok(normal.items.some((i) => i.category === "reply"));
+
+  // A co-op sender still produces under the preset.
+  const coop = msg({
+    key: "p2",
+    from: "Co-op Office",
+    fromEmail: "coop@uwaterloo.ca",
+    subject: "Interview: Firmware Co-op",
+    body: "Please reply to book your interview on Thursday, October 8 at 2:00 PM.",
+  });
+  const kept = await adapter.observe.parse(
+    payload("gmail", wrap("gmail", [coop], "message", "inbox")),
+    ctx({ onlyCourseCoop: true }),
+  );
+  assert.ok(kept.items.length > 0);
+});
+
 test("quoted history cannot create a reply task", async () => {
   const m = msg({
     from: "Alex Kim",

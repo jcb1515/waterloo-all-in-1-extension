@@ -5,7 +5,7 @@
 // sources.outlook settings slice via actions.saveSettings.
 
 import { useState } from "preact/hooks";
-import { Toggle } from "../../options/bits.jsx";
+import { Field, Toggle } from "../../options/bits.jsx";
 import {
   OPTIONAL_PERMISSION_GROUPS,
   requestSourceAccess,
@@ -143,6 +143,104 @@ export function EmailBackfill({ src, st, now }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const csv = (/** @type {any} */ v) => (Array.isArray(v) ? v.join(", ") : "");
+const list = (/** @type {string} */ s) =>
+  s.split(",").map((x) => x.trim()).filter(Boolean);
+
+/**
+ * The filter block: who counts (allow), who never does (block, wins over
+ * allow), extra keywords, the Sent opt-in, the lookback window, the Gmail
+ * invites flag and the course/co-op preset. Everything saves under
+ * sources.outlook — the adapter and the mail tabs' content scripts read it
+ * from there.
+ * @param {{src: any, save: (patch: any) => void}} p
+ */
+export function EmailFilters({ src, save }) {
+  const folders = Array.isArray(src.folders) ? src.folders : ["inbox"];
+  const sentOn = folders.some((/** @type {any} */ f) => String(f).toLowerCase() === "sent");
+  const setSent = (/** @type {boolean} */ on) =>
+    save({
+      folders: on
+        ? [...new Set([...folders, "sent"])]
+        : folders.filter((f) => String(f).toLowerCase() !== "sent"),
+    });
+  const lookback = Math.max(7, Math.min(90, Math.round(Number(src.lookbackDays) || 30)));
+  const onLookback = (/** @type {any} */ e) => {
+    const n = Math.round(Number(e.target.value));
+    if (Number.isFinite(n)) save({ lookbackDays: Math.max(7, Math.min(90, n)) });
+  };
+  return (
+    <div class="src-sub">
+      <span class="label">Filters</span>
+      <div class="toggle-col">
+        <Toggle
+          label="Course and co-op senders only"
+          checked={src.onlyCourseCoop === true}
+          onChange={(v) => save({ onlyCourseCoop: v })}
+        />
+        <Toggle
+          label="Also read Sent (to close reply to-dos)"
+          checked={sentOn}
+          onChange={setSent}
+        />
+        {src.gmail !== false ? (
+          <Toggle
+            label="Also put Gmail invitations on the calendar"
+            checked={src.gmailInvitesToFeed === true}
+            onChange={(v) => save({ gmailInvitesToFeed: v })}
+          />
+        ) : null}
+      </div>
+      <Field
+        label="Days to look back"
+        help="How far the automatic read goes on a full pass (7–90)."
+      >
+        <input
+          class="input"
+          type="number"
+          min="7"
+          max="90"
+          defaultValue={lookback}
+          onBlur={onLookback}
+        />
+      </Field>
+      <Field
+        label="Always count (allow list)"
+        help="Comma-separated addresses or domains — a domain also covers its subdomains."
+      >
+        <input
+          class="input"
+          defaultValue={csv(src.allowSenders)}
+          placeholder="prof@uwaterloo.ca, acme.com"
+          onBlur={(e) => save({ allowSenders: list(/** @type {any} */ (e.target).value) })}
+        />
+      </Field>
+      <Field
+        label="Never count (block list)"
+        help="Same format; a block wins over everything, including the allow list."
+      >
+        <input
+          class="input"
+          defaultValue={csv(src.blockSenders)}
+          placeholder="newsletter@, spammy.example.com"
+          onBlur={(e) => save({ blockSenders: list(/** @type {any} */ (e.target).value) })}
+        />
+      </Field>
+      <Field
+        label="Keywords"
+        help="Comma-separated words added to the built-in ones (interview, deadline, exam…)."
+      >
+        <input
+          class="input"
+          defaultValue={csv(src.keywords)}
+          placeholder="tapeout, design review"
+          onBlur={(e) => save({ keywords: list(/** @type {any} */ (e.target).value) })}
+        />
+      </Field>
     </div>
   );
 }

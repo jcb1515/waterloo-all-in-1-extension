@@ -206,6 +206,11 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const where = body.match(WHERE_LINE);
   const whereText = where ? where[1].trim() : undefined;
 
+  // Sender filters run before anything is produced: a blocked sender is
+  // fully silent; under the course/co-op preset only gated senders count.
+  const gate = senderGate(msg, { courses, settings, applications });
+  if (gate.blocked || (settings.onlyCourseCoop && !gate.ok)) return [];
+
   /* ---- 1. invites -> exact items ---- */
   // An invite card the client rendered above the message wins over the
   // Google-Calendar subject, the "When:" line and the link+timed fallback.
@@ -289,7 +294,6 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
 
   /* ---- 2. important mail -> Review items ---- */
   const kwRe = keywordRe(settings.keywords);
-  const gate = senderGate(msg, { courses, settings, applications });
   // A non-bulk human sender qualifies on its own. Ungated bulk passes ONLY
   // through the narrow exception below (event noun or confirmation phrase
   // in the same sentence as an explicit calendar date, at most 2 items).
@@ -518,8 +522,14 @@ export function taskItems(prod, frame, prev, opts) {
       bulk: isBulk(p.m),
     };
   });
-  /** My own mail, invite-producing mail and ungated bulk can't make tasks. */
-  const canTask = (r) => !r.m.fromMe && !r.invited && (r.gate.ok || !r.bulk);
+  /** My own mail, invite-producing mail, blocked senders, preset-excluded
+   * senders and ungated bulk can't make tasks. */
+  const canTask = (r) =>
+    !r.m.fromMe &&
+    !r.invited &&
+    !r.gate.blocked &&
+    !(settings.onlyCourseCoop && !r.gate.ok) &&
+    (r.gate.ok || !r.bulk);
   const rev = (r) => (r.gate.ok ? "auto" : "pending");
   const seenEntry = (id, key) => [
     {

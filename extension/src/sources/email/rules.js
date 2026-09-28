@@ -379,13 +379,16 @@ const appList = (v) =>
  * @param {any} msg
  * @param {{courses?: any[], settings?: Record<string, any>, applications?: any}} [ctx]
  * @returns {{ok: boolean, course?: string, team?: string, coop?: boolean,
- *   employer?: string, jobId?: string}}
+ *   employer?: string, jobId?: string, blocked?: boolean}}
  */
 export function senderGate(msg, { courses = [], settings = {}, applications } = {}) {
   const email = String(msg.fromEmail || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const subject = String(msg.subject || "");
   const fromLine = `${msg.from || ""} ${email}`.toLowerCase();
+
+  // A block entry wins over every other rule — no items, no tasks.
+  if (senderBlocked(email, settings)) return { ok: false, blocked: true };
 
   if (isCoopSender(msg)) {
     return {
@@ -412,9 +415,9 @@ export function senderGate(msg, { courses = [], settings = {}, applications } = 
   for (const t of list(settings.teams)) {
     if (fromLine.includes(t.toLowerCase())) return { ok: true, team: t };
   }
-  for (const s of list(settings.senders)) {
-    if (fromLine.includes(s.toLowerCase())) return { ok: true };
-  }
+  // allowSenders (exact address or domain incl. subdomains) plus the legacy
+  // `senders` substrings.
+  if (senderListed(msg, settings)) return { ok: true };
   // An application employer: fuzzy on the display name or the domain label,
   // or a literal domain-label token inside the employer name.
   const domainLabel = (domain.split(".")[0] || "").toLowerCase();
