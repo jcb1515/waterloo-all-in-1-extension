@@ -22,14 +22,11 @@ import { Toggle } from "../../ui/bits.jsx";
 import { Segmented } from "../../ui/Segmented.jsx";
 import { EmptyState } from "../../ui/EmptyState.jsx";
 import { sourceColorVar, sourceGlyph, sourceLabel } from "../../ui/sourceLabel.js";
-import { inventoryReport } from "../../sources/discord/index.js";
 import { SETUP } from "../components/setup/index.js";
 import { PickedUp } from "./sources/PickedUp.jsx";
 import { Check } from "./sources/Check.jsx";
 import {
   RefreshIcon,
-  ExternalLinkIcon,
-  TrashIcon,
   ShieldIcon,
   ArrowRightIcon,
   ArrowLeftIcon,
@@ -184,13 +181,14 @@ export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
 
 /**
  * One source's page: header (name, status, Enabled toggle), the Segmented
- * picker, the three slot segments and the per-source actions.
+ * picker and the three slot segments; Outlook also shows mail-scan
+ * controls (sync/open/clear now live in W3's Check segment).
  * @param {{card: any, state: any, actions: any, now: Date, segment: string,
  *   setSegment: (s: string) => void, onBack: () => void,
  *   onGoCourses?: () => void, onOpenCheck?: () => void}} p
  */
 function SourcePage({ card, state, actions, now, segment, setSegment, onBack, onOpenCheck }) {
-  const { adapter, stage, st, status } = card;
+  const { adapter, st, status } = card;
   const src = (state.settings && state.settings.sources && state.settings.sources[adapter.id]) || {};
   const enabled = adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
   const [denied, setDenied] = useState(false);
@@ -300,33 +298,9 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
         </>
       )}
 
-      {enabled ? (
+      {enabled && adapter.id === "outlook" && !needsPerm ? (
         <div class="source-actions">
-          {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
-            <button type="button" class="btn btn-sm" onClick={() => actions.sync(adapter.id)}>
-              <RefreshIcon size={13} /> Sync now
-            </button>
-          ) : null}
-          {adapter.origins && adapter.origins[0] && !needsPerm ? (
-            <button type="button" class="btn btn-sm" onClick={() => actions.open(`${adapter.origins[0]}/`)}>
-              <ExternalLinkIcon size={13} /> Open site
-            </button>
-          ) : null}
-          {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
-          {adapter.id === "outlook" && !needsPerm ? <EmailScanControls st={st} /> : null}
-          {st && !needsPerm ? (
-            <button
-              type="button"
-              class="btn btn-sm btn-ghost"
-              onClick={() => {
-                if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
-                  actions.clearSource(adapter.id);
-                }
-              }}
-            >
-              <TrashIcon size={13} /> Clear data
-            </button>
-          ) : null}
+          <EmailScanControls st={st} />
         </div>
       ) : null}
     </div>
@@ -351,62 +325,6 @@ function OpenOptionsLink({ hash }) {
     <button type="button" class="btn btn-sm" onClick={open}>
       <SettingsIcon size={13} /> Open Settings
     </button>
-  );
-}
-
-/**
- * Discord sweep controls (kept on the source page's action row until W3's
- * Check segment lands). Everything is click-driven — the adapter never
- * navigates on its own.
- * @param {{st: any}} p
- */
-function DiscordControls({ st }) {
-  const [copied, setCopied] = useState(false);
-  const state = (st && st.state) || {};
-  const queue = Array.isArray(state.sweepQueue) ? state.sweepQueue : [];
-  const next = queue[0] || null;
-
-  const openChannel = async (url) => {
-    if (IS_PREVIEW) return;
-    try {
-      const tabs = await chrome.tabs.query({ url: "https://discord.com/*" });
-      const tab = (tabs || []).find((t) => t.id != null && !t.discarded);
-      if (tab) await chrome.tabs.update(tab.id, { url, active: true });
-      else await chrome.tabs.create({ url });
-    } catch {
-      window.open(url, "_blank");
-    }
-  };
-
-  const copyReport = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(inventoryReport(state), null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
-
-  return (
-    <>
-      <button type="button" class="btn btn-sm" onClick={() => send({ type: UI.DISCORD_SWEEP })}>
-        <RefreshIcon size={13} /> Start sweep
-      </button>
-      {next ? (
-        <button
-          type="button"
-          class="btn btn-sm"
-          title={`${next.url} · ${queue.length} left`}
-          onClick={() => openChannel(next.url)}
-        >
-          <ArrowRightIcon size={13} /> #{next.name} · {next.guildName} ({queue.length} left)
-        </button>
-      ) : null}
-      <button type="button" class="btn btn-sm btn-ghost" onClick={copyReport}>
-        <ClipboardCheckIcon size={13} /> {copied ? "Copied" : "Copy report"}
-      </button>
-    </>
   );
 }
 

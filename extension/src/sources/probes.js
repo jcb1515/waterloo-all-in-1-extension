@@ -90,7 +90,7 @@ export const CHECK_SOURCES = {
  * where a nearby page kind satisfies them.
  * @type {Record<string, Record<string, string>>}
  */
-const PAGE_ALIAS = {
+export const PAGE_ALIAS = {
   waterlooworks: { "application-detail": "applications" },
   discord: {
     timestamp: "channel",
