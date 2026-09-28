@@ -12,6 +12,12 @@ import { findClashes } from "../../core/clashes.js";
 import { priorityOf } from "../../core/priority.js";
 import { estimateSumMin } from "./itemsheet.js";
 import { archivedProjectItem } from "../../core/projects.js";
+import { startOfDay, fmtTime, fmtDate as fmtDay } from "../../core/dates.js";
+import { isKeyEvent } from "../../ui/dateLabel.js";
+
+// The display formatters live in core/dates.js (one canonical set); callers
+// that imported them from here keep working via these re-exports.
+export { startOfDay, fmtTime, fmtDay };
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -19,33 +25,7 @@ const DAY = 86400000;
 const COUNTDOWN_MS = 3 * HOUR;
 const DONE_RECENT_MS = 7 * DAY;
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 /* ------------------------------- date helpers ------------------------------ */
-
-/** @param {Date|number|string} d */
-export function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-/** "12:30 PM" / "1:20 PM" — drops the minutes' leading zero, keeps AM/PM. */
-export function fmtTime(d) {
-  const x = new Date(d);
-  let h = x.getHours();
-  const m = String(x.getMinutes()).padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
-
-/** "Sat, Sep 26" */
-export function fmtDay(d) {
-  const x = new Date(d);
-  return `${WEEKDAYS[x.getDay()]}, ${MONTHS[x.getMonth()]} ${x.getDate()}`;
-}
 
 /** "Saturday, September 26" */
 export function fmtLongDay(d) {
@@ -428,6 +408,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
       org: it.org || "",
       anchor: anchor(it),
       priority: priorityOf(it, now),
+      key: isKeyEvent(it),
     })),
     clashes,
     clashById,

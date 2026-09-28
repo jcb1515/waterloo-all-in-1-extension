@@ -5,11 +5,35 @@
 // `dateBlockText` is the only way the model turns into a string.
 // Pure: safe to test in Node.
 
-import { fmtWeekdayShort, fmtShortDate, fmtTime } from "../core/dates.js";
+import { fmtWeekdayShort, fmtShortDate, fmtTime, fmtDate } from "../core/dates.js";
 
-// Types that always show the key-event block (date + time + room, bold) —
-// exams, interviews and deadlines are the things a student must not miss.
+// One time formatter for every UI surface ("7:00 PM"). core/dates.js is the
+// implementation; this module is the UI-facing surface.
+export { fmtTime, fmtDate };
+
+/**
+ * "Tue Sep 29 · 7:00 PM" — a date always accompanies the time.
+ * @param {any} d
+ */
+export function fmtDateTime(d) {
+  return `${fmtDate(d)} · ${fmtTime(d)}`;
+}
+
+// Types that are always key events (exams, interviews, deadlines) — the
+// things a student must not miss.
 export const KEY_TYPES = new Set(["exam", "interview", "deadline"]);
+
+/**
+ * One key-event rule for the whole UI: a type in KEY_TYPES, or anything with
+ * a `dueAt` (deadlines, offer/application/ranking deadlines, assignment
+ * dues). Classes, meetings and events with only a startAt are not key.
+ * @param {any} item
+ * @returns {boolean}
+ */
+export function isKeyEvent(item) {
+  if (!item) return false;
+  return KEY_TYPES.has(item.type) || !!item.dueAt;
+}
 
 /**
  * The instant a row is about: startAt for timed things, dueAt otherwise.
@@ -44,7 +68,7 @@ export function dateBlockFor(item) {
   // before in Toronto. Anchor them at local noon instead.
   const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(a) ? `${a}T12:00:00` : a);
   if (Number.isNaN(t)) return null;
-  const key = KEY_TYPES.has(item.type);
+  const key = isKeyEvent(item);
   const allDay = !!item.allDay;
   return {
     key,

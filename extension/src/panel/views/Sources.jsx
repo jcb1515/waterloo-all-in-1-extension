@@ -19,6 +19,7 @@ import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
 import { Toggle } from "../../ui/bits.jsx";
 import { Segmented } from "../../ui/Segmented.jsx";
 import { EmptyState } from "../../ui/EmptyState.jsx";
+import { sourceColorVar, sourceGlyph, sourceLabel } from "../../ui/sourceLabel.js";
 import { inventoryReport } from "../../sources/discord/index.js";
 import { SETUP } from "../components/setup/index.js";
 import { PickedUp } from "./sources/PickedUp.jsx";
@@ -99,32 +100,49 @@ export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
         {cards.map(({ adapter, st, status }) => {
           const src = (state.settings && state.settings.sources && state.settings.sources[adapter.id]) || {};
           const enabled = adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
+          const name = adapter.id === "gcal" ? sourceLabel("gcal", null) : adapter.label;
+          const meta = !enabled
+            ? "Off"
+            : adapter.id === "gcal"
+              ? "Duplicate check"
+              : `${
+                  st && typeof st.itemCount === "number" && st.itemCount > 0
+                    ? `${st.itemCount} picked up`
+                    : "Nothing picked up yet"
+                } · ${
+                  st && st.lastOkAt
+                    ? `synced ${fmtAgo(st.lastOkAt, now)}`
+                    : st && st.lastRunAt
+                      ? `tried ${fmtAgo(st.lastRunAt, now)}`
+                      : "not synced yet"
+                }`;
+          const tone = enabled ? status.tone : "muted";
           return (
             <button
               key={adapter.id}
               type="button"
               class={`src-tile${enabled ? "" : " off"}`}
               role="listitem"
+              title={`${name} — ${status.label}`}
+              aria-label={`${name}: ${meta}. Status: ${status.label}`}
               onClick={() => {
                 setSourceId(adapter.id);
                 setSegment("picked");
               }}
             >
-              <span class={`src-status-dot tone-${enabled ? status.tone : "muted"}`} aria-hidden="true" />
-              <span class="src-tile-name">{adapter.label}</span>
-              <span class="src-tile-meta tabular">
-                {enabled ? (
-                  <>
-                    {st && typeof st.itemCount === "number" && st.itemCount > 0
-                      ? `${st.itemCount} picked up`
-                      : "Nothing picked up yet"}
-                    {" · "}
-                    {st && st.lastOkAt ? `synced ${fmtAgo(st.lastOkAt, now)}` : st && st.lastRunAt ? `tried ${fmtAgo(st.lastRunAt, now)}` : "not synced yet"}
-                  </>
-                ) : (
-                  "Off"
-                )}
+              <span class="src-tile-icon" style={{ "--src": sourceColorVar(adapter.id) }} aria-hidden="true">
+                {sourceGlyph(adapter.id)}
               </span>
+              <span class="src-tile-text">
+                <span class="src-tile-name">{name}</span>
+                <span class="src-tile-meta tabular">{meta}</span>
+              </span>
+              <span
+                class={`src-status-dot tone-${tone}`}
+                title={status.label}
+                aria-label={`Status: ${status.label}`}
+                role="img"
+              />
             </button>
           );
         })}

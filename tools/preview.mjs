@@ -160,6 +160,16 @@ const SHOTS_V2 = [
   { name: "settings-dark-400", url: "/src/options/options.html?preview=1#general", size: [400, 900], dark: true },
 ];
 
+const SHOTS_V2_POLISH = [
+  { name: "upcoming-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [360, 900] },
+  { name: "upcoming-dark-400", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [400, 900], dark: true },
+  { name: "upcoming-fsheet-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming&fsheet=1", size: [360, 900] },
+  { name: "upcoming-source-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming&src=waterlooworks", size: [360, 900] },
+  { name: "sources-tiles-light-360", url: "/src/panel/panel.html?preview=1&tab=sources", size: [360, 900] },
+  { name: "sources-tiles-dark-400", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900], dark: true },
+  { name: "item-sheet-light-360", url: "/src/panel/panel.html?preview=1&item=waterlooworks%3Aint-acme", size: [360, 900] },
+];
+
 const SHOTS_FINAL = [
   { name: "options-sources-gcal-light", url: "/src/options/options.html?preview=1#sources", size: [1280, 900], scroll: "#src-gcal" },
   { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=gcal:gcal-week", size: [400, 900] },
@@ -168,6 +178,7 @@ const SHOTS_FINAL = [
 ];
 
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "v2-polish" ? SHOTS_V2_POLISH :
   process.env.WA1_SHOT_DIR === "v2" ? SHOTS_V2 :
   process.env.WA1_SHOT_DIR === "final" ? SHOTS_FINAL :
   process.env.WA1_SHOT_DIR === "post3" ? SHOTS_POST3 :
