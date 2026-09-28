@@ -510,7 +510,7 @@ function ProjectDetail({ project, state, actions, now, onBack }) {
 export function Projects({ state, actions, now }) {
   const projects = Array.isArray(state.projects) ? state.projects : [];
   const [seg, setSeg] = useState("active");
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(() => query.get("newproject") === "1");
   const [selId, setSelId] = useState(() => query.get("project"));
 
   const sel = selId ? projects.find((p) => p && p.id === selId) || null : null;
