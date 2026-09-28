@@ -35,6 +35,29 @@ import { normalizePath } from "../capture/redact.js";
 const MAX_CONCURRENT = 2;
 const MINUTE = 60 * 1000;
 
+// Hang guards: an offscreen parse that never answers must not freeze a
+// source's ingest queue, and a sync must not hold it forever. Mutated only
+// by __setTimeoutsForTest.
+let PARSE_TIMEOUT_MS = 30 * 1000;
+let SYNC_TIMEOUT_MS = 5 * MINUTE;
+
+/** Reject after `ms`; wa1Timeout marks it so callers can tell a timeout from a throw. */
+function after(ms, message) {
+  return new Promise((_, reject) =>
+    setTimeout(() => {
+      const e = /** @type {any} */ (new Error(message));
+      e.wa1Timeout = true;
+      reject(e);
+    }, ms)
+  );
+}
+
+/** @param {{parseMs?: number, syncMs?: number}} [t] */
+export function __setTimeoutsForTest(t = {}) {
+  if (t.parseMs != null) PARSE_TIMEOUT_MS = t.parseMs;
+  if (t.syncMs != null) SYNC_TIMEOUT_MS = t.syncMs;
+}
+
 /* --------------------------- pure helpers --------------------------- */
 
 /**
@@ -245,7 +268,10 @@ function makeCtx(adapter, settings, state, mv, extras) {
     })),
     fetch: t1Fetch,
     relay: relayFetch,
-    parseHtml,
+    // Offscreen parses answer over sendMessage — an unanswered one would
+    // hang the source's ingest queue forever, so cap it.
+    parseHtml: (a, b, opts) =>
+      Promise.race([parseHtml(a, b, opts), after(PARSE_TIMEOUT_MS, `parse timeout: ${adapter.id}`)]),
     textDates: extractDates,
     log: (message, data) =>
       appendLog(id, data === undefined ? String(message) : `${message} ${safeJson(data)}`),
@@ -271,12 +297,22 @@ function safeJson(v) {
   }
 }
 
-/** Call adapter.sync, converting a throw into an error SyncResult. */
+/** Call adapter.sync, converting a throw or a hang into an error SyncResult. */
 async function callSync(adapter, ctx) {
   try {
-    return await /** @type {any} */ (adapter).sync(ctx);
+    return await Promise.race([
+      /** @type {any} */ (adapter).sync(ctx),
+      after(SYNC_TIMEOUT_MS, "sync timed out"),
+    ]);
   } catch (e) {
     const err = /** @type {any} */ (e);
+    if (err && err.wa1Timeout) {
+      return {
+        items: [],
+        complete: false,
+        error: { code: "timeout", message: "sync timed out" },
+      };
+    }
     return {
       items: [],
       complete: false,
