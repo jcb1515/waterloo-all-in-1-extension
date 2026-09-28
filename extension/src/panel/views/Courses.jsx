@@ -326,7 +326,8 @@ export function Courses({ state, actions, now }) {
     [state.courses, state.items, state.userState, now]
   );
   const [selCode, setSelCode] = useState(() => query0("course"));
-  const [adding, setAdding] = useState(false);
+  // ?add=1 opens the Add outline card straight away (deep link/screenshots).
+  const [adding, setAdding] = useState(() => query0("add") === "1");
   const outlineLib = useOutlineFiles(state, actions);
   const sel = selCode ? cards.find((c) => c.code === selCode) : null;
 
