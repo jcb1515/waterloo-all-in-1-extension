@@ -1,5 +1,33 @@
 // Small shared building blocks for the settings sections.
 
+import { useState } from "preact/hooks";
+
+/**
+ * "Open side panel" button — asks Chrome to open the extension side panel
+ * inside the click. When the API can't do it (preview, or the page has no
+ * sidePanel permission path) a fallback hint appears instead.
+ * @param {{label?: string, className?: string}} p
+ */
+export function OpenPanelButton({ label, className }) {
+  const [hint, setHint] = useState("");
+  const open = async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      await chrome.sidePanel.open({ windowId: win.id });
+    } catch {
+      setHint("Click the extension icon to open the panel.");
+    }
+  };
+  return (
+    <>
+      <button type="button" class={className || "btn btn-sm"} onClick={open}>
+        {label || "Open side panel"}
+      </button>
+      {hint ? <span class="help"> {hint}</span> : null}
+    </>
+  );
+}
+
 /**
  * @param {{title?: string, children: any, danger?: boolean, id?: string}} p
  */
