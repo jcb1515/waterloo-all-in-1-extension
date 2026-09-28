@@ -26,12 +26,10 @@ export function sourceStatus(adapter, st, stage, now) {
     }
     return { key: "error", label: "Error", tone: "danger", detail: String(err.message || err.code || "Sync failed") };
   }
-  // Passive adapters (intervalMinutes 0) read only while you browse — their
-  // sync() deliberately returns complete:false carrying the cached union, so
-  // `complete` can't flag staleness. Age of lastOkAt is the only signal.
-  if (adapter.intervalMinutes > 0 && st && st.complete === false) {
-    return { key: "stale", label: "Stale · open site to refresh", tone: "warn" };
-  }
+  // complete:false is NOT staleness — an adapter can report it whenever one
+  // piece couldn't be read (e.g. a Learn course with no discussions tool, or
+  // a passive adapter's deliberate partial result) while still having synced
+  // a minute ago. Staleness is decided by the age of lastOkAt alone.
   const lastOk = st && st.lastOkAt ? Date.parse(st.lastOkAt) : NaN;
   if (Number.isNaN(lastOk)) {
     return { key: "stale", label: "Stale · open site to refresh", tone: "warn", detail: "Never synced." };
@@ -39,6 +37,14 @@ export function sourceStatus(adapter, st, stage, now) {
   const staleAfter = adapter.intervalMinutes > 0 ? 2 * adapter.intervalMinutes * 60000 : 24 * HOUR;
   if (now.getTime() - lastOk > Math.max(staleAfter, 12 * HOUR)) {
     return { key: "stale", label: "Stale · open site to refresh", tone: "warn" };
+  }
+  if (st && st.complete === false) {
+    return {
+      key: "connected",
+      label: "Connected",
+      tone: "ok",
+      detail: "Last read was partial — some sections couldn't be read.",
+    };
   }
   return { key: "connected", label: "Connected", tone: "ok" };
 }

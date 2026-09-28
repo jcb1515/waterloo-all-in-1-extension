@@ -45,13 +45,43 @@ test("passive adapters ignore complete:false — age of lastOkAt decides", () =>
   );
 });
 
-test("actively synced adapters keep the complete:false -> stale rule", () => {
+test("complete:false is not staleness — recent lastOkAt stays connected", () => {
+  // A partial read (e.g. one Learn course missing a tool) must not flip a
+  // just-synced adapter to "Stale".
   const outline = adapter("outline", 1440);
+  const s = sourceStatus(outline, st({ complete: false }), "live", NOW);
+  assert.equal(s.key, "connected");
   assert.equal(
-    sourceStatus(outline, st({ complete: false }), "live", NOW).key,
-    "stale",
+    s.detail,
+    "Last read was partial — some sections couldn't be read.",
   );
   assert.equal(sourceStatus(outline, st(), "live", NOW).key, "connected");
+  assert.equal(sourceStatus(outline, st(), "live", NOW).detail, undefined);
+});
+
+test("complete:false with an old lastOkAt is still stale", () => {
+  const learn = adapter("learn", 30);
+  const s = sourceStatus(
+    learn,
+    st({ complete: false, lastOkAt: iso(NOW.getTime() - 13 * HOUR) }),
+    "live",
+    NOW,
+  );
+  assert.equal(s.key, "stale");
+});
+
+test("storeSyncSummary: a partial read is not 'Needs attention'", async () => {
+  const { storeSyncSummary } = await import(
+    "../../extension/src/panel/model/sources.js"
+  );
+  const learn = adapter("learn", 30);
+  const r = storeSyncSummary(
+    [learn],
+    { learn: st({ complete: false }) },
+    () => "live",
+    NOW,
+  );
+  assert.equal(r.tone, "ok");
 });
 
 test("signed-out and error still win for passive adapters", () => {
