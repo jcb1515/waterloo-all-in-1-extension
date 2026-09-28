@@ -209,10 +209,24 @@ export function nextSourceState(prev, result, now, kind, itemCount, sourceId) {
     }
   }
 
+  // scopeReadAt[<scope>] = when that scope was last *successfully read*,
+  // even when it produced zero items — an empty site is still read. Same
+  // scope names as scopeOkAt without the items.length >= 1 requirement.
+  /** @type {Set<string>} */
+  const readScopes = new Set();
+  if (!result.error && !badSession && realRead) {
+    const s = result.scope || (kind === "sync" ? "sync" : sourceId);
+    if (s) readScopes.add(s);
+    if (kind === "observe" && Array.isArray(result.readOk)) {
+      for (const r of result.readOk) if (r) readScopes.add(r);
+    }
+  }
+
   if (kind === "observe") {
     const st = { ...p };
     if (result.state !== undefined) st.state = result.state;
     if (okScopes.size) st.scopeOkAt = nextScopeOkAt(p.scopeOkAt, okScopes, nowIso);
+    if (readScopes.size) st.scopeReadAt = nextScopeOkAt(p.scopeReadAt, readScopes, nowIso);
     if (result.session) {
       st.session = result.session;
     } else if (Array.isArray(result.readOk) && result.readOk.length) {
@@ -236,6 +250,7 @@ export function nextSourceState(prev, result, now, kind, itemCount, sourceId) {
       : nextBackoff(failures)
     : 0;
   const scopeOkAt = nextScopeOkAt(p.scopeOkAt, okScopes, nowIso);
+  const scopeReadAt = nextScopeOkAt(p.scopeReadAt, readScopes, nowIso);
   return {
     state: result.state !== undefined ? result.state : p.state || {},
     lastRunAt: nowIso,
@@ -247,6 +262,7 @@ export function nextSourceState(prev, result, now, kind, itemCount, sourceId) {
     backoffUntil: backoffMs ? new Date(Date.parse(nowIso) + backoffMs).toISOString() : null,
     itemCount: itemCount ?? p.itemCount ?? 0,
     ...(Object.keys(scopeOkAt).length ? { scopeOkAt } : {}),
+    ...(Object.keys(scopeReadAt).length ? { scopeReadAt } : {}),
   };
 }
 

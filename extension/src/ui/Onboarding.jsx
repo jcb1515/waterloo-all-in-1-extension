@@ -10,9 +10,12 @@ import { sourceLabel } from "./sourceLabel.js";
  * First-run checklist. `rows` = onboardingRows(state, now) — already
  * filtered to the surface's scope by the caller. Shows nothing with no
  * rows; the caller also hides it when every row is done or the card was
- * dismissed (userState.onboardingDismissedAt).
+ * dismissed (userState.onboardingDismissedAt). `onOpen` receives the whole
+ * row entry — the caller stamps markOnboardingOpened and opens the url in
+ * the same click handler.
  * @param {{rows: Array<{source: string, row: any, done: boolean,
- *   lastOkAt: string|null}>, onOpen: (url: string) => void,
+ *   status: "read"|"opened"|"todo", openedAt: string|null,
+ *   lastOkAt: string|null}>, onOpen: (entry: any) => void,
  *   onDismiss?: () => void}} p
  */
 export function OnboardingCard({ rows, onOpen, onDismiss }) {
@@ -29,27 +32,36 @@ export function OnboardingCard({ rows, onOpen, onDismiss }) {
         ) : null}
       </div>
       <ul class="onboard-list">
-        {rows.map(({ source, row, done }) => (
-          <li key={`${source}:${row.id}`} class="onboard-row">
-            <span class="onboard-text">
-              <span class="onboard-label">{row.label}</span>
-              {row.how ? <span class="onboard-how">{row.how}</span> : null}
-            </span>
-            {done ? (
-              <span class="onboard-done" role="img" aria-label="Done" title="Done">
-                <CheckIcon size={15} />
+        {rows.map((entry) => {
+          const { source, row, status } = entry;
+          return (
+            <li key={`${source}:${row.id}`} class="onboard-row">
+              <span class="onboard-text">
+                <span class="onboard-label">{row.label}</span>
+                {row.how ? <span class="onboard-how">{row.how}</span> : null}
               </span>
-            ) : row.url ? (
-              <button
-                type="button"
-                class="btn btn-sm onboard-open"
-                onClick={() => onOpen(row.url)}
-              >
-                Open
-              </button>
-            ) : null}
-          </li>
-        ))}
+              {status === "read" ? (
+                <span class="onboard-done" aria-label="Read" title="Read">
+                  <CheckIcon size={15} />
+                  <span class="onboard-status">Read</span>
+                </span>
+              ) : status === "opened" ? (
+                <span class="onboard-done onboard-opened" aria-label="Opened" title="Opened">
+                  <CheckIcon size={15} />
+                  <span class="onboard-status">Opened</span>
+                </span>
+              ) : row.url ? (
+                <button
+                  type="button"
+                  class="btn btn-sm onboard-open"
+                  onClick={() => onOpen(entry)}
+                >
+                  Open
+                </button>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

@@ -68,9 +68,9 @@ export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
       ADAPTERS.map((a) => {
         const stage = stageForAdapter(a.id);
         const st = (state.sourceState || {})[a.id] || null;
-        return { adapter: a, stage, st, status: sourceStatus(a, st, stage, now) };
+        return { adapter: a, stage, st, status: sourceStatus(a, st, stage, now, state) };
       }),
-    [state.sourceState, now]
+    [state.sourceState, state.probes, state.userState, state.settings, now]
   );
 
   const openOptions = (hash) => {
@@ -272,7 +272,14 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
       ))}
 
       {onboardHidden ? null : (
-        <OnboardingCard rows={onboard} onOpen={openExternal} onDismiss={actions.dismissOnboarding} />
+        <OnboardingCard
+          rows={onboard}
+          onOpen={(entry) => {
+            actions.markOnboardingOpened(`${entry.source}:${entry.row.id}`);
+            if (entry.row.url) actions.open(entry.row.url);
+          }}
+          onDismiss={actions.dismissOnboarding}
+        />
       )}
 
       <Segmented options={SEGMENTS} value={segment} onChange={setSegment} ariaLabel={`${adapter.label} sections`} />

@@ -240,6 +240,26 @@ export function useStore() {
         if (IS_PREVIEW) return;
         send({ type: UI.SET_USER_STATE, id: "nudgeSnooze", patch: { [key]: until } });
       },
+      /**
+       * "Get set up" Open stamp — userState.onboardingOpened
+       * ["<source>:<rowId>"] = ISO. An opened-but-unread row counts as done
+       * on the card and drives the "opened · waiting / nothing read" states.
+       */
+      markOnboardingOpened(key) {
+        const at = new Date().toISOString();
+        setState((s) => ({
+          ...s,
+          userState: {
+            ...s.userState,
+            onboardingOpened: {
+              ...(isObj(s.userState.onboardingOpened) ? s.userState.onboardingOpened : {}),
+              [key]: at,
+            },
+          },
+        }));
+        if (IS_PREVIEW) return;
+        send({ type: UI.SET_USER_STATE, id: "onboardingOpened", patch: { [key]: at } });
+      },
       /** Stamp updatesSeenAt = now (drives the bell's unread badge). */
       markUpdatesSeen() {
         const at = new Date().toISOString();

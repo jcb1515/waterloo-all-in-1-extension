@@ -321,7 +321,17 @@
 .onboard-done {
   color: var(--ok);
   display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   flex-shrink: 0;
+}
+.onboard-status {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-medium);
+}
+.onboard-opened .onboard-status {
+  color: var(--text-3);
+  font-weight: var(--w-regular);
 }
 .onboard-open {
   flex-shrink: 0;
