@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.2.0 — 2026-09-28
+
+### New panel
+
+- **New navigation**: Upcoming, To-do, Calendar, Sources and More, with
+  per-source badges and the full date shown on every row — no more
+  guessing which "Friday" an item means.
+- **Per-source pages** in Sources: each reader gets a page with what it
+  **Picked up**, its **Setup** steps, and its **Check** reader status.
+- **Get set up** card: one checklist that tracks which sources you've
+  opened and which still need a first visit, and **Needs a visit** nudges
+  in Upcoming when a source hasn't been read in a while (snoozable).
+
+### Sources and reading
+
+- **Portal auto-fetch**: opening the Portal tab once is enough — the
+  extension now walks your schedule and exam pages on its own.
+- **WaterlooWorks in-tab refresh**: the extension refreshes your
+  applications, interviews and dashboard inside an open WaterlooWorks
+  tab, with a switch in Settings → Sources to turn it off.
+- **Gmail unread feed**: dated "important" mail is read from Gmail's own
+  Atom feed — more reliable detection and it works without the reading
+  pane.
+- **Course outline refresh**: outline deadlines are re-read in the open
+  outline tab, so late additions show up on their own.
+- Email detection improvements: better sender, keyword and title handling
+  across Outlook, Gmail and Discord, including generic-subject fallbacks
+  and stale-date filtering.
+- **Check readers** now re-probe shortly after a page finishes loading,
+  so slow sites (like the WaterlooWorks dashboard) report "Read" once
+  they actually render instead of staying "not read".
+
+### Duplicate fixes
+
+- **Already-split items re-merge**: duplicates created by older versions
+  (e.g. a course midterm captured separately from Portal and the outline)
+  re-cluster on the next sync — one entry, and the stray copy disappears
+  from your calendar.
+- **Publish guard covers all-day vs timed pairs**: an all-day outline
+  deadline and the same timed Learn deadline on the same day now publish
+  once (the timed one wins). Real clashes — different courses, different
+  days — still stay separate.
+- **Rankings to-dos**: one "Submit your rankings" to-do per work term,
+  the earliest upcoming deadline for the term you're actually in —
+  instead of one per cycle across every term.
+- **Portal no longer duplicates Learn deadlines or class/exam entries**:
+  Portal's calendar mirror of Learn items is matched onto the real item
+  instead of publishing twice, and **course outlines fold restated
+  deadlines** (a deadline repeated in the outline text joins the assessed
+  row instead of appearing twice).
+- **Co-op dates re-map after updates**: WaterlooWorks cycle-date items
+  keep their identity across portal updates, so no stale duplicates.
+- Old Portal calendar entries from earlier versions are **cleaned up
+  automatically**, and three events that had been hidden by a clash now
+  show.
+
+### Under the hood
+
+- **Shared calendar server built in**: the Google Calendar feed is served
+  by our own infrastructure — no third-party service to configure.
+- **Reminder pause**: pause reminders temporarily instead of turning them
+  off and forgetting to turn them back on.
+
 ## 1.1.0
 
 ### To-do and Projects (new)
