@@ -865,12 +865,27 @@ export function applyResult(prevRaw, result, opts = { mode: "sync" }) {
     // Observed/captured: replace only the items reported under this scope.
     const want = scopeKey(scope);
     const replaced = rangeReplacement(scope);
+    // A result may name extra scopes it re-read (the email adapter's
+    // replaceScopes: a backfill re-reads each message's own scope). An item
+    // that isn't re-emitted drops when EVERY scope it was seen under sits
+    // in {scope} ∪ replaceScopes — anything also seen elsewhere stays.
+    // replaceScopes stays out of scopeOkAt/scopeReadAt: nextSourceState
+    // only stamps result.scope and result.readOk.
+    const replaceScopes =
+      result && Array.isArray(result.replaceScopes)
+        ? new Set([scope, ...result.replaceScopes].map(scopeKey))
+        : null;
     items = [
       ...prevItems.filter(
         (p) =>
           !newIds.has(p.id) &&
           !(p.seenIn || []).some((s) => scopeKey(s.scope) === want) &&
-          !(replaced && replaced(p)),
+          !(replaced && replaced(p)) &&
+          !(
+            replaceScopes &&
+            (p.seenIn || []).length > 0 &&
+            p.seenIn.every((s) => s && s.scope && replaceScopes.has(scopeKey(s.scope)))
+          ),
       ),
       ...newItems,
     ];

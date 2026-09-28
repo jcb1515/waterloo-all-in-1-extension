@@ -14,7 +14,7 @@
 */
 
 import { MSG } from "../core/contract.js";
-import { UI } from "../core/messages.js";
+import { UI, CHECK } from "../core/messages.js";
 import { ADAPTERS, adapterForSource, observePatternsFor } from "../core/registry.js";
 import { migrateStorage, getLocal, setLocal, enqueue, mutateKey } from "../core/store.js";
 import { auditStore, applySafeFixes } from "../core/audit.js";
@@ -35,7 +35,10 @@ import {
   manualSetAll,
   projectUpsert,
   projectDelete,
+  stampScopesRead,
 } from "../core/scheduler.js";
+import { startCheck, handleCheckDone, sweepCheckRuns } from "./checknow.js";
+import { reinjectAll, reinjectTab } from "./reinject.js";
 import { resetSweep } from "../sources/discord/index.js";
 import { handleDiscoveryMessage } from "../capture/discovery-store.js";
 import {
@@ -60,6 +63,24 @@ import { syncOptionalContentScripts } from "../core/permissions.js";
 const BADGE_BG = "#FED34C"; // school bus yellow
 const BADGE_TEXT = "#16181D";
 const AUDIT_ALARM = "wa1:audit"; // weekly store health check
+
+/** chrome.* deps for checknow.js / reinject.js — kept injectable for tests. */
+const reinjectDeps = {
+  tabs: chrome.tabs,
+  scripting: chrome.scripting,
+  manifest: chrome.runtime.getManifest(),
+};
+const checkDeps = {
+  tabs: chrome.tabs,
+  runSync,
+  store: { getLocal, mutateKey },
+  stampScopes: (/** @type {string} */ s, /** @type {string[]} */ scopes, /** @type {Date} */ now) =>
+    stampScopesRead(s, scopes, now),
+  reinjectTab: (/** @type {number} */ tabId, /** @type {string} */ src) =>
+    reinjectTab(tabId, src, reinjectDeps),
+  now: () => Date.now(),
+  sleep: (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms)),
+};
 
 /* ------------------------------ setup ------------------------------ */
 
@@ -104,6 +125,9 @@ async function setup() {
   installNotificationHandlers();
   await recomputeAll(); // rebuild merged view + badge; also arms the reminders
   await rescheduleReminders().catch(() => {});
+  // A dead worker can't finish its checkRuns — close out stale "running"
+  // entries as timeouts on every wake.
+  await sweepCheckRuns(checkDeps.store).catch(() => {});
 }
 
 /** On startup, run adapters whose last run is older than their interval. */
@@ -142,6 +166,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     })
     .catch((e) => console.warn("[wa1] install", e));
   syncOptionalContentScripts();
+  // Tabs open before the update never got the new scripts — re-inject.
+  reinjectAll(reinjectDeps).catch(() => {});
   if (details && details.reason === "install") {
     // First run: the options page opens on the setup checklist.
     chrome.tabs
@@ -154,6 +180,7 @@ chrome.runtime.onStartup.addListener(() => {
     .then(catchUp)
     .catch((e) => console.warn("[wa1] startup", e));
   syncOptionalContentScripts();
+  reinjectAll(reinjectDeps).catch(() => {});
 });
 // Optional-host grants change at runtime: (un)register that group's scripts.
 chrome.permissions.onAdded.addListener(() => syncOptionalContentScripts());
@@ -211,8 +238,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === UI.OPEN) {
+    if (msg.newTab === true) {
+      // Explicit "open a NEW tab" (Sources tiles, check-now Open buttons):
+      // never focus/reuse an existing one.
+      chrome.tabs
+        .create({ url: msg.url })
+        .then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true;
+    }
     openOrFocus(msg.url).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
+  }
+  if (msg.type === UI.CHECK_NOW) {
+    if (!msg.source) return false;
+    // Answers synchronously; the run continues in the background and
+    // reports through checkRuns[source].
+    sendResponse(startCheck(String(msg.source), checkDeps));
+    return false;
+  }
+  if (msg.type === CHECK.DONE) {
+    handleCheckDone(msg);
+    return false;
   }
   if (msg.type === UI.CLEAR_SOURCE) {
     if (!msg.source) return false;
