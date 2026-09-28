@@ -454,6 +454,13 @@ test("DOM: outlook list and message views", () => {
   assert.equal(row.fromEmail, "recruiting@acme.example.com");
   assert.equal(row.subject, "Interview: Firmware Co-op");
 
+  // The signed-in address comes off the folder pane's account root and is
+  // used only to flag fromMe — it is blanked, never serialised as a sender.
+  const mine = list.messages.find((m) => m.key === "conv-out-3");
+  assert.equal(mine.fromMe, true);
+  assert.equal(mine.fromEmail, "");
+  assert.ok(!JSON.stringify(list).includes("jane.student@example.com"));
+
   const view = extractFor(
     parseHTML(html("outlook-message")).document,
     "https://outlook.office.com/mail/inbox/id/conv-out-1",
@@ -466,15 +473,27 @@ test("DOM: outlook list and message views", () => {
   assert.ok(m.receivedAt);
 });
 
-test("bulk senders produce nothing unless they pass the gate", () => {
-  // Newsletter: boilerplate footer marks it bulk even though the date line
-  // carries the "info session" keyword.
-  const news = items(
+test("bulk senders produce nothing unless they pass the gate or exception", () => {
+  // Newsletter boilerplate marks it bulk — but a dated event-noun sentence
+  // is the bulk exception, so the info session does produce an item now.
+  const [session] = items(
     msg({
       from: "Club News",
       fromEmail: "news@club.example.org",
       subject: "September newsletter",
       body: "Our info session is on October 9 at 6 PM.\nUnsubscribe from these emails.",
+    }),
+  );
+  assert.equal(session.type, "event");
+  assert.equal(session.startAt, "2026-10-09T22:00:00.000Z");
+
+  // A newsletter with no event noun stays suppressed.
+  const news = items(
+    msg({
+      from: "Club News",
+      fromEmail: "news@club.example.org",
+      subject: "September newsletter",
+      body: "Our monthly update is on October 9 at 6 PM.\nUnsubscribe from these emails.",
     }),
   );
   assert.deepEqual(news, []);
@@ -703,7 +722,8 @@ test("bulk senders make no reply or book tasks", async () => {
     payload("gmail", wrap("gmail", [news], "message", "inbox")),
     ctx({}),
   );
-  assert.equal(r1.items.length, 0);
+  // The event item is the bulk exception; no reply task may come of it.
+  assert.ok(r1.items.every((i) => i.type !== "task"));
 
   const nr = msg({
     key: "nb2",

@@ -99,8 +99,11 @@ export function NudgeCard({ nudges, limit, onOpen, onSnooze }) {
   );
 }
 
-/** "Portal exam schedule" — source name + row label minus the "Your ". */
+/** "Portal exam schedule" — source name + row label minus the "Your ";
+ *  a verb-led label ("Open Portal once") reads as just the source name. */
 function nudgeLabel(n) {
+  const src = sourceLabel(n.source, null);
   const label = String(n.row.label || "").replace(/^your\s+/i, "");
-  return `${sourceLabel(n.source, null)} ${label}`.trim();
+  if (/^open\b/i.test(label)) return src;
+  return `${src} ${label}`.trim();
 }

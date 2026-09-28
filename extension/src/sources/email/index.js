@@ -136,7 +136,8 @@ const adapter = {
 
       /** @type {import("../../core/contract.js").Item[]} */
       const items = [];
-      const msgs = data.messages.filter((m) => m && m.key);
+      // List views can carry dozens of rows — bound one observation's work.
+      const msgs = data.messages.filter((m) => m && m.key).slice(0, 60);
       /** @type {{m: any, items: import("../../core/contract.js").Item[]}[]} */
       const prod = msgs.map((m) => ({ m, items: [] }));
       if (allowed) {
