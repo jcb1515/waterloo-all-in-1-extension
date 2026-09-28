@@ -36,4 +36,8 @@ export const UI = Object.freeze({
   PROJECT_UPSERT: "wa1:project-upsert",
   /** panel -> background: { type, id } delete a project and its items */
   PROJECT_DELETE: "wa1:project-delete",
+  /** options -> background: { type } run the store health check */
+  AUDIT_RUN: "wa1:audit-run",
+  /** options -> background: { type, issueIds? } apply the safe fixes, re-run */
+  AUDIT_FIX: "wa1:audit-fix",
 });

@@ -562,3 +562,42 @@ kbd {
   font-size: var(--fs-sm);
 }
 .backup-counts li { margin: 2px 0; }
+
+/* ------------------------------ health check ------------------------------ */
+
+.health-summary {
+  margin: var(--sp-3) 0 var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.health-sev {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--w-semibold, 600);
+}
+.health-sev-error { color: var(--danger); }
+.health-sev-warn { color: var(--warn); }
+.health-sev-info { color: var(--text-3); }
+.health-issues {
+  list-style: none;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+}
+.health-issue {
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.health-issue:last-child { border-bottom: none; }
+.health-msg { display: block; margin-bottom: 2px; }
+.health-sample summary {
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.health-sample ul {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-5);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}

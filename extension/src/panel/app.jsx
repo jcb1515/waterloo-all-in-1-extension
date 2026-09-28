@@ -310,6 +310,17 @@ export function App() {
 
       <main class="panel-body" role="tabpanel">
         {syncing ? <span class="sr-only" role="status">Syncing sources…</span> : null}
+        {!overlay && state.lastAudit && state.lastAudit.errors > 0 ? (
+          <button
+            type="button"
+            class="attention-strip"
+            role="alert"
+            onClick={openSettings}
+          >
+            Health check found {state.lastAudit.errors} storage error
+            {state.lastAudit.errors === 1 ? "" : "s"} — open Settings → About to see them
+          </button>
+        ) : null}
         {overlay === "review" ? (
           <Review
             state={state}

@@ -16,7 +16,8 @@
 import { MSG } from "../core/contract.js";
 import { UI } from "../core/messages.js";
 import { ADAPTERS, adapterForSource, observePatternsFor } from "../core/registry.js";
-import { migrateStorage, getLocal } from "../core/store.js";
+import { migrateStorage, getLocal, setLocal, enqueue } from "../core/store.js";
+import { auditStore, applySafeFixes } from "../core/audit.js";
 import {
   runSync,
   recomputeAll,
@@ -57,6 +58,7 @@ import { syncOptionalContentScripts } from "../core/permissions.js";
 
 const BADGE_BG = "#FED34C"; // school bus yellow
 const BADGE_TEXT = "#16181D";
+const AUDIT_ALARM = "wa1:audit"; // weekly store health check
 
 /* ------------------------------ setup ------------------------------ */
 
@@ -89,6 +91,14 @@ async function setup() {
     }
   } catch (e) {
     console.warn(`[wa1] alarm ${DAILY_ALARM}`, e);
+  }
+  // Weekly health check.
+  try {
+    if (!(await chrome.alarms.get(AUDIT_ALARM))) {
+      chrome.alarms.create(AUDIT_ALARM, { periodInMinutes: 7 * 24 * 60 });
+    }
+  } catch (e) {
+    console.warn(`[wa1] alarm ${AUDIT_ALARM}`, e);
   }
   installNotificationHandlers();
   await recomputeAll(); // rebuild merged view + badge; also arms the reminders
@@ -145,6 +155,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === DIGEST_ALARM) {
     sendDigest().catch((e) => console.warn("[wa1] digest", e && e.message));
+  }
+  if (alarm.name === AUDIT_ALARM) {
+    runAudit().catch((e) => console.warn("[wa1] audit", e && e.message));
   }
 });
 
@@ -231,8 +244,49 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     projectDelete(msg.id).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
+  if (msg.type === UI.AUDIT_RUN) {
+    runAudit().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.AUDIT_FIX) {
+    auditFix(msg.issueIds).then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   return false;
 });
+
+/**
+ * Store health check: audit the whole of chrome.storage.local, record
+ * lastAudit {at, errors, warns} for the panel attention strip, and return
+ * the full report to the caller.
+ */
+async function runAudit() {
+  const snapshot = await chrome.storage.local.get(null);
+  const report = auditStore(snapshot || {});
+  let errors = 0;
+  let warns = 0;
+  for (const i of report.issues) {
+    if (i.severity === "error") errors++;
+    else if (i.severity === "warn") warns++;
+  }
+  await setLocal("lastAudit", { at: new Date().toISOString(), errors, warns });
+  return { ok: true, report };
+}
+
+/**
+ * Apply the safe fixes inside the store queue, recompute the merged view,
+ * then return a fresh report.
+ * @param {string[]} [issueIds]
+ */
+async function auditFix(issueIds) {
+  const snapshot = await chrome.storage.local.get(null);
+  const patches = applySafeFixes(snapshot || {}, issueIds);
+  if (Object.keys(patches).length) {
+    await enqueue(() => chrome.storage.local.set(patches));
+    await recomputeAll();
+  }
+  return runAudit();
+}
 
 /**
  * "Scan my mail" — startMailScan runs inside the email adapter's ingest
