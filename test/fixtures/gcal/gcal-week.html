@@ -1,20 +1,61 @@
 <!DOCTYPE html>
-<!-- Synthetic Google Calendar Week view. Event ids are base64
-     "<eventId> <calendarId>" (some unpadded); nothing is real data. -->
+<!-- Synthetic Google Calendar Week view, matching the real render: the
+     viewkey sits on <body> in caps, day columns are role="columnheader",
+     chips carry no aria-label — the description is a hidden leaf span.
+     Event ids are base64 "<eventId> <calendarId>"; nothing is real data. -->
 <html>
-  <body>
+  <head><title>Google Calendar - Week of September 27, 2026</title></head>
+  <body data-viewkey="WEEK">
+    <div role="menubar">
+      <div role="menuitem" data-viewkey="day"></div>
+      <div role="menuitem" data-viewkey="week"></div>
+      <div role="menuitem" data-viewkey="month"></div>
+    </div>
     <a aria-label="Google Account: Jane Student (jane.student@example.com)" href="https://accounts.google.com/">J</a>
-    <div role="main">
-      <div data-eventid="ZXZ0MDAxIGphbmUuc3R1ZGVudEBleGFtcGxlLmNvbQ"
-           aria-label="1pm to 1:30pm, Chat about robotics, Jane Student, Accepted, Location: Microsoft Teams Meeting, September 29, 2026"></div>
-      <div data-eventid="ZXZ0MDAzIGZlZWQxMjNAaW1wb3J0LmNhbGVuZGFyLmdvb2dsZS5jb20"
-           aria-label="2:30pm to 3:20pm, ECE 105 · Lecture, Waterloo All-in-1, September 30, 2026"></div>
-      <div data-eventid="ZXZ0MDA0IGVuLmNhbmFkaWFuI2hvbGlkYXlAZ3JvdXAudi5jYWxlbmRhci5nb29nbGUuY29t"
-           aria-label="All day, Thanksgiving, October 12, 2026"></div>
-      <div data-eventid="!!!notbase64"
-           aria-label="10am to 11am, Mystery, October 1, 2026"></div>
-      <div data-eventid="ZXZ0OTk5IGphbmUuc3R1ZGVudEBleGFtcGxlLmNvbQ=="
-           aria-label="Focus time"></div>
+    <div role="presentation">
+      <div role="columnheader">Sun27</div>
+      <div role="columnheader">Mon28</div>
+      <div role="columnheader">Tue29</div>
+      <div role="columnheader">Wed30</div>
+      <div role="columnheader">Thu1</div>
+      <div role="columnheader">Fri2</div>
+      <div role="columnheader">Sat3</div>
+    </div>
+    <div data-is-column-view-context="true">
+      <div role="row">
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+        <div role="gridcell"></div>
+      </div>
+      <div role="main">
+        <div data-eventid="ZXZ0MDAxIGphbmUuc3R1ZGVudEBleGFtcGxlLmNvbQ"
+             aria-label="1pm to 1:30pm, Chat about robotics, Jane Student, Accepted, Location: Microsoft Teams Meeting, September 29, 2026"></div>
+        <!-- Real leaf structure: visible title span + hidden description leaf. -->
+        <div data-eventid="ZXZ0MDAzIGZlZWQxMjNAaW1wb3J0LmNhbGVuZGFyLmdvb2dsZS5jb20">
+          <div>
+            <div></div>
+            <span><span>ECE 105 · Lecture</span></span>
+            <span>2:30pm to 3:20pm, ECE 105 · Lecture, Calendar: Waterloo All-in-1, Location: PSE 5353, September 30, 2026</span>
+          </div>
+        </div>
+        <div data-eventid="ZXZ0MDA0IGVuLmNhbmFkaWFuI2hvbGlkYXlAZ3JvdXAudi5jYWxlbmRhci5nb29nbGUuY29t"
+             aria-label="All day, Thanksgiving, October 12, 2026"></div>
+        <!-- Midnight-to-midnight head + undecodable id + Calendar: segment. -->
+        <div data-eventid="!!!notbase64">
+          <div>
+            <span><span>Reading week opens</span></span>
+            <span>September 27, 2026 at 12am to September 28, 2026 at 12am, Reading week opens, Calendar: Waterloo All-in-1, No location</span>
+          </div>
+        </div>
+        <div data-eventid="!!!notbase64"
+             aria-label="10am to 11am, Mystery, October 1, 2026"></div>
+        <div data-eventid="ZXZ0OTk5IGphbmUuc3R1ZGVudEBleGFtcGxlLmNvbQ=="
+             aria-label="Focus time"></div>
+      </div>
     </div>
     <div role="dialog" data-eventid="ZXZ0MDAxIGphbmUuc3R1ZGVudEBleGFtcGxlLmNvbQ">
       <h2>Chat about robotics</h2>

@@ -12,12 +12,19 @@ import { extractDates, weekdayOf, zonedIso, zonedParts } from "../../lib/textdat
 import { accountEmail, textWithBreaks } from "../email/dom.js";
 import {
   ALLDAY_PREFIX,
+  CALENDAR_SEG,
+  COLUMN_HEADER_RE,
   DATE_TAIL,
   DIALOG_SEP,
   GCAL,
   LABEL_HINT,
   MONTHS,
+  POINT_HEAD,
+  SPAN_HEAD,
   TIME_RANGE,
+  TITLE_DAY,
+  TITLE_MONTH,
+  TITLE_WEEK,
 } from "./selectors.js";
 
 /**
@@ -33,6 +40,7 @@ import {
 export const KIND_RANK = { own: 0, subscribed: 1, unknown: 2 };
 
 const textOf = (el) => String((el && el.textContent) || "").replace(/\s+/g, " ").trim();
+const DAY3 = /** @type {Record<string, number>} */ ({ sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 });
 const toHour = (h, mer) => (h % 12) + (/p/i.test(String(mer || "")) ? 12 : 0);
 const monthOf = (name) =>
   MONTHS.findIndex((n) => n.startsWith(String(name || "").toLowerCase())) + 1;
@@ -69,6 +77,102 @@ export function gcalView(u, now) {
     date = { ...date, y: +y, m: +m, d: +d };
   }
   return { view, date: { y: date.y, m: date.m, d: date.d } };
+}
+
+/**
+ * The rendered view from the DOM: a top-level `[data-viewkey]` in ALL-CAPS
+ * ("WEEK"…). View-switcher menuitems carry the attr in lowercase and are
+ * ignored; `null` when no marker is present.
+ * @param {any} doc
+ */
+function viewFromDom(doc) {
+  const map = {
+    day: "day",
+    week: "week",
+    custom_days: "week",
+    customweek: "week",
+    month: "month",
+    agenda: "schedule",
+    schedule: "schedule",
+  };
+  for (const el of doc.querySelectorAll(GCAL.viewKey) || []) {
+    const v = String(el.getAttribute("data-viewkey") || "");
+    if (!v || v !== v.toUpperCase()) continue; // menuitems are lowercase
+    const k = v.toLowerCase();
+    if (map[k]) return map[k];
+  }
+  return null;
+}
+
+/** The focal date named by document.title, when it carries one. */
+function titleDate(doc) {
+  const t = String((doc && doc.title) || "");
+  if (!t) return null;
+  /** @type {RegExpMatchArray|null} */
+  let m = t.match(TITLE_WEEK) || t.match(TITLE_DAY);
+  if (m && monthOf(m[1])) return { y: +m[3], m: monthOf(m[1]), d: +m[2] };
+  m = t.match(TITLE_MONTH);
+  if (m && monthOf(m[1])) return { y: +m[2], m: monthOf(m[1]), d: 1 };
+  return null;
+}
+
+/**
+ * A "Sun27" column header resolved to a real date: the nearest day to
+ * `anchor` (±20 days) whose weekday AND day-of-month both match.
+ * @param {[string, string]} head
+ * @param {{y:number,m:number,d:number}} anchor
+ */
+function resolveHeader([dowName, dom], anchor) {
+  const dow = DAY3[dowName.slice(0, 3).toLowerCase()];
+  const domN = +dom;
+  if (dow == null) return null;
+  /** @type {{y:number,m:number,d:number}|null} */
+  let best = null;
+  let bestDist = 21;
+  for (let off = -20; off <= 20; off++) {
+    const c = shiftDay(anchor, off);
+    if (c.d !== domN) continue;
+    if (weekdayOf(c.y, c.m, c.d) !== dow) continue;
+    if (Math.abs(off) < bestDist) {
+      best = c;
+      bestDist = Math.abs(off);
+    }
+  }
+  return best;
+}
+
+/**
+ * The visible range from the DOM: day-cell [data-date] stamps inside the
+ * column view first, then the day-number column headers resolved against
+ * the title/URL anchor. `null` when neither is present.
+ */
+function rangeFromDom(doc, view, anchor) {
+  if (view !== "day" && view !== "week" && view !== "month") return null;
+  const col = doc.querySelector(GCAL.columnView);
+  if (col) {
+    const days = [...col.querySelectorAll(GCAL.dayStamp)]
+      .map((e) => e.getAttribute("data-date"))
+      .filter(Boolean)
+      .sort();
+    if (days.length) {
+      const f = (s) => ({ y: +s.slice(0, 4), m: +s.slice(4, 6), d: +s.slice(6, 8) });
+      const a = f(days[0]);
+      const b = shiftDay(f(days[days.length - 1]), 1);
+      return { start: zonedIso(a.y, a.m, a.d, 0, 0), end: zonedIso(b.y, b.m, b.d, 0, 0) };
+    }
+  }
+  if (view === "month") return null; // month headers carry no day numbers
+  const heads = [...doc.querySelectorAll(GCAL.columnHeader)]
+    .map((h) => String(h.textContent || "").trim().match(COLUMN_HEADER_RE))
+    .filter(Boolean);
+  if (!heads.length) return null;
+  const start = resolveHeader(/** @type {[string, string]} */ ([heads[0][1], heads[0][2]]), anchor);
+  if (!start) return null;
+  const end = shiftDay(start, heads.length);
+  return {
+    start: zonedIso(start.y, start.m, start.d, 0, 0),
+    end: zonedIso(end.y, end.m, end.d, 0, 0),
+  };
 }
 
 /**
@@ -142,18 +246,24 @@ export function kindOf(calId, account) {
 /* ----------------------------- chip labels ----------------------------- */
 
 /**
- * A chip's readable label: its aria-label, else the first descendant whose
- * text starts with a time range or "All day", else its own collapsed text.
+ * A chip's readable label: its aria-label, else the descendant leaf whose
+ * text is the visually-hidden description (starts with a month-date, a
+ * time range or "All day" — prefer one that also carries a year, which is
+ * what the real description leaf looks like), else its own collapsed text.
  * @param {any} el
  */
 export function labelOf(el) {
   const aria = el && el.getAttribute ? String(el.getAttribute("aria-label") || "").trim() : "";
   if (aria) return aria;
+  /** @type {string|null} */
+  let hinted = null;
   for (const d of (el && el.querySelectorAll("*")) || []) {
     const t = textOf(d);
-    if (LABEL_HINT.test(t)) return t;
+    if (!t || !LABEL_HINT.test(t)) continue;
+    if (/(19|20)\d{2}\b/.test(t)) return t; // the description leaf has a year
+    if (hinted == null) hinted = t;
   }
-  return textOf(el);
+  return hinted || textOf(el);
 }
 
 /**
@@ -175,13 +285,66 @@ export function labelOf(el) {
 export function parseChipLabel(label, { fallbackDate } = {}) {
   const text = String(label || "").replace(/\s+/g, " ").trim();
   if (!text) return null;
+
+  /** First comma-segment after the when-part: the title (✓ marker dropped). */
+  const titleAfter = (rest) =>
+    (rest.split(",")[1] || "").trim().replace(/^✓\s*/, "").slice(0, 200);
+  /** Any "Calendar: <name>" middle segment (names a non-primary calendar). */
+  const calOf = (rest) => {
+    const seg = rest.split(",").map((s) => s.trim()).find((s) => CALENDAR_SEG.test(s));
+    return seg ? seg.replace(CALENDAR_SEG, "").trim() : undefined;
+  };
+
+  // A) "September 8, 2026 at 8am to December 23, 2026 at 11:59pm" — a span
+  //    whose start date lives in the head (comma-splitting is unsafe there).
+  const sp = SPAN_HEAD.exec(text);
+  if (sp) {
+    const rest = text.slice(sp[0].length);
+    const title = titleAfter(rest);
+    if (!title) return null;
+    const y1 = +sp[3], mo1 = monthOf(sp[1]), d1 = +sp[2];
+    const h1 = toHour(+sp[4], sp[6]), mi1 = +(sp[5] || 0);
+    const startAt = zonedIso(y1, mo1, d1, h1, mi1);
+    const calendar = calOf(rest);
+    if (sp[8]) {
+      // Full second leg: "<Month> <D>, <YYYY> at <time>".
+      const y2 = +sp[10], mo2 = monthOf(sp[8]), d2 = +sp[9];
+      const h2 = toHour(+sp[11], sp[13]), mi2 = +(sp[12] || 0);
+      const endAt = zonedIso(y2, mo2, d2, h2, mi2);
+      // "Sep 27 at 12am to Sep 28 at 12am" is an all-day event.
+      if (h1 === 0 && mi1 === 0 && h2 === 0 && mi2 === 0)
+        return { title, startAt, endAt, allDay: true, calendar };
+      return { title, startAt, endAt, allDay: false, calendar };
+    }
+    // Time-only second leg ("… to 11pm") — same day, overnight rolls.
+    const tm = String(sp[7]).match(/(\d{1,2})(?::(\d{2}))?\s*([ap])/i);
+    if (!tm) return null;
+    let endAt = zonedIso(y1, mo1, d1, toHour(+tm[1], tm[3]), +(tm[2] || 0));
+    if (Date.parse(endAt) <= Date.parse(startAt)) {
+      const nx = shiftDay({ y: y1, m: mo1, d: d1 }, 1);
+      endAt = zonedIso(nx.y, nx.m, nx.d, toHour(+tm[1], tm[3]), +(tm[2] || 0));
+    }
+    return { title, startAt, endAt, allDay: false, calendar };
+  }
+
+  // B) "September 27, 2026 at 12:59am" — a single point in time.
+  const pt = POINT_HEAD.exec(text);
+  if (pt) {
+    const rest = text.slice(pt[0].length);
+    const title = titleAfter(rest);
+    if (!title) return null;
+    const startAt = zonedIso(+pt[3], monthOf(pt[1]), +pt[2], toHour(+pt[4], pt[6]), +(pt[5] || 0));
+    return { title, startAt, allDay: false, calendar: calOf(rest) };
+  }
+
   const segs = text.split(",").map((s) => s.trim()).filter(Boolean);
   if (segs.length < 2) return null;
   const time = TIME_RANGE.exec(segs[0]);
   const allDay = ALLDAY_PREFIX.test(segs[0]);
   if (!time && !allDay) return null;
-  const title = String(segs[1] || "").trim().slice(0, 200);
+  const title = String(segs[1] || "").trim().replace(/^✓\s*/, "").slice(0, 200);
   if (!title) return null;
+  const calendar = calOf(text.slice(segs[0].length));
 
   let y = 0, m = 0, d = 0, m2 = 0, d2 = 0;
   const dm = DATE_TAIL.exec(text);
@@ -312,19 +475,30 @@ export function gcalExtract(doc, href, { now } = {}) {
     if (u.hostname !== "calendar.google.com" || !doc || typeof doc.querySelectorAll !== "function") {
       return { v: 1, view: "other", range: null, events: [] };
     }
-    const { view, date } = gcalView(u, d);
-    const range = rangeFor(view, date);
+    // DOM first (the URL often has no view or date): the grid's viewkey,
+    // then the visible columns' date stamps / headers, then the title.
+    const { view: urlView, date: urlDate } = gcalView(u, d);
+    const view = viewFromDom(doc) || urlView;
+    const anchor = titleDate(doc) || urlDate;
+    const range = rangeFromDom(doc, view, anchor) || rangeFor(view, anchor);
+    const fallbackDate = range
+      ? ((p) => ({ y: p.y, m: p.m, d: p.d }))(zonedParts(new Date(range.start)))
+      : anchor;
     const acct = accountEmail(doc); // compare-only: never serialised
 
     /** @type {GcalEvent[]} */
     const events = [];
     for (const el of doc.querySelectorAll(GCAL.chip) || []) {
       if (el.closest && el.closest(GCAL.dialog)) continue; // popup read below
-      const parsed = parseChipLabel(labelOf(el), { now: d, fallbackDate: date });
+      const parsed = parseChipLabel(labelOf(el), { now: d, fallbackDate });
       if (!parsed) continue;
+      const { calendar, ...rest } = parsed;
+      const kind = kindOf(decodeCalId(el.getAttribute("data-eventid")), acct);
       events.push({
-        ...parsed,
-        calendarKind: kindOf(decodeCalId(el.getAttribute("data-eventid")), acct),
+        ...rest,
+        // A "Calendar: <name>" segment marks a named calendar; subscribed
+        // unless the event id already proved it one of the user's own.
+        calendarKind: kind === "own" || !calendar ? kind : "subscribed",
       });
     }
     for (const dlg of doc.querySelectorAll(GCAL.dialog) || []) {

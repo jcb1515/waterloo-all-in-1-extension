@@ -237,6 +237,101 @@ test("prose hit inside a structured all-day window is a duplicate", () => {
   assert.equal(items.filter((i) => i.review === "pending").length, 0);
 });
 
+test("prose: regrade sentences are admin deadlines, not exams", () => {
+  const synthetic = {
+    code: "TEST 101",
+    term: 1269,
+    title: "Synthetic",
+    schedule: [],
+    noScheme: false,
+    schemes: [],
+    tables: [],
+    text: {
+      plan: "",
+      assessments:
+        "Midterm or Final Exam: If you have concerns about the grading of your midterm or final " +
+        "exam, please bring them to the attention of your instructor. Students have until " +
+        "December 8 at 4:30pm to request a regrade of their midterm.",
+      team: "",
+    },
+  };
+  const { items } = buildOutline(synthetic, {
+    now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+  });
+  // The "Midterm or Final Exam:" heading must not turn the Dec 8 regrade
+  // sentence into an exam.
+  assert.equal(items.filter((i) => i.type === "exam").length, 0);
+  const re = items.find((i) => i.category === "admin");
+  assert.ok(re);
+  assert.equal(re.type, "deadline");
+  assert.equal(re.title, "Midterm regrade request deadline");
+  assert.equal(re.review, "pending");
+  assert.equal(re.dueAt, "2026-12-08T21:30:00.000Z"); // 4:30pm EST
+});
+
+test("prose: begin statements with no due wording emit nothing", () => {
+  const synthetic = {
+    code: "TEST 102",
+    term: 1269,
+    title: "Synthetic",
+    schedule: [],
+    noScheme: false,
+    schemes: [],
+    tables: [],
+    text: {
+      plan: "",
+      assessments:
+        "Tutorial assignments need to be submitted in the tutorial session. " +
+        "Tutorials will begin on September 16 - there are no tutorials before then.",
+      team: "",
+    },
+  };
+  const { items } = buildOutline(synthetic, {
+    now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+  });
+  assert.equal(items.length, 0);
+});
+
+test("prose: run-together split + Registrar final window + midterm kept", () => {
+  const synthetic = {
+    code: "TEST 103",
+    term: 1269,
+    title: "Synthetic",
+    schedule: [],
+    noScheme: false,
+    schemes: [],
+    tables: [],
+    text: {
+      plan: "",
+      assessments:
+        "Midterm Exam: The midterm will be written on Monday, October 26 from 8:00pm to 9:30pm. " +
+        "More information regarding this exam will appear later in the semester." +
+        "Final Exam: A 150 minute (2.5 hour) cumulative final examination will be scheduled by " +
+        "the Registrar's Office during the examination period from Thursday, December 10, 2026 " +
+        "to Wednesday, December 23, 2026.",
+      team: "",
+    },
+  };
+  const { items } = buildOutline(synthetic, {
+    now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+  });
+  const mid = items.find((i) => i.category === "midterm");
+  assert.ok(mid);
+  assert.equal(mid.type, "exam");
+  assert.equal(mid.title, "Midterm");
+  assert.equal(mid.startAt, "2026-10-27T00:00:00.000Z"); // Mon Oct 26 8:00pm EDT
+  assert.equal(mid.endAt, "2026-10-27T01:30:00.000Z");
+  // The Registrar sentence names the exam period -> tentative all-day window,
+  // not an exact final.
+  const fin = items.find((i) => i.category === "final");
+  assert.ok(fin);
+  assert.equal(fin.title, "Final exam");
+  assert.equal(fin.allDay, true);
+  assert.equal(fin.confidence, "tentative");
+  assert.equal(fin.startAt, "2026-12-10T05:00:00.000Z"); // Dec 10 EST
+  assert.equal(fin.endAt, "2026-12-24T05:00:00.000Z"); // Dec 23 inclusive
+});
+
 test("office-hours 'starting' year comes from term inference, not the wall clock", () => {
   const synthetic = {
     code: "TEST 200",

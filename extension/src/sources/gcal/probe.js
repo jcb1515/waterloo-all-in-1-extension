@@ -65,8 +65,8 @@ export function probe(doc, href) {
     }
     if (u.hostname !== "calendar.google.com") return { ...UNKNOWN };
 
-    const { view, date } = gcalView(u, new Date());
-    const page = VIEW_PAGES.has(`gcal-${view}`) ? `gcal-${view}` : "gcal-other";
+    const ex = gcalExtract(doc, href);
+    const page = VIEW_PAGES.has(`gcal-${ex.view}`) ? `gcal-${ex.view}` : "gcal-other";
     const account = accountEmail(doc) ? 1 : 0;
     /** @type {string[]} */
     const hints = [];
@@ -77,6 +77,7 @@ export function probe(doc, href) {
     }
 
     // Chips outside dialogs, the same set gcalExtract reads.
+    const { date } = gcalView(u, new Date());
     const chips = [...doc.querySelectorAll(GCAL.chip)].filter(
       (el) => !(el.closest && el.closest(GCAL.dialog)),
     );
@@ -86,7 +87,6 @@ export function probe(doc, href) {
       if (parseChipLabel(labelOf(el), { fallbackDate: date })) labeled++;
       if (decodeCalId(el.getAttribute("data-eventid"))) decodedIds++;
     }
-    const ex = gcalExtract(doc, href);
     const dialogs = [...doc.querySelectorAll(GCAL.dialog)];
     const detailPopup = dialogs.some((d) => popupEvent(d, new Date(), "")) ? 1 : 0;
     /** @type {Record<string, number>} */
