@@ -358,6 +358,64 @@ test("unanswered pre-existing tab: re-inject once, then fresh tab fallback", asy
   assert.ok(deps.calls.send.filter((s) => s.tabId === 7).length > 1, "retried tab 7");
 });
 
+test("opened tab whose listeners ignore CHECK.NOW (undefined) -> error, tab closed", async () => {
+  // email/content.js has an onMessage listener that ignores CHECK.NOW —
+  // sendMessage resolves undefined. That must NOT count as accepted.
+  const deps = fakeDeps();
+  deps.tabs.sendMessage = async (/** @type {number} */ tabId, /** @type {any} */ msg) => {
+    deps.calls.send.push({ tabId, msg });
+    return undefined;
+  };
+  startCheck("gmail", deps);
+  const run = await settle(deps, "gmail");
+  assert.equal(run.status, "failed");
+  assert.equal(run.reason, "error");
+  assert.ok(deps.calls.send.length > 1, "retried rather than treating undefined as an answer");
+  assert.equal(deps.calls.remove.length, 1, "the tab we opened is closed");
+});
+
+test("the done-wait pings keepAlive so the MV3 worker survives the wait", async () => {
+  const deps = fakeDeps();
+  deps.tabs.query = async () => [portalTab(7)];
+  let pokes = 0;
+  let runId = "";
+  deps.keepAlive = async () => {
+    pokes++;
+    if (pokes === 2) handleCheckDone({ source: "portal", runId, ok: true, checked: 2 });
+  };
+  deps.tabs.sendMessage = async (/** @type {number} */ tabId, /** @type {any} */ msg) => {
+    deps.calls.send.push({ tabId, msg });
+    runId = msg.runId;
+    return { accepted: true };
+  };
+  startCheck("portal", deps);
+  const run = await settle(deps, "portal");
+  assert.equal(run.status, "ok");
+  assert.equal(run.checked, 2);
+  assert.ok(pokes >= 2, "keepAlive ran during the done-wait");
+});
+
+test("sweepCheckRuns closes tabIds a dead run recorded", async () => {
+  const deps = fakeDeps();
+  deps.data.checkRuns = {
+    gmail: {
+      runId: "check:gmail:1",
+      status: "running",
+      startedAt: new Date(T0 - 120000).toISOString(),
+      tabIds: [901, 902],
+    },
+  };
+  const removed = [];
+  await sweepCheckRuns(deps.store, new Date(T0), {
+    remove: async (/** @type {number} */ id) => {
+      removed.push(id);
+    },
+  });
+  assert.deepEqual(removed.slice().sort(), [901, 902]);
+  assert.equal(deps.data.checkRuns.gmail.status, "failed");
+  assert.equal(deps.data.checkRuns.gmail.reason, "timeout");
+});
+
 test("check-done never arrives -> timeout", async () => {
   const deps = fakeDeps();
   deps.tabs.query = async () => [portalTab(7)];

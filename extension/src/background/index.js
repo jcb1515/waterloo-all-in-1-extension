@@ -80,6 +80,9 @@ const checkDeps = {
     reinjectTab(tabId, src, reinjectDeps),
   now: () => Date.now(),
   sleep: (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms)),
+  // An MV3 worker is killed after ~30 s idle; a long CHECK.NOW wait loop is
+  // pure timers, so ping a cheap API each poll to count as activity.
+  keepAlive: () => chrome.runtime.getPlatformInfo().then(() => {}),
 };
 
 /* ------------------------------ setup ------------------------------ */
@@ -126,8 +129,8 @@ async function setup() {
   await recomputeAll(); // rebuild merged view + badge; also arms the reminders
   await rescheduleReminders().catch(() => {});
   // A dead worker can't finish its checkRuns — close out stale "running"
-  // entries as timeouts on every wake.
-  await sweepCheckRuns(checkDeps.store).catch(() => {});
+  // entries as timeouts on every wake, and close tabs those runs opened.
+  await sweepCheckRuns(checkDeps.store, new Date(), chrome.tabs).catch(() => {});
 }
 
 /** On startup, run adapters whose last run is older than their interval. */

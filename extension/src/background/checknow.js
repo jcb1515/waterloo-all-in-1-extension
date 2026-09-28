@@ -102,12 +102,16 @@ export function handleCheckDone(msg) {
 
 /**
  * On any background wake: finalize running entries older than the run
- * timeout — the worker that owned them is gone.
+ * timeout — the worker that owned them is gone. If `tabs` is given, also
+ * close any tabIds the dead run recorded as opened-by-us.
  * @param {{getLocal?: Function, mutateKey: Function}} store
  * @param {Date|number} [now]
+ * @param {{remove?: Function}} [tabs]
  */
-export async function sweepCheckRuns(store, now = new Date()) {
+export async function sweepCheckRuns(store, now = new Date(), tabs = null) {
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  /** @type {number[]} */
+  const orphans = [];
   await store.mutateKey("checkRuns", (cur) => {
     const runs = cur || {};
     let changed = false;
@@ -119,6 +123,7 @@ export async function sweepCheckRuns(store, now = new Date()) {
         Number.isFinite(Date.parse(r.startedAt || "")) &&
         nowMs - Date.parse(r.startedAt) > CHECK_TIMEOUT_MS
       ) {
+        for (const id of r.tabIds || []) orphans.push(id);
         out[src] = {
           ...r,
           status: "failed",
@@ -130,6 +135,15 @@ export async function sweepCheckRuns(store, now = new Date()) {
     }
     return changed ? out : runs;
   });
+  if (tabs) {
+    for (const id of orphans) {
+      try {
+        await tabs.remove(id);
+      } catch {
+        /* already gone */
+      }
+    }
+  }
 }
 
 /* ------------------------------ internals ------------------------------ */
@@ -227,7 +241,7 @@ async function runTabCheck(source, run, deps) {
   if (!tab) {
     if (source === "discord") return { ok: false, reason: "not-on-page" };
     if (!siteUrl) return { ok: false, reason: "error" };
-    tab = await openTab(deps, run, siteUrl);
+    tab = await openTab(deps, run, source, siteUrl);
     if (!tab) return { ok: false, reason: "error" };
   }
   await waitComplete(tab.id, run, deps);
@@ -246,7 +260,7 @@ async function runTabCheck(source, run, deps) {
     if (deadline()) return { ok: false, reason: "timeout" };
     answer = await askTab(tab.id, source, run.runId, deps, REINJECT_ANSWER_WAIT_MS, run);
     if (!answer && source !== "discord" && siteUrl) {
-      const t2 = await openTab(deps, run, siteUrl);
+      const t2 = await openTab(deps, run, source, siteUrl);
       if (t2) {
         await waitComplete(t2.id, run, deps);
         answer = await askTab(t2.id, source, run.runId, deps, ANSWER_WAIT_MS, run);
@@ -259,7 +273,7 @@ async function runTabCheck(source, run, deps) {
   if (answer.accepted === false) {
     if (answer.reason === "not-on-page" && source !== "discord" && siteUrl) {
       // The page isn't on a readable view — a fresh canonical tab gets one.
-      const t2 = await openTab(deps, run, siteUrl);
+      const t2 = await openTab(deps, run, source, siteUrl);
       if (!t2) return { ok: false, reason: "error" };
       await waitComplete(t2.id, run, deps);
       answer = await askTab(t2.id, source, run.runId, deps, ANSWER_WAIT_MS, run);
@@ -283,6 +297,15 @@ async function runTabCheck(source, run, deps) {
       return { ok: msg.ok !== false, reason: msg.reason, checked: msg.checked };
     }
     if (deadline()) return { ok: false, reason: "timeout" };
+    // MV3: a pure-timer wait doesn't keep the service worker alive — the
+    // worker dies ~30 s in and run.ours dies with it. One cheap API call
+    // per poll resets the idle kill; the sweep cleans up whatever survives
+    // a real death (crash/update).
+    try {
+      if (deps.keepAlive) await deps.keepAlive();
+    } catch {
+      /* keepalive is best-effort */
+    }
   }
 }
 
@@ -301,11 +324,21 @@ function pickTab(tabs, source) {
   return best;
 }
 
-async function openTab(deps, run, url) {
+async function openTab(deps, run, source, url) {
   try {
     const tab = await deps.tabs.create({ url, active: false });
     if (tab && tab.id != null) {
       run.ours.add(tab.id);
+      // Record the id on the run entry — if the worker dies mid-run the
+      // next wake's sweep can still close the tab we opened.
+      await deps.store
+        .mutateKey("checkRuns", (cur) => {
+          const r = cur && cur[source];
+          return r && r.runId === run.runId
+            ? { ...cur, [source]: { ...r, tabIds: [...(r.tabIds || []), tab.id] } }
+            : cur;
+        })
+        .catch(() => {});
       return tab;
     }
   } catch {
@@ -350,8 +383,11 @@ async function askTab(tabId, source, runId, deps, maxMs, run) {
       () => null,
     );
     const win = await Promise.race([sent, deps.sleep(SEND_RETRY_MS).then(() => null)]);
-    if (win && typeof win === "object" && "v" in win) {
-      return win.v === undefined ? { accepted: true } : win.v;
+    // An undefined resolution is NOT an answer — it means some listener
+    // exists (e.g. the email reader) but none claimed the message. Keep
+    // retrying until a real {accepted:…} reply or the window expires.
+    if (win && typeof win === "object" && "v" in win && win.v != null) {
+      return win.v;
     }
   }
   return null;

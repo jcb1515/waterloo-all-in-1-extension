@@ -1159,6 +1159,16 @@ async function cmdCheckNow(source, extId) {
   const cdp = await connectTabById(page ? page.id : wakeTabId);
   const started = Date.now();
   try {
+    // A freshly created tab lists as a target before the page has loaded
+    // chrome.* — wait for the API before messaging.
+    for (let i = 0; i < 30; i++) {
+      const ready = await cdp
+        .eval('typeof chrome !== "undefined" && !!(chrome.runtime && chrome.runtime.id)')
+        .catch(() => false);
+      if (ready === true) break;
+      if (i === 29) die("wake page never exposed chrome.runtime.");
+      await sleep(300);
+    }
     const res = await cdp.eval(
       `chrome.runtime.sendMessage({ type: "wa1:check-now-request", source: ${JSON.stringify(src)} })`,
       { awaitPromise: true },
