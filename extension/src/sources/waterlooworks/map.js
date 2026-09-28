@@ -22,7 +22,7 @@ import {
  * frozen contract — WaterlooWorks reports both "App Status" (the student's
  * state) and "Job Status" (the posting's stage), and the latter is useful
  * context the contract has no field for.
- * @typedef {Application & {jobStatus?: string}} WWApplication
+ * @typedef {Application & {jobStatus?: string, submittedOn?: string}} WWApplication
  */
 
 const SOURCE = "waterlooworks";
@@ -87,6 +87,7 @@ export function toApplications(rows) {
       jobId: row.jobId,
       cycle: row.term,
       jobStatus: row.jobStatusText || undefined,
+      submittedOn: row.submittedOn || undefined,
       status: normalizeStatus(row.appStatusText),
       history: [],
       itemIds: [],

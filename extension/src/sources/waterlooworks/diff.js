@@ -15,8 +15,25 @@ import { STATUS_LABEL } from "./status.js";
  * @param {Date} now
  * @returns {{applications: Application[], updates: Update[]}}
  */
+const NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A "new application" bell only makes sense for a genuinely fresh
+ * submission. Applications first seen deep in the paginated grid were
+ * submitted long ago — they are seeded silently. Missing or unparseable
+ * submitted dates read as old.
+ * @param {any} app
+ * @param {number} nowMs
+ */
+function submittedRecently(app, nowMs) {
+  const ms = Date.parse(String(app?.submittedOn || ""));
+  return Number.isFinite(ms) && Math.abs(nowMs - ms) <= NEW_WINDOW_MS;
+}
+
 export function diffApplications(prev, next, now) {
-  const nowIso = (now instanceof Date ? now : new Date(now)).toISOString();
+  const nowDate = now instanceof Date ? now : new Date(now);
+  const nowIso = nowDate.toISOString();
+  const nowMs = nowDate.getTime();
   const prevList = Array.isArray(prev) ? prev : [];
   const prevById = new Map(prevList.map((app) => [app.id, app]));
   const hadPrev = prevList.length > 0;
@@ -38,7 +55,9 @@ export function diffApplications(prev, next, now) {
     }
     if (!before) {
       const history = status === "unknown" ? [] : [{ status, at: nowIso }];
-      if (hadPrev && status !== "unknown") updates.push(makeUpdate(app, status, "new", nowIso));
+      if (hadPrev && status !== "unknown" && submittedRecently(app, nowMs)) {
+        updates.push(makeUpdate(app, status, "new", nowIso));
+      }
       applications.push({ ...app, status, history, itemIds });
       continue;
     }

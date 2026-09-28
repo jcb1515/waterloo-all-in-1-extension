@@ -42,6 +42,7 @@ test("toApplications normalizes statuses into the contract shape", () => {
     jobId: "488135",
     cycle: "2027 - Winter",
     jobStatus: "Interview Selections Complete",
+    submittedOn: "2026-09-15T20:12:00.000Z",
     status: "applied",
     history: [],
     itemIds: [],
