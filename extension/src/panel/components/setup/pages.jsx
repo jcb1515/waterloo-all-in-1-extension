@@ -7,6 +7,7 @@ import { SourceBasics } from "./SourceBasics.jsx";
 import { EmailProviders, MailScan } from "../EmailSetup.jsx";
 import { DiscordWatched, DiscordChannels } from "../DiscordSetup.jsx";
 import { OutlineManager } from "../OutlineSetup.jsx";
+import { WaterlooworksRefreshToggle } from "../WaterlooworksSetup.jsx";
 import { sectionsPatch, groupPatch } from "../../model/setup.js";
 import { normCourseCode } from "../../../core/contract.js";
 
@@ -140,7 +141,11 @@ export function EmailSetupPage(p) {
 
 /** @param {{state: any, actions: any}} p */
 export function WaterlooworksSetup(p) {
-  return <SourceBasics sourceId="waterlooworks" {...p} />;
+  return (
+    <SourceBasics sourceId="waterlooworks" {...p}>
+      <WaterlooworksRefreshToggle state={p.state} actions={p.actions} />
+    </SourceBasics>
+  );
 }
 
 /** @param {{state: any, actions: any}} p */

@@ -323,6 +323,33 @@ test("SETUP pages smoke-render: what-we-read text, children gated on enabled", a
   render(SETUP.discord({ state, actions }), root);
   assert.ok(root.textContent.includes("Watched servers"));
 
+  // WaterlooWorks shows the in-tab refresh toggle.
+  root = document.createElement("div");
+  render(SETUP.waterlooworks({ state, actions }), root);
+  assert.ok(
+    root.textContent.includes("Refresh WaterlooWorks automatically"),
+    "WW setup lacks the auto-refresh toggle"
+  );
+  // Off means off: enabled:false hides the toggle like any other block.
+  root = document.createElement("div");
+  render(
+    SETUP.waterlooworks({
+      state: {
+        ...state,
+        settings: {
+          ...state.settings,
+          sources: {
+            ...(state.settings.sources || {}),
+            waterlooworks: { enabled: false },
+          },
+        },
+      },
+      actions,
+    }),
+    root
+  );
+  assert.ok(!root.textContent.includes("Refresh WaterlooWorks automatically"));
+
   // Disabled source -> children hidden; the paragraph still shows.
   const offState = {
     ...state,
