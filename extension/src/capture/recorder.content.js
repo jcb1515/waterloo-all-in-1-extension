@@ -279,14 +279,14 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   /** @type {ReturnType<typeof setTimeout> | null} */
   let probeTimer = null;
 
-  function runProbe() {
+  function runProbe(minInterval = PROBE_MIN_INTERVAL_MS) {
     if (!probeFn) return;
     try {
       const res = probeFn(document, location.href);
       if (!res || typeof res !== "object") return;
       const now = Date.now();
       const json = JSON.stringify([res.page, res.counts, res.ok, res.hints]);
-      if (!shouldSendProbe(probeLast, json, now, PROBE_MIN_INTERVAL_MS)) return;
+      if (!shouldSendProbe(probeLast, json, now, minInterval)) return;
       probeLast = { at: now, json };
       send({
         type: UI.PROBE,
@@ -310,6 +310,25 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
       runProbe();
     }
     window.addEventListener("load", runProbe, { once: true });
+    // One settled re-probe shortly after the 3 s completeness mark: SPAs
+    // (WaterlooWorks) finish rendering after the load event, so the
+    // load-time probe can read an empty shell. Mirrors the WW adapter's
+    // resendAfterSettled; fires exactly once.
+    const probeLoadedAt = Date.now();
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let settleTimer = null;
+    const scheduleSettledProbe = () => {
+      if (settleTimer !== null) return;
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        // Bypass the min-interval: the load probe's send would otherwise
+        // swallow a changed result here (dedupe on unchanged json still
+        // applies via shouldSendProbe).
+        runProbe(0);
+      }, Math.max(0, probeLoadedAt + 3000 - Date.now()) + 100);
+    };
+    window.addEventListener("load", scheduleSettledProbe, { once: true });
+    if (document.readyState === "complete") scheduleSettledProbe();
     try {
       new MutationObserver(() => {
         if (!probeTimer) {
