@@ -29,6 +29,9 @@ const RANGE = /^(.*?)\s+from\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s
 // "12:30 PM ET to 01:00 PM ET" (slot rows carry their date in a day header);
 // the dashboard's schedule/events modules use "11:30 AM ET - 01:30 PM ET".
 const TIME_RANGE = /(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?\s*(?:to|[-–—])\s*(\d{1,2}:\d{2}\s*[ap]\.?m\.?)\s*(?:ET|EST|EDT)?/i;
+// Unanchored — also finds a range rejoined from lines that were split inside
+// an <a>, or one followed by a category in the same cell.
+export const WW_TIME_RANGE_RE = TIME_RANGE;
 
 /** @typedef {{y: number, m: number, d: number, h?: number, mi?: number}} DateParts */
 

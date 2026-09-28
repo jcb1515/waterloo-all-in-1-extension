@@ -3,7 +3,12 @@
 // registry imports this module and calls the named export with a Document.
 // No chrome APIs, no fetch, no DOM mutation.
 
-import { parseWwDate, parseWwRange, parseWwTimeRange } from "./dates.js";
+import {
+  parseWwDate,
+  parseWwRange,
+  parseWwTimeRange,
+  WW_TIME_RANGE_RE,
+} from "./dates.js";
 import {
   ICON_SELECTOR,
   HEADER_KEYS,
@@ -937,21 +942,20 @@ export function parseDashboard(doc) {
       for (const tr of tableRows(el)) {
         const cells = cellElements(tr);
         if (cells.length < 2 || cells[0].tagName === "TH") continue;
-        // Cell 1: a <div> holding "11:30 AM ET - 01:30 PM ET", then the
-        // event category as loose text. Find the line that parses as a
-        // range; everything else in the cell is the category.
-        const lines = cleanLines(cells[0]);
-        /** @type {{startAt: string, endAt: string}|null} */
-        let range = null;
-        let categoryLines = lines;
-        for (let i = 0; i < lines.length; i++) {
-          const found = parseWwTimeRange(dayText, lines[i]);
-          if (found) {
-            range = found;
-            categoryLines = lines.slice(0, i).concat(lines.slice(i + 1));
-            break;
-          }
-        }
+        // Cell 1: the range ("11:30 AM ET - 01:30 PM ET") sits inside an
+        // <a>, live markup splits it across newlines; the rest of the cell
+        // is the category. Join the cell's lines, match the range there,
+        // and treat whatever text remains as the category.
+        const joined = cleanLines(cells[0]).join(" ");
+        const rangeMatch = WW_TIME_RANGE_RE.exec(joined);
+        const range = rangeMatch ? parseWwTimeRange(dayText, joined) : null;
+        const category = (
+          rangeMatch
+            ? joined.slice(0, rangeMatch.index) +
+              " " +
+              joined.slice(rangeMatch.index + rangeMatch[0].length)
+            : joined
+        ).replace(/\s+/g, " ").trim();
         // Cell 2: <b> event name, optional .label registration badge and a
         // <small> location.
         const nameEl = cells[1].querySelector("b");
@@ -962,7 +966,7 @@ export function parseDashboard(doc) {
           date: parseWwDate(dayText) || undefined,
           startAt: range ? range.startAt : undefined,
           endAt: range ? range.endAt : undefined,
-          category: categoryLines.join(" ").trim() || undefined,
+          category: category || undefined,
           name: nameEl ? cleanText(nameEl) : cleanText(cells[1]),
           location: small ? cleanText(small) || undefined : undefined,
           registration: labelEl ? cleanText(labelEl) || undefined : undefined,
