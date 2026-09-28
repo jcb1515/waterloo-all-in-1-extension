@@ -26,8 +26,9 @@ export function saveOutlineUrls(state, actions, urls) {
       isObj(state.settings.sources) &&
       state.settings.sources.outline) ||
     {};
-  actions.saveSettings({ sources: { outline: { ...src, urls } } });
-  actions.sync("outline");
+  actions
+    .saveSettings({ sources: { outline: { ...src, urls } } })
+    .then(() => actions.sync("outline"));
 }
 
 /**

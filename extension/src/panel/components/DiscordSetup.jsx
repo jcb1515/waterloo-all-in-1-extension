@@ -116,10 +116,11 @@ export function DiscordChannels({ discordState, src, actions }) {
 
   /** Persist a full channelTargets map, then make the adapter re-resolve. */
   const saveTargets = (targets) => {
-    actions.saveSettings({
-      sources: { discord: { ...(src || {}), channelTargets: targets } },
-    });
-    actions.sync("discord");
+    actions
+      .saveSettings({
+        sources: { discord: { ...(src || {}), channelTargets: targets } },
+      })
+      .then(() => actions.sync("discord"));
   };
 
   if (!picker.length) {
