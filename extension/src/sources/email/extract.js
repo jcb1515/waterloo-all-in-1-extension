@@ -537,6 +537,9 @@ function statedDue(sentence, { now: ref, termCode, td }) {
 function askOf(m, { now, termCode, td }) {
   const ref = m.receivedAt ? new Date(m.receivedAt) : now;
   const text = unquoted(`${m.subject || ""}\n${m.body || m.preview || ""}`);
+  // Confirmation/autoresponder mail never owes a reply — a "Thanks for
+  // filling out this form" mail's pleasantry is not an ask.
+  if (CONFIRM_RE.test(text)) return null;
   for (const s of sentencesOf(text)) {
     // Explicit ask phrases only — a bare "?"-sentence addressed to "you" is
     // newsletter rhetoric, not a to-do. Politeness boilerplate in the same

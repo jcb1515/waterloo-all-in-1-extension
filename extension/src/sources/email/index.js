@@ -248,8 +248,12 @@ const adapter = {
       // removed. The Atom feed scopes as `email:gmail:atom` — likewise no
       // item's seenIn scope ever matches it, so an entry leaving the unread
       // feed can never delete its item. Backfill batches scope as
-      // `email:<provider>:backfill`; their per-message readOk entries mean a
-      // body re-read marks that message's scope fresh.
+      // `email:<provider>:backfill`; EVERY listed message in a sent batch
+      // also re-reads its own `email:<provider>:<key>` scope, so a re-read
+      // under current rules drops items/tasks it no longer produces. (A
+      // payload only ever contains fully processed rows — an aborted page
+      // is never sent — and needsBody is deterministic per row+settings,
+      // so a still-gated row got its body this pass too.)
       const keys = new Set(msgs.map((m) => String(m.key)));
       const scope =
         data.view === "atom"
@@ -262,11 +266,7 @@ const adapter = {
       const readOk = isBackfill
         ? [
             scope,
-            ...new Set(
-              msgs
-                .filter((m) => m.bodyFetched)
-                .map((m) => `email:${provider}:${String(m.key)}`),
-            ),
+            ...new Set(msgs.map((m) => `email:${provider}:${String(m.key)}`)),
           ]
         : [scope];
 
@@ -307,6 +307,10 @@ const adapter = {
         backfillState = {
           ...(prev.backfill || {}),
           [provider]: {
+            // v:2 — entries stamped by the old ruleset count as never-ran
+            // (the content script's decideRun treats a missing v:2 like a
+            // lookback increase: one full, still 6 h apart).
+            v: 2,
             lastRunAt: at,
             lastFullAt: bf.full ? at : pb.lastFullAt || at,
             lookbackDays: bf.lookbackDays,

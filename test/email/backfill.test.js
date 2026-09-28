@@ -64,11 +64,22 @@ test("decideRun: first run full, then 30-min incrementals; no periodic fulls", (
   const s = {};
   assert.equal(decideRun(null, s, NOW_MS).kind, "full");
   const prev = {
+    v: 2,
     lastFullAt: new Date(NOW_MS - 2 * 3600e3).toISOString(), // 2h ago
     lastRunAt: new Date(NOW_MS - 10 * 60e3).toISOString(), // 10m ago
     lookbackDays: 30,
     newestAt: "2026-09-30T12:00:00.000Z",
   };
+  // An entry stamped by the old ruleset (no v:2) counts as never-ran: one
+  // full — still at least 6 h after its lastFullAt.
+  const { v: _v, ...stale } = prev;
+  assert.equal(decideRun(stale, s, NOW_MS).kind, "skip"); // inside 6h, tick not due
+  const staleOld = {
+    ...stale,
+    lastFullAt: new Date(NOW_MS - 7 * 3600e3).toISOString(),
+    lastRunAt: new Date(NOW_MS - 40 * 60e3).toISOString(),
+  };
+  assert.equal(decideRun(staleOld, s, NOW_MS).kind, "full");
   assert.equal(decideRun(prev, s, NOW_MS).kind, "skip"); // 10m < 30m
   const due = decideRun(
     { ...prev, lastRunAt: new Date(NOW_MS - 31 * 60e3).toISOString() },
@@ -590,9 +601,12 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
   );
   assert.equal(res.scope, "email:gmail:backfill");
   assert.ok(res.readOk.includes("email:gmail:backfill"));
-  assert.ok(res.readOk.includes("email:gmail:thr1")); // body read
-  assert.ok(!res.readOk.includes("email:gmail:thr2"));
+  // Every listed row re-reads its own message scope — a re-read under the
+  // current rules drops whatever the row no longer produces.
+  assert.ok(res.readOk.includes("email:gmail:thr1"));
+  assert.ok(res.readOk.includes("email:gmail:thr2"));
   assert.equal(res.state.threadMap.m1last, "thr1");
+  assert.equal(res.state.backfill.gmail.v, 2);
   assert.equal(res.state.backfill.gmail.lookbackDays, 30);
   assert.equal(res.state.backfill.gmail.checked, 2);
   assert.equal(res.state.backfill.gmail.newestAt, "2026-09-29T18:00:00.000Z");

@@ -1334,6 +1334,15 @@ test("to-do negatives stay silent", async () => {
       subject: "Quick check",
       body: "Please reply by September 28.",
     }),
+    // A confirmation/autoresponder never owes a reply, even when its
+    // boilerplate says "please reply".
+    msg({
+      key: "n16",
+      from: "Survey Tool",
+      fromEmail: "responses@forms.example.com",
+      subject: "Thanks for filling out this form: Lab survey",
+      body: "Your response was recorded. Please reply to this email if you need to make changes.",
+    }),
   );
   for (const m of cases) {
     const res = await adapter.observe.parse(

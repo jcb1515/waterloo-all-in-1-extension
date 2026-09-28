@@ -101,7 +101,9 @@ export function decideRun(prev, settings, nowMs, { force = false } = {}) {
   const lastRunAt = Date.parse(p.lastRunAt || "") || 0;
   if (!lastFullAt) return { kind: "full", lookbackDays, since: null };
   const prevDays = Number(p.lookbackDays) || 0;
-  const increased = prevDays > 0 && lookbackDays > prevDays;
+  // An entry stamped by the old ruleset (no v:2) counts as never-ran: one
+  // full under the new rules — still at least 6 h after its lastFullAt.
+  const increased = p.v !== 2 || (prevDays > 0 && lookbackDays > prevDays);
   if (increased && nowMs - lastFullAt >= BF_FULL_GAP_MS) {
     // Two fulls are NEVER closer than 6 h — an increase inside the gap just
     // waits for the mark; normal incremental ticking continues meanwhile.
