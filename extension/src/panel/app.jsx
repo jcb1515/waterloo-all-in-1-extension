@@ -353,7 +353,7 @@ export function App() {
         ) : tab === "todo" ? (
           <Todo state={state} actions={actions} now={now} orgs={orgs} />
         ) : tab === "projects" ? (
-          <Projects />
+          <Projects state={state} actions={actions} now={now} />
         ) : tab === "calendar" ? (
           <CalendarView state={state} actions={actions} now={now} />
         ) : tab === "coop" ? (

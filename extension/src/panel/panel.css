@@ -487,6 +487,134 @@ html[data-density="compact"] .item-title {
   border-top: 1px dashed var(--border);
 }
 
+/* ------------------------------ projects tab ----------------------------- */
+
+.proj-view,
+.proj-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.proj-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.proj-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  padding: var(--sp-3);
+  border-left: 3px solid var(--org, var(--border-strong));
+}
+.proj-card:hover {
+  border-color: var(--org, var(--border-strong));
+}
+.proj-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.proj-card-head strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proj-cal {
+  display: inline-flex;
+  color: var(--text-3);
+}
+.proj-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.proj-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.proj-track i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--org, var(--gold));
+  transition: width var(--t-med) var(--ease);
+}
+.proj-count {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.proj-next {
+  display: block;
+  margin-top: var(--sp-1);
+}
+.proj-swatches {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.proj-swatch {
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.proj-swatch.on {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--org-ink, var(--focus));
+}
+.proj-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.proj-form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.proj-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.proj-name-input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--w-semibold);
+}
+.proj-add-types {
+  flex: none;
+}
+.proj-add-types button {
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+}
+.proj-actions .sheet-acts {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.sheet-cal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.sheet-linked-src {
+  margin-top: var(--sp-2);
+}
+
 /* ------------------------- study to-do (sheet) --------------------------- */
 
 .study-todo {
