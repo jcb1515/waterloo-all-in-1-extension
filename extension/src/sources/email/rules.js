@@ -277,6 +277,18 @@ export const NEGATIVE_RE = new RegExp(NEGATIVE_RES.map((r) => r.source).join("|"
 export const EXPLICIT_DATE_RE =
   /(?:jan|feb|mar|apr|may|june?|july?|aug|sep(?:t)?|oct|nov|dec)[a-z]*\.?\s*\d|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/i;
 
+/** A weekday word, any spelling — for the mid-confidence date-shape gate. */
+export const WEEKDAY_RE =
+  /\b(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\b/i;
+
+/** A clock time: "3pm", "3:30 PM", "15:04", noon/midnight. */
+export const CLOCK_RE =
+  /\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:noon|midnight)\b/i;
+
+/** The meeting words — shared by TYPE_RULES and the kw-less item gate. */
+export const MEET_WORD_RE =
+  /\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul|\binvite[sd]?\b|\binvitations?\b/i;
+
 const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
 
 /** @param {string[]|string|undefined} extra settings.keywords */
@@ -327,7 +339,7 @@ export const TYPE_RULES = [
   // Event nouns get their group as the item category — they outrank the
   // generic meeting rule so "club meeting"/"coffee chat" classify right.
   ...EVENT_GROUPS.map(([group, re]) => /** @type {[RegExp, string, string]} */ ([re, "event", group])),
-  [/\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul|\binvite[sd]?\b|\binvitations?\b/i, "meeting"],
+  [MEET_WORD_RE, "meeting"],
   [/due|deadlines?|extensions?/i, "deadline"],
 ];
 

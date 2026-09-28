@@ -183,7 +183,8 @@ test("instructor mail: midterm room change -> one tentative exam item, no leaks"
   assert.equal(i.startAt, "2026-10-22T23:00:00.000Z");
   assert.equal(i.org, "ECE 105");
   assert.equal(i.confidence, "tentative");
-  assert.equal(i.review, "pending");
+  // Gated sender (course instructor) + explicit date + keyword -> auto.
+  assert.equal(i.review, "auto");
   assert.equal(
     i.evidence.snippet,
     "The midterm on October 22 at 7:00 PM has moved to MC 1085.",
@@ -227,6 +228,117 @@ test("a date that ended before yesterday is dropped", () => {
       fromEmail: "lead@robotics.example.org",
       subject: "Design review moved",
       body: "The design review was on September 1.",
+    }),
+  );
+  assert.deepEqual(out, []);
+});
+
+test("mid-confidence weekday + a clock time -> pending item from a human", () => {
+  // A bare weekday parses at 0.55 — under the old 0.6 floor it was
+  // dropped; the clock time sharing its sentence admits it now, and the
+  // ungated human sender still surfaces it as a pending review item.
+  const subject = "Catch up";
+  const body = "Want to catch up Friday, say 3pm?";
+  const text = `${subject}\n${body}`;
+  const stub = () => [
+    {
+      startAt: "2026-10-02T19:00:00.000Z",
+      text: "Friday",
+      index: text.indexOf("Friday"),
+      confidence: 0.55,
+    },
+  ];
+  const [i] = items(
+    msg({
+      from: "Sam Lee",
+      fromEmail: "sam.lee@freemail.example.org",
+      subject,
+      body,
+    }),
+    { textDates: stub },
+  );
+  assert.ok(i, "weekday + clock time in one sentence emits an item");
+  assert.equal(i.review, "pending");
+  assert.equal(i.confidence, "tentative");
+  assert.equal(i.source, "gmail");
+});
+
+test("a bare weekday with no clock time stays silent", () => {
+  const subject = "Catch up";
+  const body = "Are you free Friday?";
+  const text = `${subject}\n${body}`;
+  const stub = () => [
+    {
+      startAt: "2026-10-02T04:00:00.000Z",
+      text: "Friday",
+      index: text.indexOf("Friday"),
+      confidence: 0.55,
+    },
+  ];
+  const out = items(
+    msg({
+      from: "Sam Lee",
+      fromEmail: "sam.lee@freemail.example.org",
+      subject,
+      body,
+    }),
+    { textDates: stub },
+  );
+  assert.deepEqual(out, []);
+});
+
+test("a co-op sender + explicit date + keyword -> auto review", () => {
+  const [i] = items(
+    msg({
+      from: "Co-op Advisor",
+      fromEmail: "ceca@uwaterloo.ca",
+      subject: "Interview window",
+      body: "Your interview is on October 9 at 10 AM in the Tatham Centre.",
+    }),
+  );
+  assert.ok(i);
+  assert.equal(i.review, "auto");
+  assert.equal(i.type, "interview");
+});
+
+test("a gated sender without a keyword still lands pending", () => {
+  const [i] = items(
+    msg({
+      from: "Co-op Advisor",
+      fromEmail: "ceca@uwaterloo.ca",
+      subject: "Quick note",
+      body: "Something worth knowing happens October 9 at 2pm.",
+    }),
+  );
+  // Gated sender + explicit date, but no keyword/event noun in the
+  // sentence (a clock time alone) -> pending, not auto.
+  assert.ok(i);
+  assert.equal(i.review, "pending");
+});
+
+test("a deadline item carries a real dueAt", () => {
+  const [i] = items(
+    msg({
+      from: "Robotics Lead",
+      fromEmail: "lead@robotics.example.org",
+      subject: "Report due",
+      body: "The project report is due November 4.",
+    }),
+  );
+  assert.ok(i);
+  assert.equal(i.type, "deadline");
+  assert.ok(i.dueAt);
+  assert.ok(Date.parse(i.dueAt) > NOW.getTime());
+  assert.equal(i.review, "pending"); // ungated sender -> never auto
+});
+
+test("a bulk promo stays silent", () => {
+  const out = items(
+    msg({
+      from: "Shop Deals",
+      fromEmail: "no-reply@deals.example.com",
+      subject: "50% off ends Friday",
+      body: "Flash sale — 50% off everything ends Friday at 9pm. Shop now!",
     }),
   );
   assert.deepEqual(out, []);
