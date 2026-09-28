@@ -33,7 +33,7 @@ const FORBIDDEN = [
 ];
 
 test("discord sources contain no forbidden APIs", () => {
-  for (const file of ["content.js", "dom.js", "index.js", "messages.js", "identity.js", "recurring.js", "rules.js", "selectors.js", "time.js", "events.js"]) {
+  for (const file of ["content.js", "dom.js", "index.js", "messages.js", "identity.js", "recurring.js", "rules.js", "selectors.js", "time.js", "events.js", "probe.js"]) {
     const src = readFileSync(path.join(DIR, file), "utf8");
     // Strip comments and strings-free zones are overkill; the forbidden
     // tokens simply must not appear at all.

@@ -279,7 +279,18 @@ normalization; `recurring.test.js` — weekly suggestions;
 selfId/role inference; `adapter.test.js` — end-to-end parse/sync and the
 REST-vs-DOM dedupe; `static.test.js` — greps the sources for forbidden
 APIs (the passive-only guarantee); `fuzz.test.js` — ~300 malformed
-payloads plus a 1000-read growth bound.
+payloads plus a 1000-read growth bound; `probe.test.js` — probe counts
+per fixture, page kinds (channel / events-modal / dm / other), and the
+no-text privacy check.
+
+**Probe (`probe.js`).** `probe(doc, href)` powers the "Check readers"
+screen: it runs the `dom.js` readers and returns
+`{page, counts, ok, hints}` — COUNTS ONLY, so nothing user-visible ever
+leaves the DOM. `CHECKLIST` is the ordered list of pages to open; both
+are pure (no chrome/fetch) since W1's recorder imports them in a
+content-script context. DM pages report the rail count only. When a
+reader's selectors change, update the probe's count keys and the fixture
+expectations in `probe.test.js` together.
 
 **Open / needs tuning.** The list above is current — highlights: the
 events-modal markup is unverified against live Discord, the
