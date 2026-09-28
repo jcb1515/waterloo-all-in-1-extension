@@ -37,6 +37,8 @@ import {
 const BODY_CAP = 20000;
 const PREVIEW_CAP = 200;
 
+const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+
 const textOf = (el) => String((el && el.textContent) || "").replace(/\s+/g, " ").trim();
 
 /**
@@ -261,7 +263,13 @@ export function accountEmail(doc) {
     const gm = /\(([^()\s]+@[^()\s]+)\)\s*$/.exec(gl);
     if (gm) return gm[1].toLowerCase();
     for (const el of doc.querySelectorAll(ACCOUNT.outlook)) {
-      const t = String(el.getAttribute("aria-label") || el.textContent || "");
+      const t = String(
+        el.getAttribute("data-folder-name") ||
+          el.getAttribute("title") ||
+          el.getAttribute("aria-label") ||
+          el.textContent ||
+          "",
+      );
       const m = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(t);
       if (m) return m[0].toLowerCase();
     }
@@ -414,12 +422,30 @@ function outlookExtract(doc, href, now) {
       const sel = doc.querySelector(OUTLOOK.selected);
       const key = (sel && sel.getAttribute("data-convid")) || msgId || "";
       const receivedText = dateEl ? textOf(dateEl) : "";
-      const fromEmail = (senderEl && senderEl.getAttribute("title")) || "";
+      let from = textOf(senderEl);
+      const titleHit = EMAIL_RE.exec(
+        (senderEl && senderEl.getAttribute("title")) || "",
+      );
+      let fromEmail = titleHit ? titleHit[0] : "";
+      if (!fromEmail) {
+        // The reading-pane header: "From: <name>" aria-label, and the address
+        // inside a descendant's "Name<addr>" text.
+        const fromEl = main.querySelector(OUTLOOK.senderFrom);
+        if (fromEl) {
+          if (!from) {
+            from = String(fromEl.getAttribute("aria-label") || "")
+              .replace(/^From:\s*/i, "")
+              .trim();
+          }
+          const em = EMAIL_RE.exec(textOf(fromEl));
+          fromEmail = em ? em[0] : "";
+        }
+      }
       const self = mine(fromEmail);
       messages.push({
         key: String(key),
         url: urlFor(key),
-        from: textOf(senderEl),
+        from,
         fromEmail: self ? "" : fromEmail,
         fromMe: self || undefined,
         subject: textOf(main.querySelector(OUTLOOK.heading)),

@@ -16,6 +16,18 @@ Discord, Outlook and Gmail — to extract dated items such as deadlines,
 classes, applications, interviews and events. It reads only pages that you
 can already see with your own logged-in session.
 
+**Portal (portal.uwaterloo.ca).** While you have any Portal page open, the
+extension asks Portal for four things: your course enrolments, class
+schedule, exam schedule, and the university calendar for the next four
+months. It asks from inside that Portal tab, using the sign-in Portal
+already has, at most once every 30 minutes and only while the tab stays
+open. Your Portal sign-in token is used only as the header of those four
+requests. It is never saved, never copied into the extension's storage,
+never logged and never sent anywhere else, and the extension never
+refreshes or extends your Portal session. The replies are turned into
+calendar items on your computer, and only those items (course, date, time,
+room, seat) are stored. If you're signed out, nothing is fetched.
+
 ## What it stores
 
 The extension stores data in `chrome.storage.local`, which stays on your

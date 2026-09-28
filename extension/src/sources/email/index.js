@@ -8,7 +8,7 @@
 */
 
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
-import { itemsFromMessage, SENT_FOLDERS, taskItems } from "./extract.js";
+import { dedupeMailItems, itemsFromMessage, SENT_FOLDERS, taskItems } from "./extract.js";
 import { GMAIL_SCAN_QUERY, OUTLOOK_SCAN_QUERY } from "./rules.js";
 
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
@@ -136,7 +136,8 @@ const adapter = {
 
       /** @type {import("../../core/contract.js").Item[]} */
       const items = [];
-      const msgs = data.messages.filter((m) => m && m.key);
+      // List views can carry dozens of rows — bound one observation's work.
+      const msgs = data.messages.filter((m) => m && m.key).slice(0, 60);
       /** @type {{m: any, items: import("../../core/contract.js").Item[]}[]} */
       const prod = msgs.map((m) => ({ m, items: [] }));
       if (allowed) {
@@ -173,6 +174,10 @@ const adapter = {
         },
       );
       items.push(...tasks.items);
+
+      // One observation can see the same thing twice: an opened invite plus
+      // a "meeting link sent" mail, or two threads about one deadline.
+      const deduped = dedupeMailItems(items);
 
       // Guided scan bookkeeping: a search list queues unread rows; any read
       // thread leaves the queue and is marked scanned (newest 1000 kept).
@@ -218,7 +223,7 @@ const adapter = {
         ...(Object.keys(tasks.bookings).length ? { bookings: tasks.bookings } : {}),
       };
       return {
-        items,
+        items: deduped,
         complete: true,
         readOk: [scope],
         scope,

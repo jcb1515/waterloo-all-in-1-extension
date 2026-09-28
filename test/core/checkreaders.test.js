@@ -12,6 +12,7 @@ import {
   shouldSendProbe,
   checkReport,
   CHECK_SOURCES,
+  PORTAL_OPEN_ROW,
   READ_STATS_CAP,
 } from "../../extension/src/sources/probes.js";
 
@@ -102,7 +103,10 @@ test("learn has no probe: rows are satisfied by a recent sync readStat", () => {
   assert.equal(empty[0].status, "unchecked");
 });
 
-test("portal schedule row requires a portal:schedule observe", () => {
+test("the single portal-open row requires a portal:schedule observe", () => {
+  const rows = CHECK_SOURCES.portal.checklist;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "portal-open");
   const ok = checklistFor(
     "portal",
     {},
@@ -117,7 +121,6 @@ test("portal schedule row requires a portal:schedule observe", () => {
     NOW
   );
   assert.equal(wrongScope[0].status, "unchecked");
-  assert.equal(wrongScope[1].status, "ok"); // exams row matched it
 });
 
 test("readStat errors never satisfy a checklist row", () => {
@@ -200,4 +203,32 @@ test("checkReport: statuses + probes + readStats + structures, no page text", ()
   const json = JSON.stringify(report);
   assert.ok(!json.includes("REDACTED PAGE TITLE"), "titles must not leak into the report");
   assert.ok(!json.includes('"net"'), "net records stay out of the check report");
+});
+
+test("v2 row metadata: learn/portal urls, essential, refreshDays", () => {
+  const [home, course] = CHECK_SOURCES.learn.checklist;
+  assert.equal(home.id, "learn-home");
+  assert.equal(home.url, "https://learn.uwaterloo.ca/d2l/home");
+  assert.equal(home.essential, true);
+  assert.equal(course.url, undefined);
+  assert.ok(!course.essential);
+
+  // Portal is a single row now that auto-fetch reads everything from any page.
+  const [open] = CHECK_SOURCES.portal.checklist;
+  assert.equal(open.id, "portal-open");
+  assert.equal(open.url, "https://portal.uwaterloo.ca/");
+  assert.equal(open.essential, true);
+  assert.equal(open.refreshDays, 14);
+});
+
+test("PORTAL_OPEN_ROW is Portal's live checklist row", () => {
+  assert.deepEqual(PORTAL_OPEN_ROW, {
+    id: "portal-open",
+    label: "Open Portal once",
+    how: "Open any Portal page — your schedule, exams and term dates are read while it's open.",
+    url: "https://portal.uwaterloo.ca/",
+    essential: true,
+    refreshDays: 14,
+    stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+  });
 });

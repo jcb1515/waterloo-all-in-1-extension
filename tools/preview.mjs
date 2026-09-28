@@ -170,6 +170,14 @@ const SHOTS_V2_POLISH = [
   { name: "item-sheet-light-360", url: "/src/panel/panel.html?preview=1&item=waterlooworks%3Aint-acme", size: [360, 900] },
 ];
 
+const SHOTS_V2_ONBOARDING = [
+  { name: "upcoming-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [360, 900] },
+  { name: "upcoming-dark-400", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [400, 900], dark: true },
+  { name: "portal-card-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=picked", size: [360, 900] },
+  { name: "portal-check-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=check", size: [360, 900] },
+  { name: "portal-check-dark-400", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=check", size: [400, 900], dark: true },
+];
+
 const SHOTS_FINAL = [
   { name: "options-sources-gcal-light", url: "/src/options/options.html?preview=1#sources", size: [1280, 900], scroll: "#src-gcal" },
   { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=gcal:gcal-week", size: [400, 900] },
@@ -178,6 +186,7 @@ const SHOTS_FINAL = [
 ];
 
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "v2-onboarding" ? SHOTS_V2_ONBOARDING :
   process.env.WA1_SHOT_DIR === "v2-polish" ? SHOTS_V2_POLISH :
   process.env.WA1_SHOT_DIR === "v2" ? SHOTS_V2 :
   process.env.WA1_SHOT_DIR === "final" ? SHOTS_FINAL :
@@ -254,6 +263,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* --------------------------------- shots ----------------------------------- */
 
 async function shots() {
+  // WA1_ONLY=<shot name> restricts the run to one shot for a quick re-take.
+  const list = SHOTS.filter((s) => !process.env.WA1_ONLY || s.name === process.env.WA1_ONLY);
+  if (!list.length) {
+    console.error(`no shot named "${process.env.WA1_ONLY}" in the ${SHOT_DIR} set`);
+    process.exit(2);
+  }
   await mkdir(OUT, { recursive: true });
   const server = serve();
   await new Promise((r) => server.listen(PORT, HOST, r));
@@ -286,7 +301,7 @@ async function shots() {
     await cdp.send("Runtime.enable");
     await cdp.send("Log.enable");
 
-    for (const s of SHOTS) {
+    for (const s of list) {
       const [w, h] = s.size;
       await cdp.send("Emulation.setDeviceMetricsOverride", {
         width: w,
@@ -349,7 +364,7 @@ async function shots() {
     }
     await writeFile(
       path.join(OUT, "manifest.json"),
-      JSON.stringify({ takenAt: new Date().toISOString(), shots: SHOTS }, null, 2)
+      JSON.stringify({ takenAt: new Date().toISOString(), shots: list }, null, 2)
     );
     cdp.close();
     // Politely shut the whole headless browser down — msedge.exe is a stub

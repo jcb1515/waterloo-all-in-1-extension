@@ -1,15 +1,52 @@
 # portal adapter
 
-Reads Portal (portal.uwaterloo.ca) **passively** — its JSON API
-(`portalapi2.uwaterloo.ca/v2/...`) needs a bearer token the extension never
-holds, so there is no fetch tier. `sync` is a `no-tab` stub that only returns
-the accumulated state; everything real arrives through `observe` when the
-recorder relays API responses the student triggers by browsing.
+Reads Portal (portal.uwaterloo.ca) — its JSON API
+(`portalapi2.uwaterloo.ca/v2/...`) needs a bearer token, so there is no
+background fetch tier. `sync` is a `no-tab` stub that only returns the
+accumulated state; data arrives two ways:
+
+1. **Passive observe** — the recorder relays API responses the student
+   triggers by browsing (unchanged, always on).
+2. **Page-load auto-fetch** — `content.js` (registered on
+   `portal.uwaterloo.ca/*`) runs a round on every page load and hourly while
+   the tab stays open: the four GETs below, replayed to the background as
+   the exact `wa1:observed` "net" payloads the passive path would send, so
+   `observe.parse` and downstream merging are identical either way.
+
+### Auto-fetch token rules (hard)
+
+- The token is `localStorage["auth.portal.token"]` — the page's own store,
+  shared with the content script. It is used **only** as each request's
+  `Authorization: Bearer …` header: never stored, never in a message, log,
+  payload or extension storage.
+- GET only, and **never the account-refresh endpoint** — a refresh we
+  trigger could rotate the token and sign the user out of their Portal tab.
+- Missing token → nothing is sent and the summary records `no-token`.
+  A 401/403 on the **first** endpoint ends the round (signed out); a 401/403
+  later in the round skips only that endpoint. Every response — any status —
+  replays like the passive path (a replayed 401 marks the session
+  signed-out; other failures land as 0-item readStats).
+- **Rounds resume where they stopped.** Hidden tabs freeze (a fetch issued
+  just before freezing can hang indefinitely), so a round only advances
+  while `document.visibilityState === "visible"`, keeps per-endpoint
+  progress in module memory, and continues on `visibilitychange`→visible /
+  the Page Lifecycle `resume` event — never repeating an endpoint.
+- **Throttle is stamped on completion** (`sessionStorage`
+  `wa1:portal:lastFetch`): 30 min after a clean round, 5 min when any
+  endpoint failed. A `wa1:portal:inProgress` timestamp marker (2 min TTL)
+  keeps a second load from racing a live round. Each request has a 15 s
+  timeout.
+- **Round summary** (`sessionStorage["wa1:portal:lastRound"]`):
+  `{at, error?, results: [{path, status, ms, error?}]}` — path-only URLs,
+  `error` one of `timeout`/`network`/`no-token`/`http-<n>`; the token is
+  never in it.
 
 - `map.js` — pure mappers (rows -> items + course/term patches). No chrome,
   no fetch, no DOM.
 - `index.js` — routes payloads by URL path, folds patches into
   `state.courses`/`state.terms`, returns the contract result.
+- `content.js` — the auto-fetch round above (`portalRound`/`portalFetchUrls`
+  exported for tests; the page wiring is an IIFE that no-ops off-site).
 - `parsers.js` — stub; Portal reads are JSON, there is no HTML parser.
 
 ## Timestamps
@@ -87,3 +124,9 @@ only, no values).
   expansion behaviour is unverified.
 - `CourseEnrollments` rows are trusted to carry `courseSubject` +
   `courseCatalogNumber` (not `courseCode`) as the authority.
+- **HYPOTHESIS — DailyEventsV2 query params.** The saved app bundle does not
+  name the call (the `$api.calendar` service lives in another chunk), so
+  `start`/`end` as `YYYY-MM-DD` in `content.js` is inferred from the
+  observed URL shape. Confirm the real param names/format on a live page;
+  if they differ, fix `portalFetchUrls` — `observe.parse` already reads
+  `start`/`end` for its scope.

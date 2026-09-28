@@ -1,5 +1,15 @@
-<!-- Synthetic Outlook inbox rows (placeholder names only). -->
+<!-- Synthetic Outlook inbox rows (placeholder names only). The folder
+     pane's account root carries the signed-in address in data-folder-name —
+     the me-control button only has the display name. -->
 <html><body>
+<button class="me" aria-label="Jane Student" type="button"><span></span></button>
+<div role="tree" aria-label="Folder pane">
+  <div role="treeitem" data-folder-name="jane.student@example.com"
+       title="jane.student@example.com" aria-expanded="true" aria-level="1">
+    <span>jane.student@example.com</span>
+  </div>
+  <div role="treeitem" data-folder-name="Inbox" aria-level="2"><span>Inbox</span></div>
+</div>
 <div role="listbox" data-folder-name="inbox">
   <div role="option" data-convid="conv-out-1" data-item-index="0" data-focusable-row>
     <span title="recruiting@acme.example.com">Talent Team</span>
@@ -12,6 +22,12 @@
     <div>Weekend sale</div>
     <div>9:14 AM</div>
     <div>Sale ends October 12.</div>
+  </div>
+  <div role="option" data-convid="conv-out-3" data-item-index="2" data-focusable-row>
+    <span title="jane.student@example.com">Jane Student</span>
+    <div>Draft note to self</div>
+    <div>8:02 AM</div>
+    <div>Reminder to print the form.</div>
   </div>
 </div>
 </body></html>

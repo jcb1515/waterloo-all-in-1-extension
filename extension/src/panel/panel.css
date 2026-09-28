@@ -272,6 +272,102 @@
   text-align: left;
 }
 
+/* "Get set up" onboarding card (essential checklist rows) */
+.onboard-card {
+  padding: var(--sp-3) var(--sp-4);
+}
+.onboard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.onboard-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-semibold);
+}
+.onboard-dismiss {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.onboard-list {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.onboard-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.onboard-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.onboard-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-medium);
+}
+.onboard-how {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.onboard-done {
+  color: var(--ok);
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.onboard-open {
+  flex-shrink: 0;
+}
+
+/* "Needs a visit" stale-read nudges */
+.nudge-card {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+}
+.nudge-title {
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--warn);
+}
+.nudge-list {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.nudge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.nudge-text {
+  flex: 1;
+  min-width: 0;
+}
+.nudge-name {
+  font-weight: var(--w-medium);
+}
+.nudge-when {
+  color: var(--text-2);
+}
+.nudge-actions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
 .search-wrap {
   position: relative;
   display: flex;

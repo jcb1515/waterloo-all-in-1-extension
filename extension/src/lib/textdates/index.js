@@ -20,6 +20,13 @@ const WEEKDAY_RE = /\b(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thur?s(?:day)
 const REL_RE = /\b(?:today|tonight|tomorrow|yesterday)\b/i;
 const ISO_RE = /\b\d{4}-\d{2}-\d{2}\b/;
 const MONTH_G = new RegExp(MONTH_RE.source, "gi");
+// Casual time-of-day words that also appear inside event names ("game night",
+// "pitch night", "gala evening"): chrono merges the word into a following
+// date expression ("pitch night on Oct 23 at 7pm") and drops the whole
+// result. Those texts get a second pass with the words blanked (same length,
+// so result offsets still map to the original); a masked hit is kept only
+// where no real hit overlaps.
+const CASUAL_MASK_RE = /\b(?:night|tonight|evening|morning|afternoon|noon|midnight|midday)\b/gi;
 
 /**
  * Rewrite `text` into a chrono-friendlier copy, keeping for every normalised
@@ -81,6 +88,14 @@ export function extractDates(text, { now = new Date(), termCode, tz = "America/T
   // Fake-local reference: chrono reads its fields as "now" in the target tz.
   const ref = new Date(p0.y, p0.m - 1, p0.d, p0.h, p0.mi);
   const results = en.casual.parse(norm, ref, { forwardDate: true });
+  const masked = norm.replace(CASUAL_MASK_RE, (m) => " ".repeat(m.length));
+  if (masked !== norm) {
+    // The poisoned normal result sorts before the masked hit covering the
+    // same date, so a surviving real hit suppresses the masked duplicate via
+    // the prevEnd overlap check; a result the guards drop suppresses nothing.
+    results.push(...en.casual.parse(masked, ref, { forwardDate: true }));
+    results.sort((a, b) => a.index - b.index);
+  }
 
   /** @type {DateHit[]} */
   const hits = [];

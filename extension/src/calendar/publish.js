@@ -11,6 +11,7 @@
 
 import { buildFeedPayload, stableHash } from "./payload.js";
 import {
+  enqueue,
   getSettings,
   setSettings,
   getLocal,
@@ -283,7 +284,10 @@ export async function stopFeed(opts = {}) {
       /* delete is best-effort */
     }
   }
-  await d.removeKey(FEED_KEY);
+  // Serialise the delete against the store queue — removeKey is a raw
+  // chrome.storage.local.remove dep, so it needs the same enqueue every
+  // other writer goes through (stopFeed never runs inside enqueue itself).
+  await enqueue(() => d.removeKey(FEED_KEY));
   await d.setSettings((/** @type {any} */ s) => {
     if (!s.calendar) s.calendar = {};
     s.calendar.enabled = false;

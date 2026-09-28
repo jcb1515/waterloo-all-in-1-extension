@@ -1,19 +1,26 @@
 // @ts-check
-// Live DevTools console — READ-ONLY.
+// Live DevTools console — navigation allowed, no actions.
 //
 // Talks to the user's Edge over the DevTools protocol at 127.0.0.1:9222.
 // Hard rules (see README):
-//   * never Input.*, Page.navigate, clicks, scroll, or tab closing;
-//   * only side-effect-free Runtime.evaluate + DOM reads;
-//   * never automate Discord; one tab at a time; raw captures go to
-//     captures/live/ (gitignored) and must stay outside git.
+//   * `open` creates NEW tabs only, for allowlisted pages only — it never
+//     takes over, navigates, or closes the user's own tabs;
+//   * `close`/`scroll` only touch tabs this tool opened (recorded in
+//     captures/live/.opened.json);
+//   * no input events, clicks, typing or form submits anywhere;
+//   * never anything on discord.com — the user opens Discord pages;
+//   * raw captures go to captures/live/ (gitignored), outside git.
 //
 // Usage: npm run live -- <cmd>
 //   tabs                          list page targets (id, host, path)
+//   open <url|source:rowId>       new tab for an allowlisted page
+//   close <targetId|all-mine>     close only tabs this tool opened
+//   scroll <targetId> [px]        scroll a tool-opened tab (default 1200)
 //   dump <urlSub> [--name x]      save document HTML to captures/live/
 //   probe <urlSub>                dump + run the source's probe/parser
-//   storage [key] [--source id]   read chrome.storage.local from the SW
-//   watch [--source id] [--secs]  poll storage, print changes
+//   storage [key] [--source id] [--ext id]  read chrome.storage.local (SW)
+//   watch [--source id] [--secs] [--ext id] poll storage, print changes
+//   (WA1_EXT_ID selects a copy too — two unpacked dists can be loaded)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -27,8 +34,10 @@ const EXT_NAME = "Waterloo All-in-1";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LIVE_DIR = path.join(ROOT, "captures", "live");
 const SETUP_HINT =
-  "Launch Edge with remote debugging (see tools/live/README.md): " +
-  'close Edge fully, then start msedge.exe --remote-debugging-port=9222';
+  "Launch the dedicated debug profile (see tools/live/README.md): " +
+  '& "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" ' +
+  '--remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\\wa1-edge-debug" ' +
+  "— Edge ignores the port flag on the default profile since Chromium 136.";
 
 /* ------------------------------- pure parts ------------------------------ */
 
@@ -124,6 +133,145 @@ export function serviceWorkerTargets(targets) {
   );
 }
 
+/** The extension id a service-worker target belongs to ("" if malformed). */
+export function swExtId(target) {
+  try {
+    return new URL(String(target && target.url)).host;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Narrow service-worker candidates by an extension-id selector
+ * (--ext <id> / WA1_EXT_ID). No selector keeps them all; a selector must
+ * match at least one or the caller reports the miss.
+ * @returns {{candidates: any[]} | {error: string}}
+ */
+export function pickServiceWorker(targets, extId) {
+  const sws = Array.isArray(targets) ? targets : [];
+  if (!extId) return { candidates: sws };
+  const hit = sws.filter((sw) => swExtId(sw) === extId);
+  return hit.length
+    ? { candidates: hit }
+    : { error: `no service worker with extension id "${extId}"` };
+}
+
+/* ---------------------------- open allowlist ------------------------------ */
+
+const DISCORD_HOSTS = ["discord.com", "discordapp.com", "discord.gg"];
+const DISCORD_MSG =
+  "discord.com is never opened by the tool; ask the user to open Discord pages.";
+
+/** A discord host or any subdomain of one. */
+function isDiscordHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  return DISCORD_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
+/**
+ * Every page `open` may target, built at runtime — never hard-coded:
+ * the `url` of every CHECK_SOURCES checklist row, plus each adapter's
+ * home page (`origins[0]/`).
+ * @returns {{url: string, source: string, rowId: string}[]}
+ */
+export function buildAllowlist(checkSources, adapters) {
+  const out = [];
+  for (const [source, def] of Object.entries(checkSources || {})) {
+    for (const row of (def && def.checklist) || []) {
+      if (row && row.id && row.url) {
+        out.push({ url: String(row.url), source, rowId: String(row.id) });
+      }
+    }
+  }
+  for (const a of adapters || []) {
+    const origin = a && a.origins && a.origins[0];
+    if (origin) {
+      out.push({ url: `${String(origin).replace(/\/+$/, "")}/`, source: a.id, rowId: "home" });
+    }
+  }
+  return out;
+}
+
+/** origin + pathname, trailing slashes stripped — query and hash ignored. */
+function urlKey(u) {
+  const p = u.pathname.replace(/\/+$/, "");
+  return `${u.origin}${p || "/"}`;
+}
+
+/** The `source:rowId` choices for an error message (discord never listed). */
+function allowlistOptions(allowlist, source) {
+  const opts = (allowlist || [])
+    .filter((e) => e.source !== "discord" && (!source || e.source === source))
+    .map((e) => `${e.source}:${e.rowId}`);
+  return opts.length ? `\nAllowlisted: ${opts.join(", ")}` : "";
+}
+
+/**
+ * Resolve an `open` argument to an allowlisted page.
+ * `<source>:<rowId>` (or `<source>:home`) looks the row's url up; a raw
+ * URL must be https: and its origin+pathname must equal an allowlisted
+ * entry — the entry's clean url is what gets opened, so no user-typed
+ * query string is ever smuggled in. Anything discord is refused before
+ * either lookup.
+ * @returns {{ok: true, url: string, source: string, rowId: string} | {ok: false, reason: string}}
+ */
+export function resolveTarget(arg, allowlist) {
+  const input = String(arg || "").trim();
+  if (!input) return { ok: false, reason: "usage: open <url|source:rowId>" };
+
+  if (!/^https?:\/\//i.test(input)) {
+    const i = input.indexOf(":");
+    const source = i >= 0 ? input.slice(0, i) : input;
+    const rowId = i >= 0 ? input.slice(i + 1) : "";
+    if (source === "discord") return { ok: false, reason: DISCORD_MSG };
+    const entry = (allowlist || []).find((e) => e.source === source && e.rowId === rowId);
+    if (!entry) {
+      return {
+        ok: false,
+        reason: `no allowlisted page "${source}:${rowId}"` + allowlistOptions(allowlist, source),
+      };
+    }
+    return { ok: true, url: entry.url, source: entry.source, rowId: entry.rowId };
+  }
+
+  let u;
+  try {
+    u = new URL(input);
+  } catch {
+    return { ok: false, reason: `"${input}" is not a URL.` };
+  }
+  if (isDiscordHost(u.hostname)) return { ok: false, reason: DISCORD_MSG };
+  if (u.protocol !== "https:") {
+    return { ok: false, reason: `only https: pages can be opened (got ${u.protocol}//${u.host})` };
+  }
+  const key = urlKey(u);
+  const entry = (allowlist || []).find((e) => {
+    try {
+      return urlKey(new URL(e.url)) === key;
+    } catch {
+      return false;
+    }
+  });
+  if (!entry) {
+    return {
+      ok: false,
+      reason:
+        `${u.origin}${u.pathname} is not on the open allowlist.` +
+        allowlistOptions(allowlist, sourceForUrl(input)),
+    };
+  }
+  return { ok: true, url: entry.url, source: entry.source, rowId: entry.rowId };
+}
+
+/** True only when `targetId` is one the tool recorded in .opened.json. */
+export function canTouch(targetId, opened) {
+  const id = String(targetId || "");
+  return (
+    !!id && (Array.isArray(opened) ? opened : []).some((e) => e && String(e.targetId) === id)
+  );
+}
+
 /* ------------------------------- CDP client ------------------------------ */
 
 async function listTargets() {
@@ -188,8 +336,10 @@ class Cdp {
   }
 
   /**
-   * Runtime.evaluate — the ONLY protocol call this tool makes. Side-effect
-   * free expressions only: document reads and chrome.storage.local.get.
+   * Runtime.evaluate — used for document reads, chrome.storage.local.get
+   * and (on tool-opened tabs only) window.scrollBy. Tab lifecycle goes
+   * through Target.createTarget/Target.closeTarget on the browser
+   * websocket.
    * @param {string} expression @param {{awaitPromise?: boolean}} [opts]
    */
   async eval(expression, opts = {}) {
@@ -235,11 +385,84 @@ function ts() {
 }
 
 async function connectTab(target) {
-  const full = (await listTargets()).find((t) => String(t.id) === target.id);
-  if (!full || !full.webSocketDebuggerUrl) die(`Target ${target.id} has no websocket URL.`);
-  const cdp = new Cdp(full.webSocketDebuggerUrl);
+  return connectTabById(target.id);
+}
+
+/** Connect to a target by id, polling /json/list until its ws URL shows. */
+async function connectTabById(targetId) {
+  for (let i = 0; i < 40; i++) {
+    const full = (await listTargets()).find((t) => String(t.id) === String(targetId));
+    if (full && full.webSocketDebuggerUrl) {
+      const cdp = new Cdp(full.webSocketDebuggerUrl);
+      await cdp.open();
+      return cdp;
+    }
+    await sleep(250);
+  }
+  die(`Target ${targetId} never appeared in /json/list.`);
+}
+
+/** The browser-level websocket — Target.* calls live there, not on a page. */
+async function browserCdp() {
+  let ver;
+  try {
+    const res = await fetch(`${DEBUGGER}/json/version`);
+    if (!res.ok) die(`DevTools endpoint returned HTTP ${res.status}.\n${SETUP_HINT}`);
+    ver = await res.json();
+  } catch (e) {
+    die(
+      `Cannot reach the DevTools endpoint at ${DEBUGGER} (${String(
+        (e && e.cause && e.cause.code) || e,
+      )}).\n${SETUP_HINT}`,
+    );
+  }
+  if (!ver || !ver.webSocketDebuggerUrl) die("The endpoint has no browser websocket URL.");
+  const cdp = new Cdp(ver.webSocketDebuggerUrl);
   await cdp.open();
   return cdp;
+}
+
+/* ------------------------------ opened tabs ------------------------------- */
+
+const OPENED_FILE = path.join(LIVE_DIR, ".opened.json");
+
+function readOpened() {
+  try {
+    const list = JSON.parse(fs.readFileSync(OPENED_FILE, "utf8"));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOpened(list) {
+  fs.mkdirSync(LIVE_DIR, { recursive: true });
+  fs.writeFileSync(OPENED_FILE, JSON.stringify(list, null, 2));
+}
+
+/** Drop recorded ids that no longer exist as live targets. */
+function pruneOpened(opened, targets) {
+  const live = new Set((targets || []).map((t) => String(t.id)));
+  return (opened || []).filter((e) => e && e.targetId && live.has(String(e.targetId)));
+}
+
+function hostPathOf(url) {
+  try {
+    const u = new URL(url);
+    return `${u.host}${u.pathname}`;
+  } catch {
+    return String(url);
+  }
+}
+
+/** The live allowlist — imported lazily so `tabs`/`dump` stay cheap. */
+async function loadAllowlist() {
+  const dir = (...p) => pathToFileURL(path.join(ROOT, "extension", "src", ...p)).href;
+  const [{ CHECK_SOURCES }, { ADAPTERS }] = await Promise.all([
+    import(dir("sources", "probes.js")),
+    import(dir("core", "registry.js")),
+  ]);
+  return buildAllowlist(CHECK_SOURCES, ADAPTERS);
 }
 
 /** Dump the matching tab's HTML; returns {path, html, target}. */
@@ -267,30 +490,52 @@ async function dumpTab(sub, name) {
   }
 }
 
-/** Locate the extension's service worker and eval a storage.get(key). */
-async function storageGet(key) {
+/**
+ * Locate the extension's service worker and eval a storage.get(key).
+ * The worker is identified by asking it — Node can't fetch
+ * chrome-extension:// URLs, so manifest.json can't be fetched. Two unpacked
+ * copies may be loaded (main + W2's); --ext/WA1_EXT_ID picks one.
+ * @param {string|null} key @param {string|null} [extId]
+ */
+async function storageGet(key, extId) {
   const targets = await listTargets();
-  const sws = serviceWorkerTargets(targets);
-  for (const sw of sws) {
-    // Confirm it's OUR extension before touching it: fetch the manifest.
-    try {
-      const mf = await (await fetch(new URL("manifest.json", sw.url))).json();
-      if (mf.name !== EXT_NAME) continue;
-    } catch {
-      continue;
-    }
+  const wanted = extId || process.env.WA1_EXT_ID || null;
+  const pick = pickServiceWorker(serviceWorkerTargets(targets), wanted);
+  if ("error" in pick) die(`${pick.error} (from --ext/WA1_EXT_ID).`);
+
+  /** @type {{sw: any, cdp: Cdp}[]} */
+  const matches = [];
+  for (const sw of pick.candidates) {
     const cdp = new Cdp(sw.webSocketDebuggerUrl);
-    await cdp.open();
     try {
-      const expr = key
-        ? `chrome.storage.local.get(${JSON.stringify(String(key))})`
-        : "chrome.storage.local.get(null)";
-      return await cdp.eval(expr, { awaitPromise: true });
-    } finally {
+      await cdp.open();
+      const name = await cdp.eval("chrome.runtime.getManifest().name");
+      if (name === EXT_NAME) matches.push({ sw, cdp });
+      else cdp.close();
+    } catch {
       cdp.close();
     }
   }
-  die(`No "${EXT_NAME}" service worker found — is the extension loaded in that Edge?`);
+  if (!matches.length) {
+    die(`No "${EXT_NAME}" service worker found — is the extension loaded in that Edge?`);
+  }
+  if (matches.length > 1) {
+    const list = matches.map((m) => `  ${swExtId(m.sw)}\t${m.sw.url}`).join("\n");
+    for (const m of matches) m.cdp.close();
+    die(
+      `More than one "${EXT_NAME}" copy is loaded. Pick one with --ext <id> or WA1_EXT_ID:\n${list}`,
+      3,
+    );
+  }
+  const cdp = matches[0].cdp;
+  try {
+    const expr = key
+      ? `chrome.storage.local.get(${JSON.stringify(String(key))})`
+      : "chrome.storage.local.get(null)";
+    return await cdp.eval(expr, { awaitPromise: true });
+  } finally {
+    cdp.close();
+  }
 }
 
 /* ------------------------------ probe recipes ---------------------------- */
@@ -411,6 +656,133 @@ async function cmdTabs() {
   for (const t of pages) console.log(`${t.id}\t${t.host}${t.path}`);
 }
 
+/**
+ * Open an allowlisted page in a NEW tab (Target.createTarget on the
+ * browser websocket — it never reuses or navigates an existing tab),
+ * record it in captures/live/.opened.json, then wait for load.
+ */
+async function cmdOpen(arg) {
+  const res = resolveTarget(arg, await loadAllowlist());
+  if (!res.ok) die(res.reason);
+  const browser = await browserCdp();
+  let targetId;
+  try {
+    const created = await browser.send("Target.createTarget", { url: res.url });
+    targetId = created && created.targetId;
+  } finally {
+    browser.close();
+  }
+  if (!targetId) die("Target.createTarget returned no tab id.");
+  writeOpened([
+    ...readOpened(),
+    {
+      targetId: String(targetId),
+      url: res.url,
+      source: res.source,
+      rowId: res.rowId,
+      openedAt: new Date().toISOString(),
+    },
+  ]);
+
+  const cdp = await connectTabById(targetId);
+  let state = "timeout";
+  try {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const rs = await cdp.eval("document.readyState").catch(() => "");
+      if (rs === "complete") {
+        state = "complete";
+        break;
+      }
+      if (rs) state = rs;
+      await sleep(500);
+    }
+  } finally {
+    cdp.close();
+  }
+  console.log(`${targetId}\t${hostPathOf(res.url)}\t${state}`);
+}
+
+/** Close tabs — only ids this tool recorded; "all-mine" closes them all. */
+async function cmdClose(arg) {
+  if (!arg) die("usage: close <targetId|all-mine>");
+  const targets = await listTargets();
+  const before = readOpened();
+  const opened = pruneOpened(before, targets);
+  const dropped = before.length - opened.length;
+  writeOpened(opened);
+
+  if (arg === "all-mine") {
+    if (!opened.length) {
+      console.log(
+        `No tool-opened tabs${dropped ? ` (${dropped} stale record${dropped === 1 ? "" : "s"} pruned)` : ""}.`,
+      );
+      return;
+    }
+    const browser = await browserCdp();
+    const left = [];
+    try {
+      for (const e of opened) {
+        try {
+          await browser.send("Target.closeTarget", { targetId: e.targetId });
+          console.log(`closed ${e.targetId}\t${hostPathOf(e.url)}`);
+        } catch (err) {
+          left.push(e);
+          console.log(`could not close ${e.targetId}: ${String((err && err.message) || err)}`);
+        }
+      }
+    } finally {
+      browser.close();
+    }
+    writeOpened(left);
+    return;
+  }
+
+  if (!canTouch(arg, opened)) {
+    die(
+      `"${arg}" is not a tab this tool opened. Tool-opened ids: ` +
+        (opened.map((e) => e.targetId).join(", ") || "(none)") +
+        ' — "close all-mine" clears them all.',
+    );
+  }
+  const entry = opened.find((e) => String(e.targetId) === String(arg));
+  const browser = await browserCdp();
+  try {
+    await browser.send("Target.closeTarget", { targetId: entry.targetId });
+  } finally {
+    browser.close();
+  }
+  writeOpened(opened.filter((e) => String(e.targetId) !== String(arg)));
+  console.log(`closed ${arg}\t${hostPathOf(entry.url)}`);
+}
+
+/** window.scrollBy on a tool-opened tab only — N clamped to 1..20000. */
+async function cmdScroll(targetId, px) {
+  let n = Math.round(Number(px));
+  if (!Number.isFinite(n)) n = 1200;
+  n = Math.min(20000, Math.max(1, n));
+  const opened = pruneOpened(readOpened(), await listTargets());
+  writeOpened(opened);
+  if (!canTouch(targetId, opened)) {
+    die(
+      `"${targetId}" is not a tab this tool opened` +
+        (opened.length ? ` (ids: ${opened.map((e) => e.targetId).join(", ")})` : " — none recorded") +
+        "; scroll only reaches tabs from `open`.",
+    );
+  }
+  const cdp = await connectTabById(targetId);
+  try {
+    const pos = await cdp.eval(
+      `(window.scrollBy(0, ${n}), ({scrollY: window.scrollY, scrollHeight: document.documentElement.scrollHeight}))`,
+    );
+    console.log(
+      `${targetId}\tscrollY=${pos ? pos.scrollY : "?"}\tscrollHeight=${pos ? pos.scrollHeight : "?"}`,
+    );
+  } finally {
+    cdp.close();
+  }
+}
+
 async function cmdDump(sub, name) {
   const { path: out, html, target } = await dumpTab(sub, name);
   console.log(`${target.id}  ${target.host}${target.path}`);
@@ -448,8 +820,8 @@ async function cmdProbe(sub) {
   for (const it of items.slice(0, 5)) console.log(`  ${fmtRow(it)}`);
 }
 
-async function cmdStorage(key, sourceId) {
-  const all = await storageGet(key || null);
+async function cmdStorage(key, sourceId, extId) {
+  const all = await storageGet(key || null, extId);
   const snap = key ? { [key]: all && all[key] } : all || {};
   if (key && snap[key] === undefined) {
     console.log(`storage key "${key}" is not set.`);
@@ -484,7 +856,7 @@ async function cmdStorage(key, sourceId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function cmdWatch(sourceId, secs) {
+async function cmdWatch(sourceId, secs, extId) {
   const until = Date.now() + secs * 1000;
   /** @type {string|null} */
   let lastState = null;
@@ -492,7 +864,7 @@ async function cmdWatch(sourceId, secs) {
   console.log(`watching storage every 2s for ${secs}s${sourceId ? ` (source ${sourceId})` : ""} …`);
   while (Date.now() < until) {
     try {
-      const snap = await storageGet(null);
+      const snap = await storageGet(null, extId);
       const states = (snap && snap.sourceState) || {};
       const view = {};
       for (const [id, st] of Object.entries(states)) {
@@ -538,18 +910,33 @@ async function main() {
     console.log(`npm run live -- <cmd>
 
   tabs                            list page targets (id, host, path)
+  open <url|source:rowId>         new tab for an allowlisted page only
+  close <targetId|all-mine>       close only tabs this tool opened
+  scroll <targetId> [px]          scroll a tool-opened tab (default 1200)
   dump <urlSub> [--name x]        save tab HTML to captures/live/
   probe <urlSub>                  dump + probe.js + DOM extraction counts
   storage [key] [--source id]     read chrome.storage.local (SW target)
   watch [--source id] [--secs n]  poll storage every 2s, print changes
 
-READ-ONLY: no Input.*, no navigate, no clicks, no closing tabs.`);
+  Both storage commands accept --ext <id> (or the WA1_EXT_ID env var) to pick
+  one extension copy when more than one unpacked dist/ is loaded.
+
+No actions: no input events, clicks, forms; open only creates NEW tabs;
+close/scroll only reach tool-opened tabs; discord.com is always refused.`);
     return;
   }
   const rest = args.slice(1);
   switch (cmd) {
     case "tabs":
       return cmdTabs();
+    case "open":
+      if (!rest[0]) die("usage: open <url|source:rowId>");
+      return cmdOpen(rest[0]);
+    case "close":
+      return cmdClose(rest[0]);
+    case "scroll":
+      if (!rest[0]) die("usage: scroll <targetId> [px]");
+      return cmdScroll(rest[0], rest[1]);
     case "dump":
       if (!rest[0]) die("usage: dump <urlSubstring> [--name x]");
       return cmdDump(rest[0], argValue(rest, "--name"));
@@ -557,11 +944,19 @@ READ-ONLY: no Input.*, no navigate, no clicks, no closing tabs.`);
       if (!rest[0]) die("usage: probe <urlSubstring>");
       return cmdProbe(rest[0]);
     case "storage":
-      return cmdStorage(rest[0] && !rest[0].startsWith("--") ? rest[0] : null, argValue(rest, "--source"));
+      return cmdStorage(
+        rest[0] && !rest[0].startsWith("--") ? rest[0] : null,
+        argValue(rest, "--source"),
+        argValue(rest, "--ext"),
+      );
     case "watch":
-      return cmdWatch(argValue(rest, "--source"), Number(argValue(rest, "--secs")) || 120);
+      return cmdWatch(
+        argValue(rest, "--source"),
+        Number(argValue(rest, "--secs")) || 120,
+        argValue(rest, "--ext"),
+      );
     default:
-      die(`unknown command "${cmd}" — try: tabs, dump, probe, storage, watch`);
+      die(`unknown command "${cmd}" — try: tabs, open, close, scroll, dump, probe, storage, watch`);
   }
 }
 

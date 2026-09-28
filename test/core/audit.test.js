@@ -115,6 +115,37 @@ test("userState orphans prune only dead ids with no recent activity", () => {
   assert.deepEqual(Object.keys(patches.userState).sort(), ["a", "gone_fresh"]);
 });
 
+test("onboarding userState keys are known, dated and never pruned", () => {
+  const userState = {
+    onboardingDismissedAt: iso(t0 - 100 * DAY), // old but a known meta key
+    nudgeSnooze: { "portal:portal-open": iso(t0 - 20 * DAY) },
+    gone_no_dates: { notes: "x" },
+  };
+  const s = snap({ userState });
+  const iss = auditStore(s, NOW).issues;
+  assert.equal(byId({ issues: iss }, "userstate-orphans").count, 1);
+  assert.equal(byId({ issues: iss }, "userstate-onboarding-bad"), undefined);
+  const patches = applySafeFixes(s, ["userstate-orphans"], NOW);
+  assert.deepEqual(Object.keys(patches.userState).sort(), [
+    "nudgeSnooze",
+    "onboardingDismissedAt",
+  ]);
+});
+
+test("invalid onboarding dates flag and fix", () => {
+  const userState = {
+    onboardingDismissedAt: "not-a-date",
+    nudgeSnooze: { good: iso(t0), bad: "??", worse: 42 },
+  };
+  const s = snap({ userState });
+  const iss = byId({ issues: auditStore(s, NOW).issues }, "userstate-onboarding-bad");
+  assert.equal(iss.count, 3);
+  assert.equal(iss.fixable, true);
+  const patches = applySafeFixes(s, ["userstate-onboarding-bad"], NOW);
+  assert.equal(patches.userState.onboardingDismissedAt, undefined);
+  assert.deepEqual(patches.userState.nudgeSnooze, { good: iso(t0) });
+});
+
 test("uidMap tombstones prune, keeping the newest 5000", () => {
   /** @type {Record<string, any>} */
   const uidMap = { a: { uid: "u", seq: 0, hash: "h" } };
