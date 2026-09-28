@@ -49,6 +49,18 @@ this keeps your WaterlooWorks session alive. It stops as soon as
 WaterlooWorks signs you out. You can turn it off under Sources →
 WaterlooWorks → Setup → "Refresh WaterlooWorks automatically".
 
+**WaterlooWorks events and shortlisted jobs.** The extension also reads the
+"Upcoming Events / Workshops" list on your WaterlooWorks dashboard. Events
+you're registered for go on your calendar. Other events wait in Review until
+you add or dismiss them, and nothing is ever registered for you. If you've
+shortlisted jobs, the refresh also reads your shortlist, using only the same
+read-only "View" links and page numbers. For each shortlisted job that is
+still open and not yet applied to, it creates an "Apply" to-do due at the
+posting's deadline. It never applies, never adds or removes jobs from your
+shortlist, and never reads job postings you haven't shortlisted or opened
+yourself. Like the rest of your WaterlooWorks data, this stays on your
+computer; only calendar events you keep are published to your feed.
+
 ## What it stores
 
 The extension stores data in `chrome.storage.local`, which stays on your

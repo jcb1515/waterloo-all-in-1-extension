@@ -3,15 +3,16 @@
 // to-dos — auto rows carry an "Auto" badge explaining what finishes them.
 
 import { useMemo, useState } from "preact/hooks";
-import { buildTodos, doneLine, dueLabel } from "../model/todo.js";
+import { buildTodos, doneLine } from "../model/todo.js";
 import { parseQuickAdd, manualItemFrom } from "../../core/quickadd.js";
 import { stripProjectPrefix, projectByName } from "../../core/projects.js";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { typeLabelFor } from "../components/ItemRow.jsx";
+import { DateBlock } from "../../ui/DateBlock.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import { CheckIcon, PlusIcon, SparklesIcon, ExternalLinkIcon, ClockIcon } from "../../ui/icons.jsx";
 import { SourceBadge } from "../../ui/SourceBadge.jsx";
-import { fmtDay, fmtTime } from "../model/agenda.js";
+import { fmtDay, fmtLate, fmtCountdown } from "../model/agenda.js";
 
 const FILTERS = [
   ["all", "All"],
@@ -38,6 +39,20 @@ function snoozeUntil(now) {
 function openUrlOf(item) {
   const u = (item.evidence && item.evidence.url) || item.url;
   return typeof u === "string" && /^https?:\/\//i.test(u) ? u : null;
+}
+
+/** Right-cell relative label for an open row — the full date comes from the
+ *  DateBlock beside the title; this cell only carries late/countdown or the
+ *  undated markers. */
+function OpenDue({ row, now }) {
+  const item = row.item;
+  const a = item.dueAt || item.startAt || null;
+  if (!a) return <span class="item-countdown">No date</span>;
+  if (item.meta && item.meta.undated) return <span class="item-countdown">No due date</span>;
+  const diff = Date.parse(a) - now.getTime();
+  if (diff < 0) return <span class="item-late">{fmtLate(-diff)}</span>;
+  const cd = fmtCountdown(diff);
+  return cd ? <span class="item-countdown">{cd}</span> : null;
 }
 
 /** One to-do row: checkbox, title, org chip, source badge, auto badge,
@@ -79,6 +94,7 @@ function TodoRow({ row, now, actions, projects }) {
       </button>
       <span class="item-main">
         <span class="item-title">{item.title}</span>
+        <DateBlock item={item} />
         <span class="item-meta">
           {item.org ? <span class="chip chip-org">{item.org}</span> : null}
           <SourceBadge item={item} />
@@ -129,9 +145,7 @@ function TodoRow({ row, now, actions, projects }) {
         {row.done ? (
           <span class="item-status ok">{doneLine(row, now)}</span>
         ) : (
-          <span class={row.anchorMs != null && row.anchorMs < now.getTime() ? "item-late" : "item-countdown"}>
-            {dueLabel(row, now)}
-          </span>
+          <OpenDue row={row} now={now} />
         )}
       </span>
     </div>
