@@ -34,8 +34,9 @@ No passwords, session tokens or credentials are stored.
   Discord and never accesses your account token. It only notes dated
   messages in servers you already read while browsing.
 - **Calendar sync is opt-in.** If you turn it on, only event data —
-  titles, times, locations — is sent to the calendar feed server you
-  configure (self-hosted; see `server/`). Nothing else is transmitted.
+  titles, times, locations — is sent to the calendar feed server so
+  Google Calendar can subscribe. See "The shared calendar server" below.
+  Nothing else is transmitted.
 
 ## Optional permissions
 
@@ -62,11 +63,45 @@ probes on pages you open and can download a diagnostic report — the
 report contains counts and redacted structural outlines only, never page
 text, names or addresses.
 
+## The shared calendar server
+
+The extension ships pointing at a shared feed server operated by the
+extension's maintainer on **Cloudflare Workers + D1**
+(`waterloo-all-in-1-feed.jb-wat.workers.dev`). It is only used when you
+turn calendar sync on — Settings → Calendar, the panel's Calendar tab or
+the Welcome step. You can point the extension at your own Worker instead
+(Settings → Calendar → Feed server URL; see `server/README.md`).
+
+When sync is on, the server stores, per feed:
+
+- the **published event fields** — titles, start/end times, locations
+  and links for the items you publish (the exact list the feed serves as
+  an `.ics` calendar);
+- a **SHA-256 hash of your update token** — the raw token is never
+  stored, it's how your browser (and only your browser) can update or
+  delete the feed;
+- a **salted SHA-256 hash of your IP address, scoped to the UTC day**,
+  used only for the daily feed-create rate limit. Raw IPs are never
+  stored and the hash changes every day.
+
+Feeds expire **one year after their last publish** and are then deleted
+(a daily job purges expired feeds). Deleted events are kept as
+tombstones inside the feed for up to 180 days so a stale republish can't
+resurrect them — tombstones die with the feed. "Stop syncing and delete
+feed" in Settings → Calendar issues a DELETE that removes the feed, its
+rendered calendars and its aliases immediately.
+
+**Anyone with the feed link can read the feed** — that's how Google
+Calendar subscribes. The link is a long random id; treat it as private.
+
+The server has no analytics, no ads and no tracking. The source is in
+`server/`; self-hosters can deploy the same Worker.
+
 ## Third parties
 
 No analytics, advertising networks or third-party data processors are
-involved. The optional calendar feed server is one you host or choose
-yourself.
+involved. The only server involved is the calendar feed server above —
+the maintainer's shared one, or your own.
 
 ## Your choices
 

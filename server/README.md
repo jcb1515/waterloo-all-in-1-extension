@@ -7,6 +7,11 @@ Calendar, Apple Calendar, Outlook, etc. subscribe to the returned URLs (GET).
 Based on gurshh-rain/uwlearn_assignment_extension `calendar-service`
 (MIT, Gurshaan Gill). Legacy v1 assignment payloads and stored rows still work.
 
+> **Operator note:** the extension's builds default to the maintainer's
+> deployment of this Worker (`package.json` → `config.calendarServiceUrl`).
+> If you run your own, point Settings → Calendar → Feed server URL at it, or
+> bake it in with `WA1_CALENDAR_SERVICE_URL` at build time.
+
 ## Endpoints
 
 | Method | Path | Auth | Description |

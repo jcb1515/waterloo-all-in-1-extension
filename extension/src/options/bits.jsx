@@ -1,4 +1,35 @@
-// Small shared building blocks for the settings sections.
+// Small shared building blocks for the settings sections. Field and Toggle
+// live in ui/bits.jsx so the side panel uses the same switch markup.
+
+export { Field, Toggle } from "../ui/bits.jsx";
+
+import { useState } from "preact/hooks";
+
+/**
+ * "Open side panel" button — asks Chrome to open the extension side panel
+ * inside the click. When the API can't do it (preview, or the page has no
+ * sidePanel permission path) a fallback hint appears instead.
+ * @param {{label?: string, className?: string}} p
+ */
+export function OpenPanelButton({ label, className }) {
+  const [hint, setHint] = useState("");
+  const open = async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      await chrome.sidePanel.open({ windowId: win.id });
+    } catch {
+      setHint("Click the extension icon to open the panel.");
+    }
+  };
+  return (
+    <>
+      <button type="button" class={className || "btn btn-sm"} onClick={open}>
+        {label || "Open side panel"}
+      </button>
+      {hint ? <span class="help"> {hint}</span> : null}
+    </>
+  );
+}
 
 /**
  * @param {{title?: string, children: any, danger?: boolean, id?: string}} p
@@ -9,19 +40,6 @@ export function Card({ title, children, danger, id }) {
       {title ? <h3 class="opt-card-title">{title}</h3> : null}
       {children}
     </section>
-  );
-}
-
-/**
- * @param {{label: string, help?: string, children: any}} p
- */
-export function Field({ label, help, children }) {
-  return (
-    <div class="field">
-      <span class="label">{label}</span>
-      {children}
-      {help ? <p class="help">{help}</p> : null}
-    </div>
   );
 }
 
@@ -43,25 +61,6 @@ export function Segmented({ value, options, onChange, ariaLabel }) {
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * Toggle switch row.
- * @param {{checked: boolean, onChange: (v: boolean) => void, label: string, disabled?: boolean}} p
- */
-export function Toggle({ checked, onChange, label, disabled }) {
-  return (
-    <label class={`switch${disabled ? " disabled" : ""}`}>
-      <input
-        type="checkbox"
-        checked={!!checked}
-        disabled={!!disabled}
-        onChange={(e) => onChange(/** @type {any} */ (e.target).checked)}
-      />
-      <span class="track" aria-hidden="true" />
-      <span>{label}</span>
-    </label>
   );
 }
 

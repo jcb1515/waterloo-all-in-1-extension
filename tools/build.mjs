@@ -17,6 +17,18 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(REPO, "extension");
 const DIST = path.join(REPO, "dist");
 
+const pkg = JSON.parse(await readFile(path.join(REPO, "package.json"), "utf8"));
+
+// The shared calendar server is built into every bundle (dev and release)
+// from package.json's config.calendarServiceUrl. WA1_CALENDAR_SERVICE_URL
+// overrides it — an explicitly empty value bakes "" so self-hosters can ship
+// a build with no default server. The user's saved setting always wins at
+// runtime (see BUILT_IN_SERVICE_URL in core/store.js).
+const CALENDAR_SERVICE_URL =
+  process.env.WA1_CALENDAR_SERVICE_URL ??
+  (pkg.config && pkg.config.calendarServiceUrl) ??
+  "";
+
 const ESM_ENTRIES = [
   "src/background/index.js",
   "src/panel/main.jsx",
@@ -113,7 +125,7 @@ const shared = {
   logLevel: "info",
   define: {
     __WA1_DEV_PROFILE__: JSON.stringify(devProfile ?? null),
-    __WA1_CALENDAR_SERVICE_URL__: JSON.stringify(process.env.WA1_CALENDAR_SERVICE_URL || ""),
+    __WA1_CALENDAR_SERVICE_URL__: JSON.stringify(CALENDAR_SERVICE_URL),
   },
 };
 

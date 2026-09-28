@@ -356,6 +356,12 @@ export function auditStore(snapshot = {}, now = new Date()) {
         `Unknown settings key(s): ${unknown.join(", ")}`,
         { count: unknown.length, sample: unknown });
     }
+    const rem = isObj(saved.reminders) ? saved.reminders : {};
+    if (rem.pausedUntil != null && Number.isNaN(Date.parse(rem.pausedUntil))) {
+      issue("settings-bad-pause", "warn", "settings",
+        "reminders.pausedUntil is set but not a parseable date",
+        { count: 1, fixable: true });
+    }
   }
 
   /* ------------------------------ secrets hygiene ----------------------------- */
@@ -471,6 +477,14 @@ export function applySafeFixes(snapshot = {}, issueIds, now = new Date()) {
         };
       }
     }
+  }
+
+  if (has("settings-bad-pause") && isObj(snapshot[SETTINGS_KEY])) {
+    const saved = snapshot[SETTINGS_KEY];
+    patches[SETTINGS_KEY] = {
+      ...saved,
+      reminders: { ...(isObj(saved.reminders) ? saved.reminders : {}), pausedUntil: null },
+    };
   }
 
   if (has("updates-cap") && Array.isArray(snapshot.updates)) {

@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS = {
     discord: {
       enabled: true,
       watched: {},
+      channelTargets: {},
     },
   },
   agenda: { showClasses: "today" },
@@ -103,6 +104,9 @@ export const DEFAULT_SETTINGS = {
     briefing: { enabled: true, time: "08:00" },
     digest: { enabled: true, day: "sun", time: "18:00" },
     includeTentative: false,
+    // "Pause reminders until" — an ISO string or null. Deferred reminders
+    // fire at pause end; ones whose event passed are dropped.
+    pausedUntil: null,
   },
   calendar: {
     enabled: false,
@@ -130,6 +134,9 @@ const DEV_PROFILE =
 */
 const BUILD_SERVICE_URL =
   typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
+
+/** The compiled-in shared calendar server URL ("" when the build sets none). */
+export const BUILT_IN_SERVICE_URL = BUILD_SERVICE_URL;
 
 /**
  * `defaults` deep-merged with a developer profile: plain objects merge,
@@ -175,10 +182,10 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
  * value replaces the inherited one outright, so deleting a row in the UI
  * doesn't resurrect the default/dev-profile row.
  */
-const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched"]);
+const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched", "channelTargets"]);
 
 /** Recursive merge for plain-object values; arrays and scalars overwrite. */
-function deepMerge(base, patch) {
+export function deepMerge(base, patch) {
   const out = { ...(isObj(base) ? base : {}) };
   for (const [k, v] of Object.entries(patch || {})) {
     if (REPLACE_KEYS.has(k) && isObj(v)) {
@@ -188,6 +195,17 @@ function deepMerge(base, patch) {
     }
   }
   return out;
+}
+
+/**
+ * Merge one patch into settings — the same rules `setSettings` applies to
+ * stored settings. Exported so preview UIs can update their in-memory copy
+ * identically (REPLACE_KEYS tables swap wholesale; everything else merges).
+ * @param {any} current resolved settings
+ * @param {Record<string, any>} patch
+ */
+export function applySettingsPatch(current, patch) {
+  return deepMerge(current, patch);
 }
 
 /* --------------------------- settings --------------------------- */
@@ -202,7 +220,14 @@ export function resolveSettings(saved) {
   if (BUILD_SERVICE_URL) {
     base = deepMerge(base, { calendar: { serviceUrl: BUILD_SERVICE_URL } });
   }
-  return deepMerge(base, isObj(saved) ? saved : {});
+  const s = isObj(saved) ? { ...saved } : {};
+  // A saved "" means "use the built-in server", not "no server" — otherwise a
+  // blank field would shadow the shared server the build ships with.
+  if (BUILD_SERVICE_URL && isObj(s.calendar) && s.calendar.serviceUrl === "") {
+    const { serviceUrl: _dropped, ...rest } = s.calendar;
+    s.calendar = rest;
+  }
+  return deepMerge(base, s);
 }
 
 /** Settings deep-merged over DEFAULT_SETTINGS (+ dev profile). */
@@ -222,7 +247,7 @@ export async function setSettings(patchOrFn) {
     const next =
       typeof patchOrFn === "function"
         ? patchOrFn(structuredClone(current)) || current
-        : deepMerge(current, patchOrFn);
+        : applySettingsPatch(current, patchOrFn);
     await chrome.storage.local.set({ [SETTINGS_KEY]: next });
     return next;
   });

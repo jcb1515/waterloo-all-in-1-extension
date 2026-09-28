@@ -1,5 +1,7 @@
-// Sources view: one status card per adapter, with sync/open/clear actions and
-// a footer link to the privacy & discovery settings.
+// Sources view: one setup card per adapter — enabled toggle, status badge,
+// a one-line description, and the per-source setup blocks (outline -> the
+// Courses tab, email providers + guided scan, Discord servers/channels,
+// Google Calendar duplicate check). Disabled cards collapse to the header.
 
 import { useMemo, useState } from "preact/hooks";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
@@ -7,9 +9,17 @@ import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
 import { IS_PREVIEW, send } from "../data.js";
 import { UI } from "../../core/messages.js";
-import { GROUP_LABELS, neededGroups, OPTIONAL_PERMISSION_GROUPS } from "../../core/permissions.js";
+import {
+  GROUP_LABELS,
+  neededGroups,
+  OPTIONAL_PERMISSION_GROUPS,
+  requestSourceAccess,
+} from "../../core/permissions.js";
 import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
+import { Toggle } from "../../options/bits.jsx";
 import { inventoryReport } from "../../sources/discord/index.js";
+import { EmailProviders, MailScan } from "../components/EmailSetup.jsx";
+import { DiscordChannels, DiscordWatched } from "../components/DiscordSetup.jsx";
 import {
   RefreshIcon,
   ExternalLinkIcon,
@@ -17,9 +27,21 @@ import {
   ShieldIcon,
   ArrowRightIcon,
   ClipboardCheckIcon,
+  SettingsIcon,
 } from "../../ui/icons.jsx";
 
 const TONE_BADGE = { ok: "badge-ok", warn: "badge-warn", danger: "badge-danger", muted: "badge-muted" };
+
+/** One-line "what does this source do" text per adapter. */
+const SOURCE_HELP = {
+  learn: "Reads classes, deadlines and announcements while you browse Learn.",
+  outline: "Course outline pages, plus imported outline pages and PDFs.",
+  portal: "Reads your course sections while you browse Portal.",
+  outlook: "Calendar invites and dated mail in Outlook/Gmail tabs you open.",
+  waterlooworks: "Applications, interviews and deadlines while you browse.",
+  discord: "Dated messages in servers you read — passive, never posts.",
+  gcal: "Skip events already on my calendar — reads event titles and times from your own calendars only, so nothing is published twice. Subscribed calendars (including this extension's own feed) never suppress anything, and nothing it reads leaves your browser.",
+};
 
 /** Monogram from a label: "Course outlines" -> "Co", "WaterlooWorks" -> "Wa". */
 function monogram(label) {
@@ -30,9 +52,9 @@ function monogram(label) {
 }
 
 /**
- * @param {{state: any, actions: any, now: Date}} props
+ * @param {{state: any, actions: any, now: Date, onGoCourses?: () => void}} props
  */
-export function Sources({ state, actions, now }) {
+export function Sources({ state, actions, now, onGoCourses }) {
   const cards = useMemo(
     () =>
       ADAPTERS.map((a) => {
@@ -43,10 +65,10 @@ export function Sources({ state, actions, now }) {
     [state.sourceState]
   );
 
-  const openPrivacy = () => {
+  const openOptions = (hash) => {
     const url = IS_PREVIEW
-      ? "/src/options/options.html#privacy"
-      : chrome.runtime.getURL("src/options/options.html#privacy");
+      ? `/src/options/options.html${hash}`
+      : chrome.runtime.getURL(`src/options/options.html${hash}`);
     try {
       if (!IS_PREVIEW && chrome.tabs) {
         chrome.tabs.create({ url });
@@ -70,27 +92,45 @@ export function Sources({ state, actions, now }) {
           state={state}
           actions={actions}
           now={now}
+          onGoCourses={onGoCourses}
         />
       ))}
-      <button type="button" class="btn btn-ghost sources-privacy" onClick={openPrivacy}>
+      <button
+        type="button"
+        class="btn btn-ghost sources-privacy"
+        onClick={() => openOptions("#privacy")}
+      >
         <ShieldIcon size={14} /> Privacy &amp; discovery settings
+      </button>
+      <button
+        type="button"
+        class="btn btn-ghost sources-privacy"
+        onClick={() => openOptions("#advanced")}
+      >
+        <SettingsIcon size={14} /> Advanced settings
       </button>
     </div>
   );
 }
 
 /**
- * One source card. When the source is enabled but its optional host
- * permission isn't granted, the badge reads "Needs permission" and an Allow
- * button requests it in-place.
+ * One source card. The Enabled toggle drives sources.<id>.enabled through
+ * actions.saveSettings; enabling discord/gcal asks for its host group inside
+ * the click (denied -> stays off with a note). When the source is enabled
+ * but its optional host permission isn't granted, the badge reads "Needs
+ * permission" and an Allow button requests it in-place.
  * @param {{adapter: any, stage: string, st: any, status: any, state: any,
- *   actions: any, now: Date}} p
+ *   actions: any, now: Date, onGoCourses?: () => void}} p
  */
-function SourceCard({ adapter, stage, st, status, state, actions, now }) {
-  const needed = neededGroups(
-    adapter.id,
-    state.settings && state.settings.sources && state.settings.sources[adapter.id]
-  );
+function SourceCard({ adapter, stage, st, status, state, actions, now, onGoCourses }) {
+  const src = (state.settings && state.settings.sources && state.settings.sources[adapter.id]) || {};
+  // gcal is the one source that's off until the user turns it on — nothing
+  // reads Google Calendar unless the toggle (and its permission) is on.
+  const enabled =
+    adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
+  const [denied, setDenied] = useState(false);
+
+  const needed = neededGroups(adapter.id, src);
   const access = useAccessMap(needed);
   const missing = needed.filter((g) => access[g] === false);
   const needsPerm = missing.length > 0;
@@ -104,6 +144,25 @@ function SourceCard({ adapter, stage, st, status, state, actions, now }) {
       }
     : status;
 
+  /** @param {boolean} v */
+  const onToggle = async (v) => {
+    if (v && !IS_PREVIEW && (adapter.id === "discord" || adapter.id === "gcal")) {
+      // The request must start inside the click — no await before it.
+      const ok = await requestSourceAccess(adapter.id);
+      if (!ok) {
+        setDenied(true);
+        return;
+      }
+    }
+    setDenied(false);
+    actions.saveSettings({
+      sources: { [adapter.id]: { ...src, enabled: v } },
+    });
+  };
+
+  const save = (patch) =>
+    actions.saveSettings({ sources: { [adapter.id]: { ...src, ...patch } } });
+
   return (
     <section class="card source-card">
       <div class="source-head">
@@ -112,7 +171,7 @@ function SourceCard({ adapter, stage, st, status, state, actions, now }) {
         </span>
         <div class="source-title">
           <h3>{adapter.label}</h3>
-          {st || stage !== "soon" ? (
+          {enabled && (st || stage !== "soon") ? (
             <span class="source-meta tabular">
               {st && st.lastOkAt
                 ? `Synced ${fmtAgo(st.lastOkAt, now)}`
@@ -125,54 +184,103 @@ function SourceCard({ adapter, stage, st, status, state, actions, now }) {
             </span>
           ) : null}
         </div>
-        <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span>
+        {enabled ? (
+          <span class={`badge ${TONE_BADGE[shown.tone]}`}>{shown.label}</span>
+        ) : null}
+        <Toggle
+          label="Enabled"
+          checked={enabled}
+          onChange={onToggle}
+        />
       </div>
-      {shown.detail ? <p class="source-detail">{shown.detail}</p> : null}
-      {stage === "live" && !(adapter.intervalMinutes > 0) && !needsPerm ? (
-        <p class="source-detail">Updates while you browse {adapter.label}.</p>
+      {SOURCE_HELP[adapter.id] ? (
+        <p class="source-detail">{SOURCE_HELP[adapter.id]}</p>
       ) : null}
-      {adapter.id === "discord" && !needsPerm ? <DiscordControls st={st} /> : null}
-      {adapter.id === "outlook" && !needsPerm ? <EmailScanControls st={st} /> : null}
-      <div class="source-actions">
-        {missing.map((g) => (
-          <AllowSourceButton
-            key={g}
-            sourceId={g}
-            label={`Allow ${GROUP_LABELS[g] || g}`}
-          />
-        ))}
-        {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
-          <button
-            type="button"
-            class="btn btn-sm"
-            onClick={() => actions.sync(adapter.id)}
-          >
-            <RefreshIcon size={13} /> Sync now
-          </button>
-        ) : null}
-        {adapter.origins && adapter.origins[0] && !needsPerm ? (
-          <button
-            type="button"
-            class="btn btn-sm"
-            onClick={() => actions.open(`${adapter.origins[0]}/`)}
-          >
-            <ExternalLinkIcon size={13} /> Open site
-          </button>
-        ) : null}
-        {st && !needsPerm ? (
-          <button
-            type="button"
-            class="btn btn-sm btn-ghost"
-            onClick={() => {
-              if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
-                actions.clearSource(adapter.id);
-              }
-            }}
-          >
-            <TrashIcon size={13} /> Clear data
-          </button>
-        ) : null}
-      </div>
+      {denied ? (
+        <p class="help status-err">
+          Permission wasn't granted — {adapter.label} stays off. The browser
+          prompt asks for access to{" "}
+          {adapter.origins[0].replace("https://", "")}; allow it, then toggle
+          again.
+        </p>
+      ) : null}
+      {!enabled ? null : (
+        <>
+          {shown.detail ? <p class="source-detail">{shown.detail}</p> : null}
+          {stage === "live" && !(adapter.intervalMinutes > 0) && !needsPerm ? (
+            <p class="source-detail">Updates while you browse {adapter.label}.</p>
+          ) : null}
+          {adapter.id === "outline" && !needsPerm ? (
+            <p>
+              <button
+                type="button"
+                class="btn btn-sm"
+                onClick={() => onGoCourses && onGoCourses()}
+              >
+                Manage outlines in Courses
+              </button>
+            </p>
+          ) : null}
+          {adapter.id === "outlook" && !needsPerm ? (
+            <>
+              <EmailProviders src={src} save={save} />
+              <MailScan src={src} />
+              <EmailScanControls st={st} />
+            </>
+          ) : null}
+          {adapter.id === "discord" && !needsPerm ? (
+            <>
+              <DiscordWatched src={src} save={save} />
+              <DiscordChannels
+                discordState={st && st.state}
+                src={src}
+                actions={actions}
+              />
+              <DiscordControls st={st} />
+            </>
+          ) : null}
+          <div class="source-actions">
+            {missing.map((g) => (
+              <AllowSourceButton
+                key={g}
+                sourceId={g}
+                label={`Allow ${GROUP_LABELS[g] || g}`}
+              />
+            ))}
+            {stage === "live" && adapter.sync && adapter.intervalMinutes > 0 && !needsPerm ? (
+              <button
+                type="button"
+                class="btn btn-sm"
+                onClick={() => actions.sync(adapter.id)}
+              >
+                <RefreshIcon size={13} /> Sync now
+              </button>
+            ) : null}
+            {adapter.origins && adapter.origins[0] && !needsPerm ? (
+              <button
+                type="button"
+                class="btn btn-sm"
+                onClick={() => actions.open(`${adapter.origins[0]}/`)}
+              >
+                <ExternalLinkIcon size={13} /> Open site
+              </button>
+            ) : null}
+            {st && !needsPerm ? (
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost"
+                onClick={() => {
+                  if (window.confirm(`Clear all ${adapter.label} data stored on this computer?`)) {
+                    actions.clearSource(adapter.id);
+                  }
+                }}
+              >
+                <TrashIcon size={13} /> Clear data
+              </button>
+            ) : null}
+          </div>
+        </>
+      )}
     </section>
   );
 }

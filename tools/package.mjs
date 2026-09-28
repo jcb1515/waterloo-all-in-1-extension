@@ -1,9 +1,10 @@
 // Release packaging: a clean WA1_RELEASE build, dist verification, then a
 // zip in release/. `npm run package`.
 //
-//   WA1_CALENDAR_SERVICE_URL must be set to the production feed origin when
-//   cutting a real release; the zip check rejects a localhost/empty URL only
-//   when it shows up in dist.
+//   The built bundles must carry a valid https calendar service URL —
+//   package.json's config.calendarServiceUrl, overridable with
+//   WA1_CALENDAR_SERVICE_URL at build time. The check reads the actual
+//   baked literal out of dist, rejects localhost, and prints the URL.
 
 import { spawnSync } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -26,11 +27,9 @@ async function* walk(dir) {
 }
 
 /** Scan the built dist for things that must not ship. */
-async function verifyDist(pkgVersion) {
+async function verifyDist(pkgVersion, expectedServiceUrl) {
   const problems = [];
-  const feedEnv = process.env.WA1_CALENDAR_SERVICE_URL || "";
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(feedEnv))
-    problems.push(`WA1_CALENDAR_SERVICE_URL points at localhost: ${feedEnv}`);
+  let baked = null;
   for await (const p of walk(DIST)) {
     const rel = path.relative(DIST, p).split(path.sep).join("/");
     if (!TEXT_EXT.has(path.extname(p).toLowerCase())) continue;
@@ -43,11 +42,22 @@ async function verifyDist(pkgVersion) {
     // "localhost" hostname checks in publish.js/learn mocks are fine.
     if (/https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(text))
       problems.push(`${rel}: contains a localhost URL`);
+    if (expectedServiceUrl && text.includes(expectedServiceUrl)) baked = expectedServiceUrl;
   }
   const manifest = JSON.parse(await readFile(path.join(DIST, "manifest.json"), "utf8"));
   if (manifest.version !== pkgVersion)
     problems.push(`manifest version ${manifest.version} != package.json ${pkgVersion}`);
-  return problems;
+  // Releases ship the shared feed server: the expected https URL must be a
+  // literal in at least one bundle. (minified or not, the define bakes the
+  // same string)
+  if (!expectedServiceUrl) {
+    problems.push("no calendar service URL configured — set config.calendarServiceUrl or WA1_CALENDAR_SERVICE_URL");
+  } else if (!/^https:\/\/[^/]+$/.test(expectedServiceUrl)) {
+    problems.push(`calendar service URL is not a bare https origin: ${expectedServiceUrl}`);
+  } else if (!baked) {
+    problems.push(`calendar service URL ${expectedServiceUrl} is not baked into any dist bundle`);
+  }
+  return { problems, baked };
 }
 
 async function main() {
@@ -55,6 +65,11 @@ async function main() {
   const version = pkg.version;
 
   console.log("Building release bundle (WA1_RELEASE=1, no dev profile, minified)…");
+  const expectedServiceUrl =
+    process.env.WA1_CALENDAR_SERVICE_URL ??
+    (pkg.config && pkg.config.calendarServiceUrl) ??
+    "";
+
   const build = spawnSync(process.execPath, [path.join(REPO, "tools", "build.mjs")], {
     cwd: REPO,
     env: { ...process.env, WA1_RELEASE: "1" },
@@ -62,12 +77,13 @@ async function main() {
   });
   if (build.status !== 0) process.exit(build.status ?? 1);
 
-  const problems = await verifyDist(version);
+  const { problems, baked } = await verifyDist(version, expectedServiceUrl);
   if (problems.length) {
     console.error("dist verification failed:");
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
   }
+  console.log(`calendar service URL baked in: ${baked}`);
 
   const entries = [];
   for await (const p of walk(DIST)) {

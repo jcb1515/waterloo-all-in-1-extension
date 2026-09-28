@@ -228,3 +228,160 @@ test("items of archived projects get no reminders", () => {
   const r = nextReminders(items, {}, SETTINGS(), NOW, {}, {}, projects);
   assert.deepEqual([...new Set(r.map((x) => x.itemId))].sort(), ["b", "c"]);
 });
+
+/* ----------------------------- reminders pause ----------------------------- */
+
+test("pauseEndMs: active pause gives its end; expired/invalid are ignored", async () => {
+  const { pauseEndMs, pauseUntilTomorrow } = await import(
+    "../../extension/src/core/pause.js"
+  );
+  const now = Date.parse("2026-10-01T16:00:00Z");
+  assert.equal(
+    pauseEndMs({ pausedUntil: "2026-10-01T17:00:00Z" }, now),
+    Date.parse("2026-10-01T17:00:00Z")
+  );
+  assert.equal(pauseEndMs({ pausedUntil: "2026-10-01T15:00:00Z" }, now), null);
+  assert.equal(pauseEndMs({ pausedUntil: "not a date" }, now), null);
+  assert.equal(pauseEndMs({ pausedUntil: null }, now), null);
+  assert.equal(pauseEndMs({}, now), null);
+
+  // "Pause until tomorrow" = next day 08:00 Toronto, DST-safe.
+  assert.equal(pauseUntilTomorrow(now), "2026-10-02T12:00:00.000Z"); // Oct 2 08:00 EDT
+  // Nov 1 2025 noon EDT -> Nov 2 08:00 EST (the day the clocks fall back).
+  assert.equal(
+    pauseUntilTomorrow(Date.parse("2025-11-01T16:00:00Z")),
+    "2025-11-02T13:00:00.000Z"
+  );
+});
+
+test("reminderHoldEnd: pause and quiet hours — the later end wins", async () => {
+  const { reminderHoldEnd } = await import("../../extension/src/core/remind.js");
+  // 23:30 Toronto Oct 1 — inside quiet hours (23:00-08:00).
+  const late = Date.parse(zonedIso(2026, 10, 1, 23, 30));
+  const quietEnd = Date.parse(zonedIso(2026, 10, 2, 8, 0));
+  const rem = {
+    quietHours: { enabled: true, start: "23:00", end: "08:00" },
+    pausedUntil: null,
+  };
+  assert.equal(reminderHoldEnd(late, rem), quietEnd);
+  // Pause beyond the quiet end wins.
+  const later = quietEnd + 3600000;
+  rem.pausedUntil = new Date(later).toISOString();
+  assert.equal(reminderHoldEnd(late, rem), later);
+  // A pause inside quiet hours defers to the quiet end.
+  rem.pausedUntil = new Date(late + 3600000).toISOString();
+  assert.equal(reminderHoldEnd(late, rem), quietEnd);
+  // Expired pause + outside quiet hours -> null.
+  const noon = Date.parse(zonedIso(2026, 10, 1, 12, 0));
+  rem.pausedUntil = "2026-09-30T12:00:00Z";
+  assert.equal(reminderHoldEnd(noon, rem), null);
+});
+
+test("briefing/digest alarms arm at the first occurrence past the pause", async () => {
+  const { rescheduleBriefing, rescheduleDigest, BRIEFING_ALARM, DIGEST_ALARM } =
+    await import("../../extension/src/core/remind.js");
+  const now = new Date("2026-10-01T16:00:00Z"); // Thu Oct 1 noon EDT
+
+  let bAt = null;
+  let dAt = null;
+  const alarm = (name, at) => {
+    if (name === BRIEFING_ALARM) bAt = at;
+    if (name === DIGEST_ALARM) dAt = at;
+  };
+
+  // Pause ends Fri Oct 3 08:00 EDT — that morning's briefing still fires.
+  await rescheduleBriefing(
+    { reminders: { briefing: { enabled: true, time: "08:00" }, pausedUntil: "2026-10-03T12:00:00Z" } },
+    { alarm, now }
+  );
+  assert.equal(bAt, Date.parse(zonedIso(2026, 10, 3, 8, 0)));
+
+  // A longer pause skips Oct 3 and Oct 4 briefings entirely.
+  await rescheduleBriefing(
+    { reminders: { briefing: { enabled: true, time: "08:00" }, pausedUntil: "2026-10-04T20:00:00Z" } },
+    { alarm, now }
+  );
+  assert.equal(bAt, Date.parse(zonedIso(2026, 10, 5, 8, 0)));
+
+  // Digest (Sun 18:00): next is Oct 4 — a pause past it moves to Oct 11.
+  await rescheduleDigest(
+    { reminders: { digest: { enabled: true, day: "sun", time: "18:00" }, pausedUntil: "2026-10-05T01:00:00Z" } },
+    { alarm, now }
+  );
+  assert.equal(dAt, Date.parse(zonedIso(2026, 10, 11, 18, 0)));
+
+  // No pause -> next Sunday as usual.
+  await rescheduleDigest(
+    { reminders: { digest: { enabled: true, day: "sun", time: "18:00" } } },
+    { alarm, now }
+  );
+  assert.equal(dAt, Date.parse(zonedIso(2026, 10, 4, 18, 0)));
+});
+
+test("paused reminders defer to the pause end; ones past their event drop", async () => {
+  const { fireDueReminders } = await import("../../extension/src/core/remind.js");
+  const store = new Map();
+  const fired = [];
+  globalThis.chrome = /** @type {any} */ ({
+    storage: {
+      local: {
+        get: async (keys) => {
+          if (typeof keys === "string") return { [keys]: store.get(keys) };
+          const out = /** @type {Record<string, any>} */ ({});
+          for (const k of keys) out[k] = store.get(k);
+          return out;
+        },
+        set: async (obj) => {
+          for (const [k, v] of Object.entries(obj)) store.set(k, v);
+        },
+      },
+      onChanged: { addListener() {}, removeListener() {} },
+    },
+    alarms: { create() {}, clear() {} },
+    notifications: { create: async (id) => fired.push(id) },
+  });
+  try {
+    const now = Date.now();
+    const pauseEnd = new Date(now + 3600000).toISOString();
+    store.set("wa1Settings", {
+      reminders: {
+        enabled: true,
+        leads: { deadline: [30, 1560] },
+        quietHours: { enabled: false },
+        briefing: { enabled: false },
+        digest: { enabled: false },
+        pausedUntil: pauseEnd,
+      },
+    });
+    store.set("items", {
+      // Due now (anchor - 30min lead = now) and over before the pause ends.
+      soon: item("soon", {
+        source: "portal",
+        dueAt: new Date(now + 30 * 60000).toISOString(),
+      }),
+      // Due now (anchor - 26h lead = now) and outlives the pause -> deferred.
+      far: item("far", {
+        source: "portal",
+        dueAt: new Date(now + 26 * 3600000).toISOString(),
+      }),
+    });
+    await fireDueReminders();
+    const snoozed = store.get("reminderSnooze") || {};
+    const sent = store.get("remindersSent") || {};
+    assert.equal(fired.length, 0, "nothing notified during the pause");
+    assert.ok(
+      Object.keys(snoozed).some((k) => k.startsWith("far:")),
+      "the far reminder is deferred"
+    );
+    assert.ok(
+      Object.values(snoozed).some((until) => until === pauseEnd),
+      "deferral lands on the pause end"
+    );
+    assert.ok(
+      Object.keys(sent).some((k) => k.startsWith("soon:")),
+      "the reminder whose event passed inside the pause is dropped"
+    );
+  } finally {
+    delete /** @type {any} */ (globalThis).chrome;
+  }
+});

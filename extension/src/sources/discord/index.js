@@ -215,7 +215,7 @@ function watchedGuilds(state, settings) {
   /** @type {Record<string, any>} */
   const out = {};
   for (const [guildId, g] of Object.entries(obj(state.guilds))) {
-    const cfg = watchConfig(g?.name || "", settings?.watched);
+    const cfg = watchConfig(g?.name || "", settings?.watched, settings?.channelTargets);
     if (cfg) out[guildId] = cfg;
   }
   return out;
@@ -372,7 +372,7 @@ function ingestMessages(state, messages, src, ctx, nowMs, nowIso, at) {
     const loc = locateChannel(state, channelId);
     const guildId = loc?.guildId || msg?.guild_id || src.guildId;
     const guild = guildId ? obj(state.guilds)[guildId] : null;
-    const srv = guild ? watchConfig(guild.name, settings.watched) : null;
+    const srv = guild ? watchConfig(guild.name, settings.watched, settings.channelTargets) : null;
     const watch = guildId ? state.watch?.[guildId] : null;
     const watched = arr(watch?.channelIds).includes(channelId);
 
@@ -598,7 +598,7 @@ function evictGuilds(state, settings) {
   }
   const pinned = new Set();
   for (const id of ids) {
-    const cfg = watchConfig(guilds[id]?.name || "", settings?.watched);
+    const cfg = watchConfig(guilds[id]?.name || "", settings?.watched, settings?.channelTargets);
     if (!cfg) continue; // not watched under the current settings
     if (hasList || itemGuilds.has(id)) pinned.add(id);
   }
@@ -981,7 +981,7 @@ export default {
             const chanIds = Object.keys(rec.channels);
             if (chanIds.length > GUILD_CHANNEL_CAP) {
               const gid = String(loc.guildId);
-              const cfg = watchConfig(rec.name || "", settings.watched);
+              const cfg = watchConfig(rec.name || "", settings.watched, settings.channelTargets);
               const pin = new Set(
                 [
                   ...arr(state.watch?.[gid]?.channelIds),
@@ -1041,7 +1041,8 @@ export default {
             const guild = obj(state.guilds)[guildId];
             const cfg = watchConfig(
               String(extract.guildName || guild?.name || ""),
-              settings.watched
+              settings.watched,
+              settings.channelTargets
             );
             const fresh = parseEventsExtract(extract, {
               now: nowMs,

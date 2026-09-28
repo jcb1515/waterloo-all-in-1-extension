@@ -7,8 +7,7 @@ import { setSettings } from "../core/store.js";
 import { BrandMark } from "../ui/brand.jsx";
 import { WelcomeSection } from "./sections/Welcome.jsx";
 import { GeneralSection } from "./sections/General.jsx";
-import { ProfileSection } from "./sections/Profile.jsx";
-import { SourcesSection } from "./sections/SourcesSection.jsx";
+import { AdvancedSection } from "./sections/Advanced.jsx";
 import { CalendarSection } from "./sections/Calendar.jsx";
 import { RemindersSection } from "./sections/Reminders.jsx";
 import { PrivacySection } from "./sections/Privacy.jsx";
@@ -17,16 +16,20 @@ import { AboutSection } from "./sections/About.jsx";
 const SECTIONS = [
   ["welcome", "Welcome", WelcomeSection],
   ["general", "General", GeneralSection],
-  ["profile", "Profile", ProfileSection],
-  ["sources", "Sources", SourcesSection],
+  ["advanced", "Advanced", AdvancedSection],
   ["calendar", "Calendar", CalendarSection],
   ["reminders", "Reminders", RemindersSection],
   ["privacy", "Privacy & discovery", PrivacySection],
   ["about", "About", AboutSection],
 ];
 
+// Pre-redesign hashes keep working: #profile's sections/groups and the
+// sources setup moved into the side panel; the advanced bits stayed here.
+const LEGACY_HASH = { profile: "general", sources: "advanced" };
+
 function currentSection() {
-  const h = (location.hash || "#general").slice(1);
+  let h = (location.hash || "#general").slice(1);
+  h = LEGACY_HASH[h] || h;
   return SECTIONS.some(([id]) => id === h) ? h : "general";
 }
 

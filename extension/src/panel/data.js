@@ -8,7 +8,7 @@
 */
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { resolveSettings, SETTINGS_KEY, setLocal } from "../core/store.js";
+import { applySettingsPatch, resolveSettings, SETTINGS_KEY, setLocal, setSettings } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
 
@@ -178,6 +178,19 @@ export function useStore() {
       },
       sync(source) {
         return send({ type: UI.SYNC, source });
+      },
+      /**
+       * Merge a settings patch (the panel's own setup controls write through
+       * this). Table keys — sections, groups, urls, watched, channelTargets —
+       * replace wholesale, so callers pass the full map. Preview updates the
+       * in-memory copy so controls react immediately.
+       */
+      saveSettings(patch) {
+        if (IS_PREVIEW) {
+          setState((s) => ({ ...s, settings: applySettingsPatch(s.settings, patch) }));
+          return Promise.resolve(null);
+        }
+        return setSettings(patch).catch(() => null);
       },
       open(url) {
         return send({ type: UI.OPEN, url });
