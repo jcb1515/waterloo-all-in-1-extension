@@ -4,6 +4,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
 import { fmtEstimate } from "../model/itemsheet.js";
+import { attentionSource } from "../model/sources.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../components/ItemRow.jsx";
@@ -75,11 +76,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
   // Error / stale strip: the first *actively synced* source that needs
   // attention. Passive sources (WaterlooWorks) stay silent — they read only
   // while you browse, so a stale/signed-out state is normal, not a nag.
-  const troubled = ADAPTERS.find((a) => {
-    if (stageForAdapter(a.id) !== "live" || !(a.intervalMinutes > 0)) return false;
-    const st = (state.sourceState || {})[a.id];
-    return st && (st.error || st.session === "signed-out");
-  });
+  const troubled = attentionSource(ADAPTERS, state.sourceState, stageForAdapter);
 
   // Calendar feed trouble gets its own strip — it isn't a "source", so the
   // adapter loop above can't see it.
@@ -102,10 +99,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
       {troubled ? (
         <button type="button" class="attention-strip" onClick={onGoSources}>
           <AlertTriangleIcon size={14} />
-          {troubled.label}:{" "}
-          {troubled.session === "signed-out" || (troubled.error && troubled.error.code) === "signed-out"
-            ? "signed out — open the site"
-            : (troubled.error && troubled.error.message) || "sync error"}
+          {troubled.adapter.label}: {troubled.text}
         </button>
       ) : null}
 

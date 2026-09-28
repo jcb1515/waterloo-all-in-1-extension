@@ -1,7 +1,7 @@
 // @ts-check
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sourceStatus } from "../../extension/src/panel/model/sources.js";
+import { sourceStatus, attentionSource } from "../../extension/src/panel/model/sources.js";
 
 const NOW = new Date("2026-09-27T16:00:00.000Z");
 const HOUR = 3600000;
@@ -70,4 +70,84 @@ test("soon stage is muted regardless of state", () => {
   const s = sourceStatus(adapter("email", 0), st(), "soon", NOW);
   assert.equal(s.key, "soon");
   assert.equal(s.detail, undefined);
+});
+
+const live = () => /** @type {"live"|"soon"} */ ("live");
+
+test("attentionSource: signed-out session says 'signed out — open the site'", () => {
+  const learn = adapter("learn", 30);
+  const r = attentionSource(
+    [learn],
+    { learn: st({ session: "signed-out" }) },
+    live,
+  );
+  assert.equal(r && r.adapter, learn);
+  assert.equal(r && r.text, "signed out — open the site");
+});
+
+test("attentionSource: signed-out error code reads as signed out", () => {
+  const outline = adapter("outline", 1440);
+  const r = attentionSource(
+    [outline],
+    { outline: st({ error: { code: "signed-out", message: "SSO redirect" } }) },
+    live,
+  );
+  assert.equal(r && r.text, "signed out — open the site");
+});
+
+test("attentionSource: error with a message shows the message", () => {
+  const learn = adapter("learn", 30);
+  const r = attentionSource(
+    [learn],
+    { learn: st({ error: { code: "http-500", message: "Brightspace 500" } }) },
+    live,
+  );
+  assert.equal(r && r.text, "Brightspace 500");
+});
+
+test("attentionSource: error without a message falls back to 'sync error'", () => {
+  const learn = adapter("learn", 30);
+  const r = attentionSource(
+    [learn],
+    { learn: st({ error: { code: "http-500" } }) },
+    live,
+  );
+  assert.equal(r && r.text, "sync error");
+});
+
+test("attentionSource: passive and non-live adapters never nag", () => {
+  const discord = adapter("discord", 0); // passive
+  const learn = adapter("learn", 30);
+  assert.equal(
+    attentionSource(
+      [discord],
+      { discord: st({ session: "signed-out" }) },
+      live,
+    ),
+    null,
+  );
+  assert.equal(
+    attentionSource(
+      [learn],
+      { learn: st({ session: "signed-out" }) },
+      () => "soon",
+    ),
+    null,
+  );
+});
+
+test("attentionSource: healthy sources give null; first troubled wins", () => {
+  const learn = adapter("learn", 30);
+  const outline = adapter("outline", 1440);
+  assert.equal(attentionSource([learn, outline], {}, live), null);
+  const r = attentionSource(
+    [outline, learn],
+    {
+      outline: st({ error: { message: "first" } }),
+      learn: st({ error: { message: "second" } }),
+    },
+    live,
+  );
+  assert.equal(r && r.adapter.id, "outline");
+  assert.equal(r && r.text, "first");
 });

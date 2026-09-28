@@ -44,6 +44,30 @@ export function sourceStatus(adapter, st, stage, now) {
 }
 
 /**
+ * The Agenda attention strip: the first actively synced live source whose
+ * sourceState shows an error or a signed-out session, plus the text to show.
+ * Passive sources (intervalMinutes 0) stay silent — a signed-out state there
+ * is normal, not a nag.
+ * @param {import("../../core/contract.js").Adapter[]} adapters
+ * @param {Record<string, any>} sourceState
+ * @param {(id: string) => "live"|"soon"} stageFor
+ * @returns {null | {adapter: import("../../core/contract.js").Adapter, st: any, text: string}}
+ */
+export function attentionSource(adapters, sourceState, stageFor) {
+  for (const a of adapters || []) {
+    if (stageFor(a.id) !== "live" || !(a.intervalMinutes > 0)) continue;
+    const st = (sourceState || {})[a.id];
+    if (!st || !(st.error || st.session === "signed-out")) continue;
+    const text =
+      st.session === "signed-out" || (st.error && st.error.code) === "signed-out"
+        ? "signed out — open the site"
+        : (st.error && st.error.message) || "sync error";
+    return { adapter: a, st, text };
+  }
+  return null;
+}
+
+/**
  * Header pill for the whole store: "Needs attention" if any live source that
  * the extension actively syncs (intervalMinutes > 0) is in trouble, otherwise
  * "Synced Xm ago" from the newest lastOkAt. Passive sources — WaterlooWorks
