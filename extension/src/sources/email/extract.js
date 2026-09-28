@@ -10,12 +10,17 @@ import { slug } from "../outline/expand.js";
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
 import { hashString } from "../../capture/redact.js";
 import {
+  APP_RECEIVED_RE,
   BOOK_LINK,
   BOOK_RE,
   cleanSubject,
+  CONFIRM_RE,
   DEADLINE_TYPES,
   EASTERN_TZ,
   employerOf,
+  EVENT_ANY_RE,
+  DEADLINE_CUE_RE,
+  EXPLICIT_DATE_RE,
   GCAL_INVITE_RE,
   isBulk,
   isCoopSender,
@@ -23,10 +28,12 @@ import {
   keywordRe,
   mailType,
   MEET_LINK,
+  NEGATIVE_RE,
   normCardWhen,
   QUOTE_CUT_RE,
   REPLY_RE,
   senderGate,
+  SLOT_RE,
   WHEN_LINE,
   WHERE_LINE,
 } from "./rules.js";
@@ -149,11 +156,19 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   /* ---- 2. important mail -> Review items ---- */
   const kwRe = keywordRe(settings.keywords);
   const gate = senderGate(msg, { courses, settings, applications });
-  // A non-bulk human sender qualifies on its own; bulk mail needs the gate.
-  if (!gate.ok && isBulk(msg)) return [];
+  // A non-bulk human sender qualifies on its own. Ungated bulk passes ONLY
+  // through the narrow exception below (event noun or confirmation phrase
+  // in the same sentence as an explicit calendar date, at most 2 items).
+  const ungatedBulk = !gate.ok && isBulk(msg);
 
   const text = `${subject}\n${body || msg.preview || ""}`;
   const floor = ref.getTime() - DAY_MS;
+  const hitCap = ungatedBulk ? 2 : MAX_HITS;
+  // "Application received" only counts as a confirmation when the message
+  // actually names a dated event or interview.
+  const appReceivedCounts =
+    APP_RECEIVED_RE.test(text) &&
+    /interview|event|workshop|session|fair|expo|summit|orientation|meeting/i.test(text);
   /** @type {{h: any, sentence: string, kw: string}[]} */
   const good = [];
   const days = new Set();
@@ -161,15 +176,35 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     .filter((h) => h.confidence >= 0.6)
     .sort((a, b) => b.confidence - a.confidence);
   for (const h of hits) {
-    if (good.length >= MAX_HITS) break;
+    if (good.length >= hitCap) break;
     if (Date.parse(h.endAt || h.startAt) < floor) continue;
     const sentence = sentenceOf(text, h.index, h.text.length);
-    const kw = keywordOf(sentence, kwRe);
-    if (!kw) continue;
+    const nounM = sentence.match(EVENT_ANY_RE);
+    const cueM = sentence.match(DEADLINE_CUE_RE);
+    const confirm = CONFIRM_RE.test(sentence) || (appReceivedCounts && APP_RECEIVED_RE.test(sentence));
+    // Promo/shipping/billing/security/renewal sentences never produce an
+    // item — unless a real event signal shares the sentence.
+    if (NEGATIVE_RE.test(sentence) && !nounM && !confirm) continue;
+    /** @type {string|undefined} */
+    let kw;
+    if (ungatedBulk) {
+      // Bulk exception: noun, confirmation or deadline cue, and THIS hit
+      // must be an explicit calendar date (no bare weekday or "tomorrow").
+      if (!nounM && !confirm && !cueM) continue;
+      if (!EXPLICIT_DATE_RE.test(h.text)) continue;
+      kw = (nounM && nounM[0]) || (cueM && cueM[0]) || "confirmation";
+    } else {
+      kw =
+        keywordOf(sentence, kwRe) ||
+        (nounM && nounM[0]) ||
+        (cueM && cueM[0]) ||
+        (confirm ? "confirmation" : undefined);
+      if (!kw) continue;
+    }
     const day = torontoDay(h.startAt);
     if (days.has(day)) continue;
     days.add(day);
-    good.push({ h, sentence, kw });
+    good.push({ h, sentence, kw: /** @type {string} */ (kw) });
   }
   if (!good.length) return [];
 
@@ -297,9 +332,11 @@ function askOf(m, { now, termCode, td }) {
 function bookingOf(m) {
   const link = (m.links || []).find((l) => BOOK_LINK.test(l));
   const text = unquoted(`${m.subject || ""}\n${m.body || m.preview || ""}`);
-  const sentence = sentencesOf(text).find((s) => BOOK_RE.test(s));
+  const sentences = sentencesOf(text);
+  const slot = sentences.find((s) => SLOT_RE.test(s));
+  const sentence = slot || sentences.find((s) => BOOK_RE.test(s));
   if (!link && !sentence) return null;
-  return { link, sentence };
+  return { link, sentence, slot: !!slot };
 }
 
 /**
@@ -519,9 +556,12 @@ export function taskItems(prod, frame, prev, opts) {
       const existing = bookings[key];
       if (existing && existing.status === "done") continue; // never reopen
       const dueAt = taskDue(r.m.receivedAt || at);
+      const employer = r.gate.employer || employerOf(r.m.fromEmail, r.m.from);
       const rec = {
         id: `${provider}:book:${key}`,
-        title: `Book a call with ${r.m.from || "the sender"}`,
+        title: trig.slot
+          ? `Select interview time slot${employer ? ` — ${employer}` : ""}`
+          : `Book a call with ${r.m.from || "the sender"}`,
         dueAt,
         url: trig.link || r.m.url,
         senderHash: hashString(String(r.m.fromEmail || "").toLowerCase()),

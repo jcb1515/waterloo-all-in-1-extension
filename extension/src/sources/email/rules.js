@@ -33,6 +33,10 @@ export const BOOK_LINK =
 export const BOOK_RE =
   /schedule a (call|time|meeting|chat)|book a (time|call|slot|meeting)|pick a time|find a time/i;
 
+/** Co-op "pick your interview slot" wording — a book-a-call task. */
+export const SLOT_RE =
+  /\bselect(?:ing)? (?:an?|your|the) (?:interview )?(?:time ?)?slots?\b|\bselect(?:ing)? (?:an?|your|the|a) (?:interview )?time\b|\bchoose (?:an?|your|the|a) (?:time ?slots?|slots?|times?)\b|\bsign ?up for (?:an?|your|the|a) (?:interview|slots?|times?)\b/i;
+
 /** Phrases that mean a reply is owed, plus "?"-sentences addressed to "you". */
 export const REPLY_RE =
   /\b(please (reply|respond|confirm|let me know)|let me know|get back to me|are you (available|free)|what times? works?|when (are|would) you (be )?(free|available)|rsvp)\b/i;
@@ -153,6 +157,93 @@ export const KEYWORDS = [
   "action required",
 ];
 
+/* ---- event vocabulary -------------------------------------------------
+ * Noun groups that turn a dated sentence into an `event` item; the matched
+ * group becomes the item's category. "meeting"/"call"/"interview" stay
+ * their own types (TYPE_RULES order decides). */
+
+/** @type {[string, RegExp][]} */
+export const EVENT_GROUPS = [
+  [
+    "hack",
+    /\bhackathons?\b|\bhack ?nights?\b|\bcode ?jams?\b|\bgame ?jams?\b|\bdatathons?\b|\bideathons?\b|\bmakeathons?\b|\bdesignathons?\b|\bbuildathons?\b/i,
+  ],
+  [
+    "social",
+    /\bnetworking\b|\bmixers?\b|\bmeet ?ups?\b|\bmeet ?and ?greets?\b|\bsocials?\b|\bcoffee chats?\b|\bhappy hours?\b|\breceptions?\b|\bgalas?\b|\bbanquets?\b|\blunch ?and ?learns?\b|\bgame nights?\b|\btrivia\b|\bkaraoke\b|\bmovie nights?\b|\bwatch parties\b|\bpicnics?\b|\bdinners?\b|\blunches?\b|\bbrunch(?:es)?\b|\bbreakfasts?\b/i,
+  ],
+  [
+    "career",
+    /\bcareer fairs?\b|\bjob fairs?\b|\bemployer events?\b|\brecruit(?:ing|ment) events?\b|\binfo(?:rmation)? sessions?\b|\bopen houses?\b|\bcompany visits?\b|\bsite visits?\b|\boffice tours?\b|\brecruitment\b|\bappointments?\b|\bconsultations?\b/i,
+  ],
+  [
+    "learning",
+    /\bworkshops?\b|\bbootcamps?\b|\btraining sessions?\b|\btrainings?\b|\bcertifications?\b|\bseminars?\b|\bwebinars?\b|\bspeaker series\b|\bguest speakers?\b|\btalks?\b|\bpanels?\b|\bfireside chats?\b|\bAMAs?\b|\bQ&As?\b|\blecture series\b|\blectures?\b|\boffice hours\b|\bdrop-?ins?\b/i,
+  ],
+  [
+    "conference",
+    /\bconferences?\b|\bsummits?\b|\bsymposiums?\b|\bsymposia\b|\bexpos?\b|\bforums?\b|\bconventions?\b/i,
+  ],
+  [
+    "competition",
+    /\b(?:case |pitch )?competitions?\b|\bpitch nights?\b|\bdemo days?\b|\bshowcases?\b|\btournaments?\b|\bcontests?\b|\bolympiads?\b/i,
+  ],
+  [
+    "community",
+    /\borientations?\b|\bkick ?offs?\b|\blaunch parties\b|\bwelcome events?\b|\btown halls?\b|\bgeneral meetings?\b|\bannual general meetings?\b|\bAGMs?\b|\bclub meetings?\b|\binfo nights?\b|\bvolunteer shifts?\b|\bvolunteer(?:ing)?\b|\bfundraisers?\b|\bceremonies\b|\bconvocations?\b|\bfestivals?\b|\bauditions?\b|\btry ?outs?\b|\bpractices?\b|\brehearsals?\b|\bshifts?\b|\bbookings?\b|\breservations?\b/i,
+  ],
+];
+
+/** Every event noun in one expression — for the keyword-provenance match. */
+export const EVENT_ANY_RE = new RegExp(
+  EVENT_GROUPS.map(([, re]) => re.source).join("|"),
+  "i",
+);
+
+/**
+ * The event-noun group a sentence names, or undefined.
+ * @param {string} sentence
+ */
+export function eventNounOf(sentence) {
+  const s = String(sentence || "");
+  for (const [group, re] of EVENT_GROUPS) if (re.test(s)) return group;
+  return undefined;
+}
+
+/* ---- confirmations ----------------------------------------------------
+ * Registration/RSVP confirmations: evidence on their own, so a dated
+ * confirmation from a no-reply sender still yields an event. "application
+ * received" is handled separately — it only counts when a dated
+ * event/interview is mentioned in the same message. */
+export const CONFIRM_RE =
+  /\byou(?:'re| are) registered\b|\bregistration confirmed\b|\bthank(?:s| you) for register(?:ing|ation)\b|\byour tickets?\b|\bsee you at\b|\byou(?:'ve| have) RSVP'?d\b|\bRSVP confirmed\b|\bthank(?:s| you) for filling out (?:this|the|our) form\b|\byour spot is confirmed\b/i;
+export const APP_RECEIVED_RE = /\bapplication received\b/i;
+
+/* ---- negatives ----------------------------------------------------------
+ * Sentences that are never date-worthy on their own: promos, shipping,
+ * billing, security codes, social notifications, renewals. A genuine event
+ * noun or confirmation phrase in the same sentence overrides the veto
+ * ("order your ticket for the hackathon on Nov 7" is still an event). */
+export const NEGATIVE_RES = [
+  /\b(?:sale|flash sale|discount|coupons?|promo(?:\s*code)?s?|\d{1,2}\s*%\s*off|deals?|last chance|door-?busters?|clearance)\b/i,
+  /\b(?:offer|price|pricing|deal|subscription)\b[^.!?\n]{0,25}\b(?:ends?|expires?|expiring)\b/i,
+  /\b(?:arriv(?:e|es|ed|ing)|deliver(?:y|ies|ed|ing)|out for delivery|on (?:its|the) way|ships?\b|shipped|shipping|track(?:ing)? (?:your|the|a)|your (?:package|parcel)|packages?|tracking number|order (?:is|has|was) (?:shipped|on its way)|order confirmed)\b/i,
+  /\b(?:payments?(?:\s+due)?|invoices?|billing|bills?|receipts?|statements?|balance|amount due|past due|refunds?|charged?|auto-?pay|declined)\b/i,
+  /\b(?:security codes?|verification codes?|one-?time (?:codes?|passcodes?|passwords?)|passcodes?|password resets?|reset (?:your|the) password|sign-?in (?:codes?|attempts?|alerts?)|new sign-?in|\botp\b|two-?factor|2fa)\b/i,
+  /\b(?:viewed your profile|profile views?|liked your|endorsed you|connection requests?|new followers?|started following|sent you a (?:connection )?request)\b/i,
+  /\b(?:subscriptions?|auto-?renew\w*|renew(?:s|al|als|ed|ing)?\b|membership (?:renewal|has|will|expires)|free trials? (?:ends?|expir|renew))\b/i,
+];
+export const NEGATIVE_RE = new RegExp(NEGATIVE_RES.map((r) => r.source).join("|"), "i");
+
+/**
+ * A date hit's matched text carrying an explicit calendar date — a named
+ * month + day, an ISO date or an M/D/Y — not a bare weekday or relative
+ * word ("Friday", "tomorrow"). Used by the bulk exception.
+ * @param {string} text
+ */
+export const EXPLICIT_DATE_RE =
+  /(?:jan|feb|mar|apr|may|june?|july?|aug|sep(?:t)?|oct|nov|dec)[a-z]*\.?\s*\d|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/i;
+
 const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
 
 /** @param {string[]|string|undefined} extra settings.keywords */
@@ -176,17 +267,34 @@ export function keywordOf(sentence, kwRe) {
   return m ? m[0] : undefined;
 }
 
+/**
+ * Application/registration window cues: "applications close Nov 1",
+ * "RSVP by Friday", "registration deadline", "apply before …". These are
+ * evidence on their own (a dated window needs no keyword), so the same
+ * expressions drive both the deadline type and the evidence gate.
+ */
+export const DEADLINE_CUE_RES = [
+  /\b(?:rsvp|regist(?:er|ration|rations)|sign[- ]?ups?|apply|applications?|submissions?|entries|abstracts?|responses?)\b[^.!?\n]{0,30}\b(?:by|before|deadline|due|clos(?:e|es|ing)|ends?)\b/i,
+  /\b(?:clos(?:e|es|ing)|deadline|due)\b[^.!?\n]{0,25}\b(?:rsvp|regist(?:er|ration)|applications?|submissions?|entries|abstracts?)\b/i,
+];
+export const DEADLINE_CUE_RE = new RegExp(
+  DEADLINE_CUE_RES.map((r) => r.source).join("|"),
+  "i",
+);
+
 /** Item type from the keyword inside the hit's sentence. @type {[RegExp, string, string?][]} */
 export const TYPE_RULES = [
   [/interview|phone screen|\bscreen(ing)?\b|hirevue|onsite/i, "interview"],
   [/offer/i, "offer-deadline"],
   [/rank(ing)?/i, "cycle-date"],
-  [/\b(rsvp|register|registration|sign\s*up|apply)\b[^.!?\n]{0,25}\b(by|before|deadline)\b/i, "deadline"],
+  ...DEADLINE_CUE_RES.map((re) => /** @type {[RegExp, string]} */ ([re, "deadline"])),
   [/online assessment|coding challenge|\bassessment\b/i, "deadline", "assessment"],
   [/\bOA\b/, "deadline", "assessment"], // capital-OA only, case-sensitive
   [/mid-?terms?|exams?/i, "exam"],
+  // Event nouns get their group as the item category — they outrank the
+  // generic meeting rule so "club meeting"/"coffee chat" classify right.
+  ...EVENT_GROUPS.map(([group, re]) => /** @type {[RegExp, string, string]} */ ([re, "event", group])),
   [/\bmeet(ing|ings)?\b|\bcalls?\b|\bphone\b|\bchat\b|coffee|\bsync\b|catch up|zoom|teams meeting|google meet|design reviews?|tapeout|availab|\b(?:re)?schedul/i, "meeting"],
-  [/office hours|info session|workshop/i, "event"],
   [/due|deadlines?|extensions?/i, "deadline"],
 ];
 
@@ -202,7 +310,10 @@ export function mailType(sentence) {
 /** Bulk sender mail: no-reply-style local parts or list-footer boilerplate. */
 export function isBulk(msg) {
   const local = String(msg.fromEmail || "").split("@")[0] || "";
-  if (/^(no-?reply|do-?not-?reply|notifications?|newsletters?)\b/i.test(local)) return true;
+  if (
+    /^(no-?reply|do-?not-?reply|notifications?|newsletters?|alerts?|account|security|support|mailer|daemon|postmaster|bounce|system|service|digest|updates?)\b/i
+      .test(local)
+  ) return true;
   return /unsubscribe|view (it |this (email |message )?)?in (your )?browser|manage (your )?(email |subscription )?preferences/i
     .test(String(msg.body || ""));
 }

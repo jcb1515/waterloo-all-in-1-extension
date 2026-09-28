@@ -162,9 +162,11 @@ function rangeFromDom(doc, view, anchor) {
     }
   }
   if (view === "month") return null; // month headers carry no day numbers
-  const heads = [...doc.querySelectorAll(GCAL.columnHeader)]
-    .map((h) => String(h.textContent || "").trim().match(COLUMN_HEADER_RE))
-    .filter(Boolean);
+  const heads = /** @type {RegExpMatchArray[]} */ (
+    [...doc.querySelectorAll(GCAL.columnHeader)]
+      .map((h) => String(h.textContent || "").trim().match(COLUMN_HEADER_RE))
+      .filter(Boolean)
+  );
   if (!heads.length) return null;
   const start = resolveHeader(/** @type {[string, string]} */ ([heads[0][1], heads[0][2]]), anchor);
   if (!start) return null;
@@ -280,7 +282,7 @@ export function labelOf(el) {
  * (the URL date). No time and no "All day" → null.
  * @param {string} label
  * @param {{now?: Date, fallbackDate?: {y:number,m:number,d:number}}} [opts]
- * @returns {{title: string, startAt: string, endAt?: string, allDay: boolean}|null}
+ * @returns {{title: string, startAt: string, endAt?: string, allDay: boolean, calendar?: string}|null}
  */
 export function parseChipLabel(label, { fallbackDate } = {}) {
   const text = String(label || "").replace(/\s+/g, " ").trim();
@@ -364,7 +366,7 @@ export function parseChipLabel(label, { fallbackDate } = {}) {
   }
 
   if (allDay) {
-    /** @type {{title: string, startAt: string, endAt?: string, allDay: boolean}} */
+    /** @type {{title: string, startAt: string, endAt?: string, allDay: boolean, calendar?: string}} */
     const ev = { title, startAt: zonedIso(y, m, d, 0, 0), allDay: true };
     if (d2) {
       // Range end is the midnight after the last day (exclusive); a

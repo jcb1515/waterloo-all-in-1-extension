@@ -312,12 +312,12 @@ function examWindow(code, terms, courses) {
  * @param {any[]} rows
  * @param {{scope?: string, at?: string, terms?: Record<string, any>,
  *   courses?: Record<string, any>, tstIndex?: Record<string, any[]>}} ctx
- * @returns {{items: Item[], examIndex: Record<string, {day: string, start: string, end: string}[]>}}
+ * @returns {{items: Item[], examIndex: Record<string, {id: string, day: string, start: string, end: string, location?: string, seat?: string, seatInstructions?: string, category?: string}[]>}}
  */
 export function mapExams(rows, { scope, at, terms, courses, tstIndex } = {}) {
   /** @type {Item[]} */
   const items = [];
-  /** @type {Record<string, {day: string, start: string, end: string}[]>} */
+  /** @type {Record<string, {id: string, day: string, start: string, end: string, location?: string, seat?: string, seatInstructions?: string, category?: string}[]>} */
   const examIndex = {};
   // TST items still floating: the matched exam takes the TST item's id, an
   // unmatched one must not collide with it.

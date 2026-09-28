@@ -261,7 +261,13 @@ export function accountEmail(doc) {
     const gm = /\(([^()\s]+@[^()\s]+)\)\s*$/.exec(gl);
     if (gm) return gm[1].toLowerCase();
     for (const el of doc.querySelectorAll(ACCOUNT.outlook)) {
-      const t = String(el.getAttribute("aria-label") || el.textContent || "");
+      const t = String(
+        el.getAttribute("data-folder-name") ||
+          el.getAttribute("title") ||
+          el.getAttribute("aria-label") ||
+          el.textContent ||
+          "",
+      );
       const m = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(t);
       if (m) return m[0].toLowerCase();
     }
