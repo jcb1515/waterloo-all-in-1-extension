@@ -691,6 +691,17 @@ export default {
         readOk.push("dashboard");
         delete state.needsUpdate.dashboard;
       }
+      if (parsed.landing) {
+        // Counts-only landings (Total Submitted / Booked Interviews rows):
+        // no grid, but the page scope was read — report it and satisfy the
+        // expected-section check so a landing never flags needs-update.
+        const kind = obj(parsed.landing).kind;
+        if (kind === "applications" || kind === "interviews") {
+          if (!readOk.includes(kind)) readOk.push(kind);
+          found.add(kind);
+          delete state.needsUpdate[kind];
+        }
+      }
       if (parsed.shortlist) {
         // Observe-only: the shortlist grid is reached by buildForm POSTs the
         // refresh round never sends, so this only fires when the student

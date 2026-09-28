@@ -427,6 +427,33 @@ export function detectPage(doc, opts = {}) {
 // ---------------------------------------------------------------------------
 // table parsers
 
+/**
+ * Counts-only landings carry no grid — a stat-table row names the tally
+ * ("Total Submitted:", "Booked Interviews", "Unscheduled Interviews") — but
+ * the page scope was still read. Returns which landing the page is.
+ * @param {any} doc
+ * @returns {"applications"|"interviews"|undefined}
+ */
+export function landingKind(doc) {
+  /** @type {Set<string>} */
+  const labels = new Set();
+  for (const tr of doc.querySelectorAll("tr")) {
+    const cell = cellElements(tr)[0];
+    if (!cell) continue;
+    labels.add(
+      cleanText(cell).replace(/:\s*$/, "").trim().toLowerCase()
+    );
+  }
+  if (labels.has("total submitted")) return "applications";
+  if (
+    labels.has("booked interviews") ||
+    labels.has("unscheduled interviews")
+  ) {
+    return "interviews";
+  }
+  return undefined;
+}
+
 export function parseApplications(doc) {
   const table = tableOfKind(doc, "applications");
   if (!table) return { ok: false, rows: [] };
@@ -1180,6 +1207,8 @@ export function parseAll(doc, opts = {}) {
   if (isRankings(doc)) out.rankings = parseRankings(doc);
   if (isShortlist(doc) && tableOfKind(doc, "shortlist"))
     out.shortlist = parseShortlist(doc);
+  const landing = landingKind(doc);
+  if (landing) out.landing = { kind: landing };
   const dashboard = parseDashboard(doc);
   if (dashboard.ok) out.dashboard = dashboard;
   return out;

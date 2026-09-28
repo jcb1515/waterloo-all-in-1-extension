@@ -370,6 +370,46 @@ test("shortlist snapshot emits apply deadlines, hides applied + superseded posti
   );
 });
 
+test("counts-only landings report their page scope", async () => {
+  const apps = await adapter.observe.parse(
+    domPayload(
+      "applications-landing.html",
+      "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm"
+    ),
+    makeCtx()
+  );
+  assert.equal(apps.complete, true);
+  assert.ok(apps.readOk.includes("waterlooworks:applications"));
+
+  const iv = await adapter.observe.parse(
+    domPayload(
+      "interviews-landing.html",
+      "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm"
+    ),
+    makeCtx()
+  );
+  assert.equal(iv.complete, true);
+  assert.ok(iv.readOk.includes("waterlooworks:interviews"));
+});
+
+test("a complete snapshot of an empty list still reports the page scope", async () => {
+  const result = await adapter.observe.parse(
+    {
+      source: "waterlooworks",
+      kind: "dom",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm",
+      body: `<html data-wa1-complete="1"><body>${fixture(
+        "applications-empty.html"
+      )}</body></html>`,
+      at: AT,
+    },
+    makeCtx()
+  );
+  assert.equal(result.complete, true);
+  assert.ok(result.readOk.includes("waterlooworks:applications"));
+  assert.deepEqual(result.applications, []);
+});
+
 test("an incomplete snapshot emits no per-page readOk scopes", async () => {
   const result = await adapter.observe.parse(
     {
