@@ -218,6 +218,36 @@ test("already-running sync that never stamps -> failed error at the deadline", a
   assert.equal(run.reason, "error");
 });
 
+test("already-running: a stamp just before our start still counts", async () => {
+  // doSync stamps sourceState mid-run, then stays in-flight through
+  // recomputeAll — the stamp can predate our startedAt by seconds.
+  const deps = fakeDeps({
+    runSync: async () => ({ ok: false, reason: "already-running" }),
+  });
+  deps.data.sourceState.learn = {
+    lastRunAt: new Date(T0 - 4000).toISOString(),
+    session: "signed-in",
+  };
+  startCheck("learn", deps);
+  const run = await settle(deps, "learn");
+  assert.equal(run.status, "ok");
+  assert.equal(deps.calls.stamp.length, 1);
+});
+
+test("already-running: a stamp older than the grace window doesn't count", async () => {
+  const deps = fakeDeps({
+    runSync: async () => ({ ok: false, reason: "already-running" }),
+  });
+  deps.data.sourceState.learn = {
+    lastRunAt: new Date(T0 - 6 * 60 * 1000).toISOString(),
+    session: "signed-in",
+  };
+  startCheck("learn", deps);
+  const run = await settle(deps, "learn");
+  assert.equal(run.status, "failed");
+  assert.equal(run.reason, "error");
+});
+
 test("newItems counts only this source's new ids in the raw record", async () => {
   const deps = fakeDeps({
     runSync: async () => {

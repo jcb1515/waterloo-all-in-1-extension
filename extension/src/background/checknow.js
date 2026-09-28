@@ -169,19 +169,29 @@ async function runCheck(source, run, deps) {
 
 async function runSyncCheck(source, adapterId, run, deps) {
   const res = await deps.runSync(adapterId, "manual");
+  let minLastRun = run.startedAtMs;
   if (res && res.ok === false) {
     if (res.reason === "disabled") return { ok: false, reason: "disabled" };
-    // already-running means a sync is doing the read we asked for — wait
-    // for its fresh sourceState stamp and take the verdict from that.
     if (res.reason !== "already-running") return { ok: false, reason: "error" };
+    // A sync was already doing this read. Its stamp lands near the end of
+    // the run but the run stays in-flight through the post-stamp merge
+    // work — so the stamp can predate our start by a little. Count any
+    // stamp inside a small grace window as that read's verdict.
+    minLastRun = run.startedAtMs - ALREADY_RUNNING_GRACE_MS;
   } else if (!res || !res.ok) {
     return { ok: false, reason: "error" };
   }
   // runSync reports {ok:true} even for a signed-out/no-tab adapter result;
-  // the session it stamps on sourceState is the real verdict. The stamp's
-  // lastRunAt must be from this run (or the concurrent one), not stale.
-  const st = await freshSourceState(adapterId, run, deps);
+  // the session it stamps on sourceState is the real verdict.
+  const st = await recentSourceState(adapterId, run, deps, minLastRun);
   if (!st) return res && res.ok === true ? { ok: true } : { ok: false, reason: "error" };
+  return verdictFromState(st);
+}
+
+/** How far back a stamp can predate our run and still be the in-flight read's. */
+const ALREADY_RUNNING_GRACE_MS = 5 * 60 * 1000;
+
+function verdictFromState(st) {
   if (st.session === "signed-out") return { ok: false, reason: "signed-out" };
   if (st.session === "no-tab") return { ok: false, reason: "not-on-page" };
   if (st.error) return { ok: false, reason: "error" };
@@ -189,17 +199,17 @@ async function runSyncCheck(source, adapterId, run, deps) {
 }
 
 /**
- * sourceState[adapterId] once it carries a stamp from this run
- * (lastRunAt >= startedAt). A finishing sync always writes lastRunAt; the
- * poll stops at the run deadline.
+ * sourceState[adapterId] once it carries a stamp at or after minLastRunMs.
+ * A finishing sync always writes lastRunAt; the poll stops at the run
+ * deadline.
  */
-async function freshSourceState(adapterId, run, deps) {
+async function recentSourceState(adapterId, run, deps, minLastRunMs) {
   while (deps.now() - run.startedAtMs < CHECK_TIMEOUT_MS) {
     try {
       const states = (await deps.store.getLocal("sourceState")) || {};
       const st = states[adapterId];
       const lastRun = st && st.lastRunAt ? Date.parse(st.lastRunAt) : 0;
-      if (st && lastRun >= run.startedAtMs) return st;
+      if (st && lastRun >= minLastRunMs) return st;
     } catch {
       /* keep polling */
     }
