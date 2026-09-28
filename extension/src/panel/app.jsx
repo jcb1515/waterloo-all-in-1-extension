@@ -5,9 +5,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useStore, query, IS_PREVIEW } from "./data.js";
-import { primaryTabs, moreTabs, migrateTabId } from "./model/tabs.js";
+import { primaryTabs, moreTabs, moreSheetRows, migrateTabId } from "./model/tabs.js";
 import { BrandMark } from "../ui/brand.jsx";
-import { SettingsIcon, InboxIcon, BellIcon, BellOffIcon, ArrowLeftIcon, PlusIcon, SearchIcon, ChevronDownIcon } from "../ui/icons.jsx";
+import { SettingsIcon, InboxIcon, BellIcon, BellOffIcon, ArrowLeftIcon, PlusIcon, SearchIcon, ChevronDownIcon, GraduationCapIcon, BriefcaseIcon, UsersIcon, FolderIcon, SparklesIcon } from "../ui/icons.jsx";
 import { pauseEndMs } from "../core/pause.js";
 import { Upcoming } from "./views/Upcoming.jsx";
 import { Todo } from "./views/Todo.jsx";
@@ -52,6 +52,14 @@ function unreadCount(updates, seenAt) {
   return n;
 }
 
+/** More-sheet icon keys (panel/model/tabs.js) -> components. */
+const MORE_ICONS = {
+  courses: GraduationCapIcon,
+  coop: BriefcaseIcon,
+  teams: UsersIcon,
+  projects: FolderIcon,
+};
+
 export function App() {
   const state = useStore();
   const tabs = useMemo(() => primaryTabs(state.settings), [state.settings]);
@@ -63,7 +71,10 @@ export function App() {
     return query.get("view") === "sources" ? "sources" : "upcoming";
   });
   const [moreOpen, setMoreOpen] = useState(() => query.get("more") === "1");
+  const [sheetTop, setSheetTop] = useState(0);
   const tabsNav = useRef(/** @type {any} */ (null));
+  const moreBtnRef = useRef(/** @type {any} */ (null));
+  const sheetRef = useRef(/** @type {any} */ (null));
   const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [qaEditId, setQaEditId] = useState(() => null);
   const [qaPreset, setQaPreset] = useState(/** @type {{type?: string, date?: string} | null} */ (null));
@@ -75,6 +86,11 @@ export function App() {
     return v && OVERLAY_TITLES[v] ? v : null;
   });
   const [now, setNow] = useState(() => new Date());
+  const moreRows = useMemo(
+    () => moreSheetRows(state.settings, state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, now]
+  );
   const [toast, setToast] = useState(/** @type {{text: string, action?: {label: string, run: () => void}} | null} */ (null));
   const toastTimer = useRef(/** @type {any} */ (null));
 
@@ -158,13 +174,74 @@ export function App() {
     }
   }, [tabs, more, tab]);
 
-  // Close the More dropdown on any outside click.
+  // Close the More sheet on any outside click.
   useEffect(() => {
     if (!moreOpen) return;
     const close = () => setMoreOpen(false);
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [moreOpen]);
+
+  /** Close the sheet; refocus the More button unless the user clicked away. */
+  const closeMore = (refocus = true) => {
+    setMoreOpen(false);
+    if (refocus && moreBtnRef.current) moreBtnRef.current.focus();
+  };
+
+  const selectMore = (id) => {
+    setMoreOpen(false);
+    setTab(id);
+    if (moreBtnRef.current) moreBtnRef.current.focus();
+  };
+
+  // On open: pin the layer to the strip's bottom edge and focus the current
+  // row (or the first). On close the More button gets focus back.
+  useEffect(() => {
+    if (!moreOpen) return;
+    if (tabsNav.current) {
+      setSheetTop(Math.round(tabsNav.current.getBoundingClientRect().bottom));
+    }
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    const row =
+      sheet.querySelector('[role="menuitemradio"][aria-checked="true"]') ||
+      sheet.querySelector('[role="menuitemradio"]');
+    if (row) row.focus();
+  }, [moreOpen]);
+
+  /** Roving focus inside the sheet; Escape stops before the global handler. */
+  const onSheetKey = (e) => {
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    const rows = [...sheet.querySelectorAll('[role="menuitemradio"]')];
+    if (!rows.length) return;
+    const i = rows.indexOf(document.activeElement);
+    const move = (j) => {
+      e.preventDefault();
+      const el = rows[Math.max(0, Math.min(rows.length - 1, j))];
+      if (el) el.focus();
+    };
+    switch (e.key) {
+      case "Escape":
+        e.stopPropagation();
+        closeMore();
+        break;
+      case "ArrowDown":
+        move(i < 0 ? 0 : i + 1);
+        break;
+      case "ArrowUp":
+        move(i < 0 ? rows.length - 1 : i - 1);
+        break;
+      case "Home":
+        move(0);
+        break;
+      case "End":
+        move(rows.length - 1);
+        break;
+      default:
+        break;
+    }
+  };
 
   // Keep the active tab in view when the strip scrolls horizontally.
   useEffect(() => {
@@ -316,6 +393,7 @@ export function App() {
             {more.length ? (
               <div class="more-wrap">
                 <button
+                  ref={moreBtnRef}
                   type="button"
                   role="tab"
                   aria-selected={more.some((t) => t.id === tab)}
@@ -327,31 +405,56 @@ export function App() {
                     setMoreOpen(!moreOpen);
                   }}
                 >
-                  {(more.find((t) => t.id === tab) || {}).label || "More"} <ChevronDownIcon size={12} />
+                  <span class="more-label">
+                    {(more.find((t) => t.id === tab) || {}).label || "More"}
+                  </span>
+                  <ChevronDownIcon size={12} />
                 </button>
-                {moreOpen ? (
-                  <div class="more-menu" role="menu">
-                    {more.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        role="menuitem"
-                        aria-selected={tab === t.id}
-                        onClick={() => {
-                          setMoreOpen(false);
-                          setTab(t.id);
-                        }}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             ) : null}
           </div>
         </nav>
       )}
+
+      {moreOpen && !overlay ? (
+        <div class="more-layer" style={{ top: sheetTop }}>
+          <div
+            class="more-sheet"
+            role="menu"
+            aria-label="More views"
+            ref={sheetRef}
+            onKeyDown={onSheetKey}
+          >
+            {moreRows.map((r) => {
+              const Icon = MORE_ICONS[r.icon] || SparklesIcon;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={tab === r.id}
+                  class={`more-row${tab === r.id ? " active" : ""}`}
+                  onClick={() => selectMore(r.id)}
+                >
+                  <Icon size={20} />
+                  <span class="more-row-text">
+                    <span class="more-row-label">{r.label}</span>
+                    <span class="more-row-desc">{r.description}</span>
+                  </span>
+                  {r.count ? <span class="count-badge more-row-count">{r.count}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            class="more-scrim"
+            aria-label="Close views"
+            tabIndex={-1}
+            onClick={() => closeMore(false)}
+          />
+        </div>
+      ) : null}
 
       <main class="panel-body" role="tabpanel">
         {!overlay && state.lastAudit && state.lastAudit.errors > 0 ? (
