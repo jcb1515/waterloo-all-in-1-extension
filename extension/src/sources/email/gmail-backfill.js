@@ -226,6 +226,12 @@ export const gmailBackfill = {
       for (const tr of rows) {
         if (i >= messages.length) break;
         if (/\bzE\b/.test(String(tr.className || ""))) unread.add(i);
+        // The thread's last-message id is the body-read signature: a new
+        // reply bumps it, so a stale signature means refetch the body.
+        const sig =
+          tr.getAttribute("data-legacy-last-message-id") ||
+          tr.getAttribute("data-legacy-thread-id");
+        if (sig) messages[i].sig = sig;
         i++;
       }
       messages.forEach((m, i) => {

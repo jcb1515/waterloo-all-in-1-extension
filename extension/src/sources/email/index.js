@@ -194,6 +194,29 @@ const adapter = {
         if (ks.length > 2000) for (const k of ks.slice(0, ks.length - 2000)) delete merged[k];
         threadMap = merged;
       }
+      // Body-read signatures: the thread/message revision each fetched
+      // body was read at — the content script's next run skips a body
+      // fetch while this matches (Gmail last-message-id, Outlook message
+      // Id). Newest 2000 per provider, same cap shape as threadMap.
+      let bodyRead = prev.bodyRead;
+      if (isBackfill) {
+        const cur = (((prev.bodyRead || {})[provider]) || {});
+        /** @type {Record<string, string>} */
+        const next = { ...cur };
+        let touched = false;
+        for (const m of msgs) {
+          if (m && m.bodyFetched && m.sig) {
+            next[String(m.key)] = String(m.sig);
+            touched = true;
+          }
+        }
+        if (touched) {
+          const ks = Object.keys(next);
+          if (ks.length > 2000) for (const k of ks.slice(0, ks.length - 2000)) delete next[k];
+          bodyRead = { ...(prev.bodyRead || {}), [provider]: next };
+        }
+      }
+
       /** @type {any} */
       let checkState = prev.check;
       const chk = isBackfill ? data.check : null;
@@ -229,6 +252,7 @@ const adapter = {
         ...(Object.keys(tasks.replies).length ? { replies: tasks.replies } : {}),
         ...(Object.keys(tasks.bookings).length ? { bookings: tasks.bookings } : {}),
         ...(threadMap ? { threadMap } : {}),
+        ...(bodyRead ? { bodyRead } : {}),
         ...(checkState ? { check: checkState } : {}),
       };
       // Dead state from the retired guided scan and the v:2 lookback

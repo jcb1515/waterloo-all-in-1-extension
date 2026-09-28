@@ -104,31 +104,42 @@ test("checkNowDecision: not-on-page, signed-out, disabled", () => {
 });
 
 test("doneFromResult: ok/signed-out/disabled/timeout/error", () => {
-  assert.deepEqual(doneFromResult({ listed: 12 }), { ok: true, checked: 12 });
+  assert.deepEqual(doneFromResult({ listed: 12 }), { ok: true, checked: 12, sent: 0 });
+  assert.deepEqual(doneFromResult({ listed: 12, sentListed: 3, partial: true }), {
+    ok: true,
+    checked: 12,
+    sent: 3,
+    partial: true,
+  });
   assert.deepEqual(doneFromResult({ skipped: "no-token" }), {
     ok: false,
     reason: "signed-out",
     checked: 0,
+    sent: 0,
   });
   assert.deepEqual(doneFromResult({ skipped: "off" }), {
     ok: false,
     reason: "disabled",
     checked: 0,
+    sent: 0,
   });
   assert.deepEqual(doneFromResult({ skipped: "not-on-page" }), {
     ok: false,
     reason: "not-on-page",
     checked: 0,
+    sent: 0,
   });
   assert.deepEqual(doneFromResult({ stale: true, listed: 4 }), {
     ok: false,
     reason: "timeout",
     checked: 4,
+    sent: 0,
   });
   assert.deepEqual(doneFromResult({ error: "http", listed: 9 }), {
     ok: false,
     reason: "error",
     checked: 9,
+    sent: 0,
   });
 });
 
@@ -325,6 +336,29 @@ test("gmail: a frozen tab drops the round mid-flight", async (t) => {
   assert.ok(r.stale || r.error || r.sent >= 0); // no crash, nothing else required
 });
 
+test("gmail: an unchanged body-read signature skips the fetch", async (t) => {
+  before(t);
+  const { env, fetches } = gmailEnv();
+  // As if a previous run already read both gated bodies at these
+  // revisions — the row's data-legacy-last-message-id is the signature.
+  env.getBodyRead = async () => ({
+    "17fb2c3d4e5f6a7b": "17fb2c3d4e5f6a99",
+    "18fa1a2b3c4d5e6f": "18fa1a2b3c4d5e6f",
+  });
+  const r = await backfillRound({ ...env, force: true }, gmailBackfill);
+  assert.equal(r.bodies, 0);
+  assert.equal(fetches.length, 0);
+  // A new reply bumps the last-message id → only that thread refetches.
+  env.getBodyRead = async () => ({
+    "17fb2c3d4e5f6a7b": "17fb2c3d4e5f0000",
+    "18fa1a2b3c4d5e6f": "18fa1a2b3c4d5e6f",
+  });
+  const r2 = await backfillRound({ ...env, force: true }, gmailBackfill);
+  assert.equal(r2.bodies, 1);
+  assert.equal(fetches.length, 1);
+  assert.match(fetches[0].url, /th=17fb2c3d4e5f6a7b/);
+});
+
 /* -------------------------- outlook fake env --------------------------- */
 
 const TOKEN = "header.payload.signature";
@@ -516,6 +550,62 @@ test("outlook: sent opt-in adds a sentitems pass that marks no items", async (t)
   assert.ok(folders.includes("sent"));
 });
 
+test("outlook: checked counts inbox only; the sent pass reports sent", async (t) => {
+  before(t);
+  const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
+  const { env, messages } = outlookEnv({
+    settings: { folders: ["inbox", "sent"], outlookCount: 50 },
+    pages: [
+      { value: [rest.value[0], rest.value[1]] }, // inbox: 2 rows, no nextLink
+      { value: [{ ...rest.value[0], Id: "S1", ConversationId: "conv-sent-1" }] },
+    ],
+  });
+  const r = await backfillRound({ ...env, force: true }, outlookBackfill);
+  assert.equal(r.listed, 2);
+  assert.equal(r.sentListed, 1);
+  const done = doneFromResult(r);
+  assert.equal(done.checked, 2);
+  assert.equal(done.sent, 1);
+  // The final marker's checked is inbox-only too.
+  assert.equal(payloadsOf(messages).at(-1).check.checked, 2);
+});
+
+test("outlook: a forced run stops new body fetches at the 60 s budget", async (t) => {
+  before(t);
+  const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
+  const gated = (i) => ({
+    ...rest.value[0],
+    Id: `B-${i}`,
+    ConversationId: `conv-b-${i}`,
+  });
+  let clock = NOW_MS;
+  const { env } = outlookEnv({
+    settings: { outlookCount: 50 },
+    pages: [{ value: [gated(1), gated(2), gated(3)] }],
+  });
+  env.wallNow = () => clock;
+  const rawFetch = env.fetchImpl;
+  env.fetchImpl = async (/** @type {string} */ url, /** @type {any} */ init) => {
+    const res = await rawFetch(url, init);
+    if (/me\/messages\//.test(url)) clock += 40000; // each body costs 40 s of wall time
+    return res;
+  };
+  // Forced: bodies at t+0 and t+40 fetch; the third (t+80 >= t+60) is cut.
+  const r = await backfillRound({ ...env, force: true }, outlookBackfill);
+  assert.equal(r.partial, true);
+  assert.equal(r.bodies, 2);
+  assert.equal(r.listed, 3);
+  const done = doneFromResult(r);
+  assert.equal(done.ok, true);
+  assert.equal(done.partial, true);
+  assert.equal(done.checked, 3);
+  // Automatic runs have no budget — the same page fetches all three.
+  clock = NOW_MS;
+  const auto = await backfillRound(env, outlookBackfill);
+  assert.equal(auto.partial, undefined);
+  assert.equal(auto.bodies, 3);
+});
+
 test("outlook: reads the newest N — outlookCount 50/100/200", async (t) => {
   before(t);
   const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
@@ -684,6 +774,43 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
   assert.ok(!res.state.backfill);
   assert.ok(res.items.length >= 1);
   assert.equal(res.items[0].source, "gmail");
+});
+
+test("adapter: bodyRead records the signature of each fetched body", async () => {
+  const mk = (sig) =>
+    adapter.observe.parse(
+      payload("gmail", {
+        v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+        messages: [
+          {
+            key: "k1", subject: "a", sig, bodyFetched: true,
+            receivedAt: "2026-09-29T18:00:00.000Z", links: [],
+          },
+          { key: "k2", subject: "b", receivedAt: "2026-09-29T18:00:00.000Z", links: [] },
+          // Fetched but unsigned — nothing to record.
+          { key: "k3", subject: "c", bodyFetched: true, receivedAt: "2026-09-29T18:00:00.000Z", links: [] },
+        ],
+        check: { runId: "g2", since: NOW.toISOString(), batch: 0, final: true, checked: 3, ok: true },
+      }),
+      ctx({}),
+    );
+  const res = await mk("rev1");
+  assert.deepEqual(res.state.bodyRead.gmail, { k1: "rev1" });
+  // A bumped signature replaces the entry on the next batch.
+  const res2 = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [
+        {
+          key: "k1", subject: "a", sig: "rev2", bodyFetched: true,
+          receivedAt: "2026-09-29T18:00:00.000Z", links: [],
+        },
+      ],
+      check: { runId: "g3", since: NOW.toISOString(), batch: 0, final: true, checked: 1, ok: true },
+    }),
+    ctx({}, { state: res.state }),
+  );
+  assert.deepEqual(res2.state.bodyRead.gmail, { k1: "rev2" });
 });
 
 test("adapter: a non-final batch marks check.running; final clears it", async () => {
