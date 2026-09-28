@@ -49,8 +49,9 @@ export function Agenda({ state, actions, now, onGoSources }) {
         filter,
         org,
         q,
+        projects: state.projects,
       }),
-    [state.items, state.userState, state.settings, filter, org, q]
+    [state.items, state.userState, state.settings, state.projects, filter, org, q]
   );
 
   if (!state.ready) {

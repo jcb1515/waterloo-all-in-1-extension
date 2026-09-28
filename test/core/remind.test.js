@@ -214,3 +214,17 @@ test("reminderCopy: org · title, due-in lead, time, location", () => {
   assert.match(c2.message, /Starts in/);
   assert.match(c2.message, /Video call/);
 });
+
+test("items of archived projects get no reminders", () => {
+  const items = {
+    a: item("a", { dueAt: "2026-10-05T03:59:00Z", meta: { projectId: "p1" } }),
+    b: item("b", { dueAt: "2026-10-05T03:59:00Z", meta: { projectId: "p2" } }),
+    c: item("c", { dueAt: "2026-10-05T03:59:00Z" }),
+  };
+  const projects = [
+    { id: "p1", status: "archived" },
+    { id: "p2", status: "active" },
+  ];
+  const r = nextReminders(items, {}, SETTINGS(), NOW, {}, {}, projects);
+  assert.deepEqual([...new Set(r.map((x) => x.itemId))].sort(), ["b", "c"]);
+});

@@ -8,6 +8,7 @@
 import { zonedParts, zonedIso, weekdayOf } from "../../lib/textdates/index.js";
 import { effectiveItem, isVisible } from "../../core/effective.js";
 import { findClashes } from "../../core/clashes.js";
+import { archivedProjectItem } from "../../core/projects.js";
 
 const TZ = "America/Toronto";
 const MIN = 60000;
@@ -136,7 +137,7 @@ function layoutColumns(evs) {
  * @param {any} settings
  * @param {number} weekStartMs  a Toronto-midnight Monday (see weekStartOf)
  * @param {Date} now
- * @param {{showClasses?: boolean}} [opts]
+ * @param {{showClasses?: boolean, projects?: any[]}} [opts]
  */
 export function weekModel(items, userState, settings, weekStartMs, now, opts = {}) {
   const acceptPending = !!(settings && settings.review && settings.review.showPending);
@@ -144,9 +145,17 @@ export function weekModel(items, userState, settings, weekStartMs, now, opts = {
   const starts = weekDayStarts(weekStartMs);
   const nowMs = now.getTime();
 
+  // Archived projects hide their items everywhere, clashes included.
+  const projects = Array.isArray(opts.projects) ? opts.projects : [];
+  const listed = projects.length
+    ? Object.fromEntries(
+        Object.entries(items || {}).filter(([, it]) => it && !archivedProjectItem(it, projects))
+      )
+    : items || {};
+
   const clashIds = new Set();
   let maxSeverity = new Map();
-  for (const c of findClashes(items, userState, now, { horizonDays: 14, acceptPending })) {
+  for (const c of findClashes(listed, userState, now, { horizonDays: 14, acceptPending })) {
     if (c.kind !== "overlap") continue;
     for (const id of c.itemIds) {
       clashIds.add(id);
@@ -172,7 +181,7 @@ export function weekModel(items, userState, settings, weekStartMs, now, opts = {
     return isVisible(eff, nowMs);
   };
 
-  for (const raw of Object.values(items || {})) {
+  for (const raw of Object.values(listed)) {
     if (!raw || !raw.id) continue;
     const eff = effectiveItem(raw, (userState || {})[raw.id], { acceptPending });
     if (!accept(eff)) continue;
@@ -244,8 +253,9 @@ export function weekModel(items, userState, settings, weekStartMs, now, opts = {
  * @param {any} settings
  * @param {Date|number} anchor   any day inside the month to show
  * @param {Date} now
+ * @param {any[]} [projects]      project items of archived projects are hidden
  */
-export function monthModel(items, userState, settings, anchor, now) {
+export function monthModel(items, userState, settings, anchor, now, projects = []) {
   const acceptPending = !!(settings && settings.review && settings.review.showPending);
   const pa = zonedParts(new Date(anchor), TZ);
   const firstMs = Date.parse(zonedIso(pa.y, pa.m, 1, 0, 0, TZ));
@@ -276,6 +286,7 @@ export function monthModel(items, userState, settings, anchor, now) {
 
   for (const raw of Object.values(items || {})) {
     if (!raw || !raw.id) continue;
+    if (archivedProjectItem(raw, projects)) continue;
     const eff = effectiveItem(raw, (userState || {})[raw.id], { acceptPending });
     if (!eff || eff.status === "cancelled" || !isVisible(eff, now)) continue;
     const a = eff.dueAt || eff.startAt;

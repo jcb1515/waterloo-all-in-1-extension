@@ -13,7 +13,7 @@ import {
   sourceLabel,
 } from "../model/itemsheet.js";
 import { Checklist } from "../components/Checklist.jsx";
-import { TYPE_LABELS } from "../components/ItemRow.jsx";
+import { typeLabelFor } from "../components/ItemRow.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import {
   typeIcon,
@@ -135,7 +135,7 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
         </div>
         <dl class="sheet-facts tabular">
           <dt>Type</dt>
-          <dd>{TYPE_LABELS[item.type] || item.type}</dd>
+          <dd>{typeLabelFor(item)}</dd>
           {whenLabel(item) ? (
             <>
               <dt>When</dt>

@@ -174,3 +174,29 @@ test("shortLabel splits course orgs and first-words everything else", () => {
     "falls back to the title's first word"
   );
 });
+
+test("archived projects hide their items from week and month; done projects stay", () => {
+  const projects = [
+    { id: "proj_a", name: "Old", status: "archived" },
+    { id: "proj_b", name: "Done", status: "done" },
+    { id: "proj_c", name: "Live", status: "active" },
+  ];
+  const items = {
+    arch: due("arch", 6, 5, { meta: { projectId: "proj_a" }, org: "Old" }),
+    dproj: due("dproj", 6, 5, { meta: { projectId: "proj_b" }, org: "Done" }),
+    live: due("live", 6, 5, { meta: { projectId: "proj_c" }, org: "Live" }),
+    plain: due("plain", 6, 5),
+  };
+  const wk = weekModel(items, {}, {}, WEEK, NOW, { projects });
+  assert.deepEqual(
+    wk.days[1].due.map((d) => d.id).sort(),
+    ["dproj", "live", "plain"]
+  );
+
+  const mo = monthModel(items, {}, {}, new Date("2026-10-10T12:00:00Z"), NOW, projects);
+  const cell = mo.cells.find((c) => c.date === "2026-10-06");
+  assert.deepEqual(
+    cell.items.map((i) => i.id).sort(),
+    ["dproj", "live", "plain"]
+  );
+});

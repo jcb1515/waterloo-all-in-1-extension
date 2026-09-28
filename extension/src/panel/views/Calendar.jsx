@@ -32,8 +32,12 @@ const hourLabel = (h) => (h === 12 ? "12 PM" : h < 12 ? `${h}` : `${h - 12} PM`)
 /** The Week grid. */
 function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
   const model = useMemo(
-    () => weekModel(state.items, state.userState, state.settings, cursor, now, { showClasses }),
-    [state.items, state.userState, state.settings, cursor, now, showClasses]
+    () =>
+      weekModel(state.items, state.userState, state.settings, cursor, now, {
+        showClasses,
+        projects: state.projects,
+      }),
+    [state.items, state.userState, state.settings, state.projects, cursor, now, showClasses]
   );
   const { startHour, endHour, minutes } = model.range;
   const gridH = minutes * PX_PER_MIN;
@@ -174,8 +178,8 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
 /** The Month grid + selected-day rows. */
 function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
   const model = useMemo(
-    () => monthModel(state.items, state.userState, state.settings, cursor, now),
-    [state.items, state.userState, state.settings, cursor, now]
+    () => monthModel(state.items, state.userState, state.settings, cursor, now, state.projects),
+    [state.items, state.userState, state.settings, state.projects, cursor, now]
   );
   const [showClassCounts, setShowClassCounts] = useState(false);
   const sel = selDay ? model.cells.find((c) => c.date === selDay) : null;

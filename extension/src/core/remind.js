@@ -16,6 +16,7 @@ import {
   getMergedView,
 } from "./store.js";
 import { runSync, setUserState } from "./scheduler.js";
+import { archivedProjectItem } from "./projects.js";
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -54,7 +55,7 @@ function anchorOf(eff) {
  * reminder, not a skipped one.
  * @returns {{key: string, itemId: string, fireAt: number, lead: number}[]}
  */
-export function nextReminders(items, userState = {}, settings = {}, now = new Date(), sent = {}, snoozed = {}) {
+export function nextReminders(items, userState = {}, settings = {}, now = new Date(), sent = {}, snoozed = {}, projects = []) {
   const rem = (settings && settings.reminders) || {};
   if (rem.enabled === false) return [];
   const leads = rem.leads || {};
@@ -65,6 +66,7 @@ export function nextReminders(items, userState = {}, settings = {}, now = new Da
   const out = [];
   for (const raw of Object.values(items || {})) {
     if (!raw || !raw.id) continue;
+    if (archivedProjectItem(raw, projects)) continue;
     const eff = effectiveItem(raw, userState[raw.id], { acceptPending });
     if (!isVisible(eff, nowMs)) continue;
     if (eff.status !== "open") continue;
@@ -360,7 +362,8 @@ export async function rescheduleReminders(deps = {}) {
     settings,
     now,
     sent,
-    snoozed
+    snoozed,
+    mv.projects
   );
   const next = pending.find((r) => r.fireAt > now.getTime() - STALE_MS);
   alarm(REMIND_ALARM, next ? next.fireAt : null);
@@ -437,7 +440,7 @@ export async function fireDueReminders() {
   let mv = await getMergedView();
   let { sent, snoozed } = await reminderStore();
   const allItems = () => ({ ...mv.items, ...(mv.todos || {}) });
-  let pending = nextReminders(allItems(), mv.userState, settings, now, sent, snoozed);
+  let pending = nextReminders(allItems(), mv.userState, settings, now, sent, snoozed, mv.projects);
   let due = dueNow(pending, now.getTime());
   if (!due.length) {
     await rescheduleReminders();
@@ -458,7 +461,7 @@ export async function fireDueReminders() {
       ]);
       mv = await getMergedView();
       ({ sent, snoozed } = await reminderStore());
-      pending = nextReminders(allItems(), mv.userState, settings, new Date(), sent, snoozed);
+      pending = nextReminders(allItems(), mv.userState, settings, new Date(), sent, snoozed, mv.projects);
       due = dueNow(pending, Date.now());
     } catch {
       /* recheck is best-effort; fire on last-known state */

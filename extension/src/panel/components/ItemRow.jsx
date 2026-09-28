@@ -26,11 +26,25 @@ export const TYPE_LABELS = {
 const NO_CHECK = new Set(["class", "tutorial", "exam", "term-date"]);
 
 /**
+ * The meta-line type label: project deadlines read "Milestone" and the
+ * synced "<name> due" item reads "Project due"; everything else uses
+ * TYPE_LABELS.
+ * @param {any} item
+ */
+export function typeLabelFor(item) {
+  if (item && item.meta && item.meta.projectId) {
+    if (item.meta.projectDue) return "Project due";
+    if (item.type === "deadline") return "Milestone";
+  }
+  return TYPE_LABELS[(item && item.type)] || (item && item.type);
+}
+
+/**
  * @param {{item: any, now: Date, actions: any, done?: boolean,
  *   clashes?: any[], items?: Record<string, any>, priority?: string,
- *   projects?: any[]}} props
+ *   projects?: any[], hideOrg?: boolean}} props
  */
-export function ItemRow({ item, now, actions, done, clashes, items, priority, projects }) {
+export function ItemRow({ item, now, actions, done, clashes, items, priority, projects, hideOrg }) {
   const v = rowView(item, now);
   const style = orgStyle(item.org, projects) || {};
   const Icon = typeIcon(item.type);
@@ -92,8 +106,8 @@ export function ItemRow({ item, now, actions, done, clashes, items, priority, pr
           {item.title}
         </span>
         <span class="item-meta">
-          {item.org ? <span class="chip chip-org">{item.org}</span> : null}
-          <span class="item-type">{TYPE_LABELS[item.type] || item.type}</span>
+          {item.org && !hideOrg ? <span class="chip chip-org">{item.org}</span> : null}
+          <span class="item-type">{typeLabelFor(item)}</span>
           {item.location ? (
             <span class="item-loc">
               <MapPinIcon size={11} /> {item.location}

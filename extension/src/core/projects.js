@@ -168,6 +168,18 @@ export function deleteProjectFold(projects, items, id) {
   };
 }
 
+/** The project record an item belongs to, or null. @param {any} item @param {any[]|null|undefined} projects */
+export function itemProject(item, projects) {
+  const id = item && item.meta && item.meta.projectId;
+  return id ? projectById(projects, id) : null;
+}
+
+/** True when the item's project is archived — hidden from agenda, calendar and reminders. */
+export function archivedProjectItem(item, projects) {
+  const p = itemProject(item, projects);
+  return !!(p && p.status === "archived");
+}
+
 /**
  * The items belonging to a project, from a merged items map or a raw list.
  * @param {Record<string, any> | any[]} items @param {string} projectId

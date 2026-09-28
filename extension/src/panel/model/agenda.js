@@ -11,6 +11,7 @@ import { effectiveItem, isVisible } from "../../core/effective.js";
 import { findClashes } from "../../core/clashes.js";
 import { priorityOf } from "../../core/priority.js";
 import { estimateSumMin } from "./itemsheet.js";
+import { archivedProjectItem } from "../../core/projects.js";
 
 const MIN = 60000;
 const HOUR = 3600000;
@@ -182,10 +183,11 @@ export function rowView(item, now) {
  * @param {string} [p.filter]                 "all"|deadlines|classes|exams|meetings|coop
  * @param {string|null} [p.org]               restrict to one org (normalised compare)
  * @param {string} [p.q]                      free-text match on title/org/location
+ * @param {any[]} [p.projects]               project items of archived projects are hidden
  * @returns {{summary: any, nextClass: any, nextUp: any[], clashes: any[],
  *   clashById: Map<string, any[]>, groups: any[]}}
  */
-export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, q = "" }) {
+export function buildAgenda({ items = {}, userState = {}, settings = {}, now, filter = "all", org = null, q = "", projects = [] }) {
   const today = startOfDay(now);
   const tomorrow = new Date(today.getTime() + DAY);
   const dayAfter = new Date(today.getTime() + 2 * DAY);
@@ -200,8 +202,16 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   const normOrg = org ? normCourseCode(org) : null;
   const needle = q.trim().toLowerCase();
 
+  // Archived projects hide their items everywhere, clashes included.
+  const listed =
+    Array.isArray(projects) && projects.length
+      ? Object.fromEntries(
+          Object.entries(items).filter(([, it]) => it && !archivedProjectItem(it, projects))
+        )
+      : items;
+
   // Clashes are computed over effective items once, for badges + summary.
-  const clashes = findClashes(items, userState, now, { horizonDays: 7, acceptPending });
+  const clashes = findClashes(listed, userState, now, { horizonDays: 7, acceptPending });
   /** @type {Map<string, any[]>} */
   const clashById = new Map();
   for (const c of clashes) {
@@ -232,7 +242,7 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
   /** Top open items by anchor for the "Next up" line. */
   const nextUp = [];
 
-  const sorted = Object.values(items)
+  const sorted = Object.values(listed)
     .map((it) => (it ? effectiveItem(it, userState[it.id], { acceptPending }) : it))
     .filter((it) => it && anchor(it))
     .sort((a, b) => Date.parse(anchor(a)) - Date.parse(anchor(b)));

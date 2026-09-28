@@ -12,7 +12,10 @@ import {
   upsertProjectFold,
   deleteProjectFold,
   projectProgress,
+  itemProject,
+  archivedProjectItem,
 } from "../../extension/src/core/projects.js";
+import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
 
 const DAY = 86400000;
 const NOW = new Date("2026-01-19T16:00:00.000Z");
@@ -138,4 +141,30 @@ test("newProjectId is unique and prefixed", () => {
   const a = newProjectId();
   assert.match(a, /^proj_/);
   assert.notEqual(a, newProjectId());
+});
+
+test("archivedProjectItem: archived hides, active/done and non-project items do not", () => {
+  const projects = [
+    proj({ id: "p1", status: "archived" }),
+    proj({ id: "p2", status: "done" }),
+  ];
+  assert.equal(archivedProjectItem(pitem("x", { meta: { projectId: "p1" } }), projects), true);
+  assert.equal(archivedProjectItem(pitem("x", { meta: { projectId: "p2" } }), projects), false);
+  assert.equal(archivedProjectItem(pitem("x"), projects), false);
+  assert.equal(itemProject(pitem("x", { meta: { projectId: "p1" } }), projects).status, "archived");
+});
+
+test("buildAgenda hides archived-project items; done-project items stay", () => {
+  const projects = [
+    proj({ id: "p1", status: "archived" }),
+    proj({ id: "p2", status: "done" }),
+  ];
+  const items = {
+    a: pitem("a", { dueAt: iso(t0 + 2 * 3600000), meta: { projectId: "p1" } }),
+    b: pitem("b", { dueAt: iso(t0 + 2 * 3600000), meta: { projectId: "p2" } }),
+    c: pitem("c", { dueAt: iso(t0 + 2 * 3600000) }),
+  };
+  const ag = buildAgenda({ items, now: NOW, projects });
+  const ids = ag.groups.flatMap((g) => g.rows.map((r) => r.id)).sort();
+  assert.deepEqual(ids, ["b", "c"]);
 });

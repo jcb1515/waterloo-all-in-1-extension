@@ -7,6 +7,7 @@ import { buildTodos, doneLine, dueLabel } from "../model/todo.js";
 import { parseQuickAdd, manualItemFrom } from "../../core/quickadd.js";
 import { stripProjectPrefix, projectByName } from "../../core/projects.js";
 import { GroupHeader } from "../components/GroupHeader.jsx";
+import { typeLabelFor } from "../components/ItemRow.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import { CheckIcon, PlusIcon, SparklesIcon } from "../../ui/icons.jsx";
 import { fmtDay, fmtTime } from "../model/agenda.js";
@@ -63,6 +64,9 @@ function TodoRow({ row, now, actions, projects }) {
         <span class="item-title">{item.title}</span>
         <span class="item-meta">
           {item.org ? <span class="chip chip-org">{item.org}</span> : null}
+          {item.meta && item.meta.projectId ? (
+            <span class="item-type">{typeLabelFor(item)}</span>
+          ) : null}
           {row.auto ? (
             <span class="badge badge-auto" title={row.auto}>
               <SparklesIcon size={10} /> Auto

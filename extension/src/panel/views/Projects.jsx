@@ -418,6 +418,7 @@ function ProjectDetail({ project, state, actions, now, onBack }) {
                   actions={actions}
                   done={g.id === "done"}
                   projects={state.projects}
+                  hideOrg
                 />
               ))}
             </div>
