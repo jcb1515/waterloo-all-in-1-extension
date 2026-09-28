@@ -987,10 +987,27 @@ async function cmdReloadExt(extId) {
   }
   let err = null;
   try {
-    const cdp = new Cdp(sw.webSocketDebuggerUrl);
+    // Connect + verify the manifest name. An eval failure means the worker
+    // is mid-restart — wait 1 s, re-list targets and retry once on whatever
+    // worker target exists then. A *wrong* name dies immediately.
+    let cdp = null;
+    let name = null;
+    for (let attempt = 0; attempt < 2 && !cdp; attempt++) {
+      if (attempt) {
+        await sleep(1000);
+        sw = (await waitForServiceWorker(id)) || sw;
+      }
+      const cand = new Cdp(sw.webSocketDebuggerUrl);
+      try {
+        await cand.open();
+        name = await cand.eval("chrome.runtime.getManifest().name");
+        cdp = cand;
+      } catch {
+        cand.close();
+      }
+    }
+    if (!cdp) throw new Error(`service worker for "${id}" did not answer the manifest check.`);
     try {
-      await cdp.open();
-      const name = await cdp.eval("chrome.runtime.getManifest().name").catch(() => "");
       if (name !== EXT_NAME) throw new Error(`extension "${id}" is not "${EXT_NAME}".`);
       await cdp.eval("chrome.runtime.reload()").catch(() => {});
     } finally {

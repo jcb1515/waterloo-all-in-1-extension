@@ -116,6 +116,9 @@ function toEvent(it, us, cal, nowMs, excludedProjects) {
   // reach the feed only when to-dos are opted in (include.todos, which the
   // publisher sets from settings.todos.includeInCalendar).
   if (it.type === "task" && TODO_TASK_CATEGORIES.has(it.category) && inc.todos !== true) return null;
+  // A submit-rankings to-do shares its deadline with the co-op cycle date —
+  // it is a to-do, not a second calendar event, unless to-dos are opted in.
+  if (it.meta && it.meta.action === "submit-rankings" && inc.todos !== true) return null;
   // meta.undated tasks carry a suggested dueAt (received + 2d) for the to-do
   // bucket — it is not a real date and must not reach the feed.
   if (it.meta && it.meta.undated === true) return null;

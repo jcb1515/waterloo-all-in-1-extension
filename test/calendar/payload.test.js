@@ -382,3 +382,39 @@ test("meta.undated tasks never reach the feed, even with a suggested dueAt", () 
   assert.equal(count, 1, "the undated suggestion and the anchorless task stay off the feed");
   assert.deepEqual(payload.events.map((e) => e.id), ["learn:d"]);
 });
+
+test("submit-rankings to-do publishes only when to-dos are opted in", () => {
+  const due = "2026-10-09T18:00:00.000Z";
+  const items = () => ({
+    task: mk("waterlooworks:rankings:winter-2027", {
+      source: "waterlooworks",
+      type: "deadline",
+      title: "Submit your rankings — Winter 2027",
+      dueAt: due,
+      meta: { action: "submit-rankings" },
+    }),
+    cycle: mk("waterlooworks:cycle:winter-2027:cycle-1:rankings-due", {
+      source: "waterlooworks",
+      type: "cycle-date",
+      title: "Cycle 1: Student rankings close",
+      dueAt: due,
+      allDay: true,
+    }),
+    // an unrelated dated action is unchanged: it still publishes by default
+    offer: mk("waterlooworks:offer:acme", {
+      source: "waterlooworks",
+      type: "deadline",
+      title: "Respond to Acme's offer",
+      dueAt: iso(NOW.getTime() + 2 * DAY),
+      meta: { action: "respond-offer" },
+    }),
+  });
+  const def = build(items());
+  assert.deepEqual(
+    def.payload.events.map((e) => e.id).sort(),
+    ["waterlooworks:cycle:winter-2027:cycle-1:rankings-due", "waterlooworks:offer:acme"].sort(),
+    "default: the cycle date publishes once; the rankings to-do stays in the To-do tab",
+  );
+  const optIn = build(items(), {}, { ...CAL, include: { ...CAL.include, todos: true } });
+  assert.equal(optIn.count, 3, "include.todos publishes the rankings to-do too");
+});
