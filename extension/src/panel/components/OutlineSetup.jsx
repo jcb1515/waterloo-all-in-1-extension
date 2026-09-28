@@ -9,6 +9,7 @@ import { IS_PREVIEW } from "../data.js";
 import { fileToEntry, OUTLINE_FILES_KEY } from "../../options/outline-import.js";
 import { pdfToText, base64ToBytes } from "../../options/pdf-text.js";
 import { outlineUrlPatch } from "../model/setup.js";
+import { orgStyle } from "../../ui/colors.js";
 import { FileTextIcon, TrashIcon } from "../../ui/icons.jsx";
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -237,6 +238,78 @@ export function OutlineFileList({ files, write }) {
 
 const shortUrl = (u) =>
   String(u || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+/**
+ * "Waiting to sync": outline URLs configured for courses the outline sync
+ * hasn't produced yet, with a remove button per row (moved here from
+ * Courses.jsx for the outline source's Setup page).
+ * @param {{state: any, actions: any}} p
+ */
+export function WaitingOutlines({ state, actions }) {
+  const urls =
+    (isObj(state.settings) &&
+      isObj(state.settings.sources) &&
+      isObj(state.settings.sources.outline) &&
+      state.settings.sources.outline.urls) ||
+    {};
+  const known = new Set(
+    Object.keys(state.courses || {}).map((c) => normCourseCode(c))
+  );
+  const waiting = Object.keys(urls)
+    .filter((c) => !known.has(normCourseCode(c)))
+    .sort();
+  if (!waiting.length) return null;
+
+  return (
+    <div class="card">
+      <h3>Waiting to sync</h3>
+      {waiting.map((c) => (
+        <div class="waiting-row" key={c}>
+          <span class="chip chip-org" style={orgStyle(c, state.projects)}>
+            {c}
+          </span>
+          <span class="waiting-url" title={urls[c]}>
+            {urls[c]}
+          </span>
+          <button
+            type="button"
+            class="btn-icon"
+            aria-label={`Remove ${c}`}
+            onClick={() =>
+              saveOutlineUrls(state, actions, outlineUrlPatch(state.settings, c, null))
+            }
+          >
+            <TrashIcon size={14} />
+          </button>
+        </div>
+      ))}
+      <p class="help">Saved outline links the next outline sync picks up.</p>
+    </div>
+  );
+}
+
+/**
+ * The outline source's whole setup body: the Add outline card, the imported
+ * files list and the waiting-to-sync rows. Mounted on the outline Setup
+ * page (W1 may also swap it into the Courses tab in place of the inline
+ * copy there).
+ * @param {{state: any, actions: any}} p
+ */
+export function OutlineManager({ state, actions }) {
+  const outlineLib = useOutlineFiles(state, actions);
+  return (
+    <>
+      <AddOutlineCard
+        state={state}
+        actions={actions}
+        addFiles={outlineLib.addFiles}
+        fileError={outlineLib.error}
+      />
+      <OutlineFileList files={outlineLib.files} write={outlineLib.write} />
+      <WaitingOutlines state={state} actions={actions} />
+    </>
+  );
+}
 
 /**
  * The Outline row of a course's Setup card: the current link with
