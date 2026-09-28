@@ -546,10 +546,16 @@ const dayEnd = (day) => {
 
 /**
  * DailyEventsV2 rows -> event/term-date items + TermInfo patches.
+ * `examIndex` (emitted ExamSchedule exams from an earlier read) lets the
+ * Learn feed's mirrored exam rows fold away instead of duplicating them —
+ * the core's same-source rule could never merge a portal row onto a portal
+ * exam.
+ * @param {any[]} rows
+ * @param {{scope?: string, at?: string, examIndex?: Record<string, any[]>}} ctx
  * @returns {{items: Item[], terms: {termCode: number, start?: string, end?: string,
  *   readingWeek?: {start: string, end?: string}, examPeriod?: {start?: string, end?: string}}[]}}
  */
-export function mapEvents(rows, { scope, at }) {
+export function mapEvents(rows, { scope, at, examIndex } = {}) {
   /** @type {Item[]} */
   const items = [];
   /** @type {Map<number, any>} */
@@ -624,6 +630,17 @@ export function mapEvents(rows, { scope, at }) {
         continue;
       }
       if (cls.type === "exam") {
+        // The ExamSchedule exam on the same day at an overlapping (or
+        // within-an-hour) start IS this row — two portal items could never
+        // merge, so don't emit the mirror at all.
+        const seen = (org && (examIndex || {})[org]) || [];
+        const dupe = seen.some(
+          (e) =>
+            e.day === startDay &&
+            (overlaps(e.start, e.end, startAt, endAt || startAt) ||
+              Math.abs(Date.parse(e.start) - Date.parse(startAt)) <= 60 * 60 * 1000),
+        );
+        if (dupe) continue;
         // A Learn-mirrored exam ("ECE190 midterm test") reuses the exam shape
         // so the core merge can cluster it with the ExamSchedule item.
         items.push({

@@ -656,27 +656,51 @@ test("merge: a portal Learn-mirror deadline joins the Learn item", async () => {
   assert.equal(canon.title, "WHMIS Completion");
 });
 
-test("merge: the Learn-mirror exam never merges portal-vs-portal but the feed collapses it", async () => {
+test("merge: with examIndex the Learn-mirror exam is never emitted — 1 canonical", async () => {
   const exams = await adapter.observe.parse(payload(URLS.exams, eventsJson([
     { title: "ECE 190 Midterm", startDate: "2026-10-21T15:00:00", endDate: "2026-10-21T16:00:00",
       location: "MC 2034", seatCode: null, seatInstructions: null },
   ])), ctx());
   const portalExam = exams.items.find((i) => i.org === "ECE 190");
   assert.equal(portalExam.id, "portal:exam:ECE190:midterm");
-  const res = await eventsParse([
-    learnRow("ECE190 midterm test", "2026-10-21T15:00:00", "2026-10-21T16:00:00"),
-  ]);
-  const mirror = res.items[0];
+  // Events observed after exams: examIndex names the ECE 190 midterm, so the
+  // same-day overlapping Learn row is dropped instead of duplicating it.
+  const res = await eventsParse(
+    [learnRow("ECE190 midterm test", "2026-10-21T15:00:00", "2026-10-21T16:00:00")],
+    exams.state,
+  );
+  assert.equal(res.items.length, 0);
   const out = recompute({
-    raws: { portal: { items: [portalExam, mirror], updatedAt: NOW.toISOString() } },
+    raws: { portal: { items: [portalExam], updatedAt: NOW.toISOString() } },
     now: NOW,
   });
-  // Same-source raws never merge — the core rule is deliberate. The feed's
-  // publish guard still collapses the pair into one calendar event.
-  assert.equal(Object.keys(out.items).length, 2);
+  assert.equal(Object.keys(out.items).length, 1);
   const feed = buildFeedPayload(out.items, {}, {}, NOW, { acceptPending: true });
   assert.equal(feed.count, 1);
-  assert.equal(feed.collapsed, 1);
+  assert.equal(feed.collapsed, 0);
+});
+
+test("merge: a Learn-mirror exam starting within the hour is still suppressed", async () => {
+  const exams = await adapter.observe.parse(payload(URLS.exams, eventsJson([
+    { title: "ECE 190 Midterm", startDate: "2026-10-21T15:00:00", endDate: "2026-10-21T16:00:00",
+      location: "MC 2034", seatCode: null, seatInstructions: null },
+  ])), ctx());
+  // A disjoint interval 45 min after the exam's start: no overlap, but the
+  // start sits inside the 60-minute window -> same exam, not emitted.
+  const res = await eventsParse(
+    [learnRow("ECE190 midterm test", "2026-10-21T15:45:00", "2026-10-21T16:45:00")],
+    exams.state,
+  );
+  assert.equal(res.items.length, 0);
+  // A mirror on a different day (or an unlisted course) still emits.
+  const other = await eventsParse(
+    [
+      learnRow("ECE190 midterm test", "2026-10-22T15:00:00", "2026-10-22T16:00:00"),
+      learnRow("MATH117 midterm test", "2026-10-21T15:00:00", "2026-10-21T16:00:00"),
+    ],
+    exams.state,
+  );
+  assert.equal(other.items.length, 2);
 });
 
 test("an exact reading-week title wins over a vaguer break row", async () => {
