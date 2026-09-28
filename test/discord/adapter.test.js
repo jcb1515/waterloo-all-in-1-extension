@@ -390,6 +390,43 @@ test("a settings.watched change applies without a new inventory", async () => {
   assert.equal(r3.items[0].meta.channelId, CH_MEMES);
 });
 
+test("channelTargets narrow one guild and apply through sync", async () => {
+  // Empty watched: every guild is watched, channels suggested.
+  const open = { watched: {} };
+  const r1 = await adapter.observe.parse(
+    dom(inventory),
+    makeCtx({}, { settings: open })
+  );
+  const r2 = await adapter.observe.parse(
+    net(`${API}/channels/${CH_DEAD}/messages?limit=50`, [
+      restMsg("9301", CH_DEAD, `weekly sync moved to <t:${TS_OCT8_6PM}>`),
+    ]),
+    makeCtx(r1.state, { settings: open })
+  );
+  assert.equal(r2.items.length, 1); // deadlines is a suggested channel
+  assert.equal(r2.state.watch[G].from, "suggested");
+  assert.ok(r2.state.watch[G].channelIds.includes(CH_DEAD));
+  assert.ok(r2.state.watch[G2]); // Rocket Team watched too — not exclusive
+
+  // Pin Robotics Club to just its pcb-design channel via channelTargets —
+  // a settings-only change applied by sync() -> recomputeWatch.
+  const targeted = {
+    watched: {},
+    channelTargets: { "Robotics Club": [CH] },
+  };
+  const r3 = await adapter.sync(makeCtx(r2.state, { settings: targeted }));
+  assert.deepEqual(r3.state.watch[G].channelIds, [CH]);
+  assert.equal(r3.state.watch[G].from, "settings");
+  assert.equal(r3.items.length, 0); // the deadlines item is filtered out
+  assert.ok(r3.state.watch[G2]); // other guilds still watched
+
+  // Clearing the targets returns to suggestions and the item reappears.
+  const r4 = await adapter.sync(makeCtx(r3.state, { settings: open }));
+  assert.equal(r4.state.watch[G].from, "suggested");
+  assert.ok(r4.state.watch[G].channelIds.includes(CH_DEAD));
+  assert.equal(r4.items.length, 1);
+});
+
 test("sync returns the cached filtered union", async () => {
   const ctx = makeCtx();
   const r1 = await adapter.observe.parse(dom(inventory), ctx);
