@@ -320,7 +320,7 @@ const docTitle = (doc) => {
   }
 };
 
-const isLoggedOut = (doc, url) =>
+export const isLoggedOut = (doc, url) =>
   LOGGED_OUT_PATH_RE.test(pathOf(url)) ||
   LOGGED_OUT_TEXT_RE.test(docTitle(doc)) ||
   Boolean(findTextElement(doc, LOGGED_OUT_TEXT_RE));

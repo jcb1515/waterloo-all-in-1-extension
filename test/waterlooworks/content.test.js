@@ -135,7 +135,12 @@ test("the snapshot selector covers the live dashboard's date anchors", () => {
   // Dashboard day headings live in <strong> and the "Rank and Match" notice
   // in .orbis-posting-actions — outside the original h1-h4/table/dl/.label
   // set, so the selector must name them or the snapshot loses those modules.
-  const src = readFileSync(CONTENT_JS, "utf8");
+  // OBSERVE_SEL lives in refresh.js — shared by the content snapshots and
+  // the hidden-iframe refresh snapshots.
+  const src = readFileSync(
+    CONTENT_JS.replace(/content\.js$/, "refresh.js"),
+    "utf8"
+  );
   for (const sel of [
     "h1",
     "table",

@@ -17,6 +17,13 @@ import {
 
 /** @typedef {import("../../core/contract.js").Item} Item */
 /** @typedef {import("../../core/contract.js").Application} Application */
+/**
+ * WW's stored application carries the Job Status column text on top of the
+ * frozen contract — WaterlooWorks reports both "App Status" (the student's
+ * state) and "Job Status" (the posting's stage), and the latter is useful
+ * context the contract has no field for.
+ * @typedef {Application & {jobStatus?: string}} WWApplication
+ */
 
 const SOURCE = "waterlooworks";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -73,17 +80,19 @@ const arr = (v) => (Array.isArray(v) ? v : []);
 export function toApplications(rows) {
   return arr(rows)
     .filter((row) => row && row.jobId)
-    .map((row) => ({
+    .map((row) => /** @type {WWApplication} */ ({
       id: `waterlooworks:${row.jobId}`,
       employer: row.employer || "",
       jobTitle: row.jobTitle || "",
       jobId: row.jobId,
       cycle: row.term,
+      jobStatus: row.jobStatusText || undefined,
       status: normalizeStatus(row.appStatusText),
       history: [],
       itemIds: [],
     }));
 }
+
 
 /**
  * @param {any[]} rows  parseInterviews rows

@@ -1,0 +1,85 @@
+<!-- Applications grid fragment with the Job Status column live pages carry:
+     two apps still "Applied" while their postings are open ("Expired - Apps
+     Available"), and one already "Selected for Interview". Strings in the
+     Job Status cells get flipped by the adapter tests to exercise the
+     not-selected inference. Synthetic rows only. -->
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Job ID<span class="material-icons">swap_vert</span></th>
+        <th>App Status<i class="material-icons">keyboard_arrow_down</i></th>
+        <th>Job Title<span class="material-icons">swap_vert</span></th>
+        <th>Term</th>
+        <th>Organization<span class="material-icons">swap_vert</span></th>
+        <th>Job Status</th>
+        <th>Division</th>
+        <th>Location</th>
+        <th>City</th>
+        <th>Openings</th>
+        <th>App Deadline<span class="material-icons">swap_vert</span></th>
+        <th>App Submitted On (1)<i class="material-icons">keyboard_arrow_down</i></th>
+        <th>App Submitted By</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>611001</td>
+        <td><span class="table__value">Applied</span></td>
+        <th scope="row">
+          <button><i class="material-icons">preview</i></button>
+          <button><i class="material-icons">print</i></button>
+          <span class="table__value">QA Automation Co-op</span>
+        </th>
+        <td>2027 - Winter</td>
+        <td><span class="table__value">Northwind Traders</span></td>
+        <td>Expired - Apps Available</td>
+        <td>QA</td>
+        <td>Kitchener</td>
+        <td>Kitchener</td>
+        <td>1</td>
+        <td>Sep 29, 2026 9:00 AM</td>
+        <td>Sep 15, 2026 4:12 PM</td>
+        <td>Student</td>
+      </tr>
+      <tr>
+        <td>611002</td>
+        <td><span class="table__value">Applied</span></td>
+        <th scope="row">
+          <button><i class="material-icons">preview</i></button>
+          <button><i class="material-icons">print</i></button>
+          <span class="table__value">Data Engineering Intern</span>
+        </th>
+        <td>2027 - Winter</td>
+        <td><span class="table__value">Fabrikam Inc</span></td>
+        <td>Expired - Apps Available</td>
+        <td>Data</td>
+        <td></td>
+        <td>Toronto</td>
+        <td>2</td>
+        <td>Oct 2, 2026</td>
+        <td>09/25/2026 12:01 PM</td>
+        <td>Student</td>
+      </tr>
+      <tr>
+        <td>611003</td>
+        <td><span class="table__value">Selected for Interview</span></td>
+        <th scope="row">
+          <button><i class="material-icons">preview</i></button>
+          <button><i class="material-icons">print</i></button>
+          <span class="table__value">Embedded Systems Co-op</span>
+        </th>
+        <td>2027 - Winter</td>
+        <td><span class="table__value">Acme Robotics</span></td>
+        <td>Interview Selections Complete</td>
+        <td>Firmware</td>
+        <td></td>
+        <td>Waterloo</td>
+        <td>1</td>
+        <td>Nov 30, 2026 11:59 PM</td>
+        <td>Oct 01, 2026 10:00 AM</td>
+        <td>Student</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

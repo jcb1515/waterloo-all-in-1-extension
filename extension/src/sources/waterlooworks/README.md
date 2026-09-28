@@ -2,18 +2,58 @@
 
 WaterlooWorks is Orbis with a Vue UI: every data load is a POST with a
 per-session encrypted `action` token, so background fetch (T1) and tab-relay
-replay (T2) can't reproduce them. This adapter is **T3 only**:
+replay (T2) can't reproduce them. Reads are **T3 + T4**:
 
 - Window 1's recorder forwards page-network responses whose URL matches
   `OBSERVE_PATTERNS` (see `selectors.js`) as `kind: "net"` ObservedPayloads.
-- `content.js` (no imports, no requests) snapshots the rendered DOM —
-  h1–h4, tables, and label/value blocks under `/myAccount/` — as
-  `kind: "dom"` payloads, throttled and hash-deduped. Snapshots mark the root
+- `content.js` (no requests, no navigation of its own page) snapshots the
+  rendered DOM — h1–h4, tables, and label/value blocks under `/myAccount/` —
+  as `kind: "dom"` payloads, throttled and hash-deduped. The snapshot builder
+  lives in `refresh.js` (`buildSnapshot`) so the content script and the
+  refresh iframe share one hygienic serializer. Snapshots mark the root
   element `data-wa1-complete="1"` once `readyState === "complete"` and 3 s
   have passed since load; an incomplete snapshot never flags `needsUpdate`.
-- Both land in `observe.parse`, which renders HTML through
+- `refresh.js` (`maybeRefresh`, T4) re-reads the paginated pages the open tab
+  can't see — see "In-tab refresh" below.
+- All of it lands in `observe.parse`, which renders HTML through
   `ctx.parseHtml(body, "waterlooworks/parseAll", {url})` → `parsers.js`
   (pure functions, offscreen document).
+
+## In-tab refresh (T4)
+
+The open `/myAccount/` page only shows one grid page at a time (the
+applications grid paginates at ~45 rows of a 100-row list), and the grids
+load via session POSTs we can't replay. So after the page's own complete
+snapshot, `maybeRefresh()` opens **one hidden same-origin iframe**
+(off-screen, `aria-hidden`) and walks, in order:
+
+1. `dashboard.htm` — unless the open page already is the dashboard.
+2. `interviews.htm` landing, then the **View** link of every nonzero
+   "Booked Interviews"/"Unscheduled Interviews" row, returning to the
+   landing between views.
+3. `applications.htm` landing → the "Total Submitted" row's **View** →
+   every numeric `.pagination__link` page (2–10) of the grid.
+
+Each step sends the iframe document through `buildSnapshot` as a normal
+`kind: "dom"` payload, so the refresh feeds the exact same
+`observe.parse` → parser/diff pipeline as a passive read.
+
+**Bounds.** Top frame only, `document.visibilityState === "visible"`, at
+most one round per tab per 30 min (`sessionStorage["wa1:ww-refresh-at"]`),
+rounds never overlap, every step caps at 15 s of polling. A signed-out
+iframe (`/notLoggedIn.htm` or the logged-out wording) aborts the round
+immediately. The iframe is always removed when the round ends. Like any
+page view, the walk also keeps the WW session alive.
+
+**Safety.** The extension itself issues no requests and never reads a
+token: WW's own JavaScript performs every POST inside the iframe. The only
+DOM action is `el.click()`, and only on elements `allowedClick(el, step)`
+accepts — the Booked/Unscheduled View anchors (whose `onclick` filter must
+match the row label), the "Total Submitted" View (no `status` key), and
+numeric pagination links. Everything else — apply, withdraw, decline,
+book, status-filtered Views — is refused. `buildSnapshot` scrubs every
+`on*` attribute and `javascript:` href on a clone before serialising, so
+a `buildForm` action token can never reach a payload.
 
 ## What each page yields
 
@@ -161,7 +201,10 @@ application status diffs; `dates.test.js` — Toronto conversions;
 parse/sync including the accumulator caps; `fuzz.test.js` — ~300
 deterministic malformed payloads plus a 1000-read growth bound;
 `probe.test.js` — exact probe counts per fixture and the no-text
-privacy check.
+privacy check; `content.test.js` — the snapshot/send wiring;
+`refresh.test.js` — snapshot hygiene, the click allowlist, and the
+iframe round on fake DOM/timers (throttle, signed-out abort, cleanup,
+token-free payloads, multi-page traversal).
 
 **Probe (`probe.js`).** `probe(doc, href)` powers the "Check readers"
 screen: it runs `detectPage` plus the same parsers and returns
