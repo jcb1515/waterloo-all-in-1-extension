@@ -237,6 +237,41 @@ test("prose hit inside a structured all-day window is a duplicate", () => {
   assert.equal(items.filter((i) => i.review === "pending").length, 0);
 });
 
+test("assess row: out-of-term year is corrected, uncorrectable is dropped", () => {
+  // Live shape (ECE 198, Fall 2026): the assess cell reads "Nov. 23, 25" —
+  // a trailing number eaten as a 2-digit year produced Nov 23 2025, a year
+  // before the term. The same month/day at the term year lands inside the
+  // window, so the year is corrected and marked tentative.
+  const synthetic = {
+    code: "ECE 198",
+    term: 1269,
+    title: "Synthetic",
+    schedule: [],
+    noScheme: false,
+    schemes: [
+      {
+        name: null,
+        rows: [
+          { component: "Project Symposium Demonstration", dateText: "Nov. 23, 25", location: "In person", weight: 30 },
+          { component: "Ghost Deadline", dateText: "Mar. 14, 25", location: "", weight: 10 },
+        ],
+      },
+    ],
+    tables: [],
+    text: { plan: "", assessments: "", team: "" },
+  };
+  const { items } = buildOutline(synthetic, {
+    now: NOW, url: "u", sections: [], group: null, officeHours: false, readingWeeks: [], textDates: extractDates,
+  });
+  const symp = items.find((i) => i.id === "outline:ECE198:assess:project-symposium-demonstration");
+  assert.ok(symp);
+  assert.equal(symp.dueAt, "2026-11-24T04:59:00.000Z"); // Nov 23 2026 23:59 EST
+  assert.equal(symp.confidence, "tentative");
+  assert.match((symp.meta?.facts || []).map((f) => f.value).join(" "), /year corrected/i);
+  // "Mar. 14" lands outside the Fall 2026 window in any candidate year => dropped.
+  assert.equal(items.find((i) => i.id === "outline:ECE198:assess:ghost-deadline"), undefined);
+});
+
 test("prose: regrade sentences are admin deadlines, not exams", () => {
   const synthetic = {
     code: "TEST 101",

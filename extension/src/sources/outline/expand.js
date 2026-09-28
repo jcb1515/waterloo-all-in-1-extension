@@ -9,6 +9,8 @@ import {
   inferYear,
   parseWeekLabel,
   termCodeFor,
+  termSeason,
+  termYear,
   weekdayOf,
   zonedIso,
   zonedParts,
@@ -72,6 +74,55 @@ const dateFor = (monText, day, { now, termCode } = /** @type {{now?: Date, termC
   const year = inferYear(mon, Number(day), { now, termCode });
   return `${year}-${pad(mon)}-${pad(Number(day))}`;
 };
+
+/** Term month span per season digit: winter Jan-Apr, spring May-Aug, fall Sep-Dec. */
+const TERM_MONTHS = { 1: [1, 4], 5: [5, 8], 9: [9, 12] };
+
+/**
+ * [first, last] Toronto dates allowed for this outline's parsed dates:
+ * term start − 30 d through term end + 30 d.
+ */
+export function termWindow(termCode) {
+  const y = termYear(termCode);
+  const [m0, m1] = TERM_MONTHS[termCode % 10] || TERM_MONTHS[9];
+  const last = new Date(Date.UTC(y, m1, 0)).getUTCDate();
+  return [addDays(`${y}-${pad(m0)}-01`, -30), addDays(`${y}-${pad(m1)}-${pad(last)}`, 30)];
+}
+
+/**
+ * A date read outside the outline's term window is almost always a mis-parsed
+ * year (a trailing number eaten as a 2-digit year, e.g. "Nov. 23, 25" on a
+ * Fall 2026 outline) or an instructor typo. The same month/day re-anchored at
+ * the term year must land inside the window or the hit is dropped.
+ * @param {any} hit @param {number|undefined} termCode
+ */
+function termGuard(hit, termCode) {
+  if (!hit || termCode == null) return hit;
+  const [w0, w1] = termWindow(termCode);
+  const inWin = (isoInstant) => {
+    const d = torontoDate(isoInstant);
+    return w0 <= d && d <= w1;
+  };
+  if (inWin(hit.startAt)) return hit;
+  const ty = termYear(termCode);
+  const shift = (isoInstant) => {
+    const p = zonedParts(new Date(isoInstant));
+    return zonedIso(ty, p.m, p.d, p.h, p.mi);
+  };
+  const moved = { ...hit, startAt: shift(hit.startAt), yearFixed: true };
+  if (hit.endAt) moved.endAt = shift(hit.endAt);
+  return inWin(moved.startAt) ? moved : null;
+}
+
+/** Tentative flag + fact note for a hit the term guard re-anchored. */
+const noteYearFix = (item, termCode) => ({
+  ...item,
+  confidence: "tentative",
+  meta: {
+    ...item.meta,
+    facts: factsOf([["Date note", `year corrected to match the ${termSeason(termCode)} ${termYear(termCode)} term`]]),
+  },
+});
 
 const SKIP_LINE = /reading week|midterm week|no class|no lectures/i;
 const REVIEW_FOR = /\breview (?:session )?for\b/i;
@@ -409,7 +460,7 @@ export function buildOutline(data, opts = {}) {
     for (const row of scheme0.rows || []) {
       const cls = classify({ title: row.component });
       const hits = row.dateText ? textDates(row.dateText, { now, termCode }) : [];
-      const hit = hits.find((h) => h.confidence >= 0.5) || null;
+      const hit = hits.filter((h) => h.confidence >= 0.5).map((h) => termGuard(h, termCode)).find(Boolean) || null;
       /** @type {string|null} */
       let itemId = null;
       if (cls.type === "exam" && cls.category === "midterm" && midterms.length) {
@@ -452,7 +503,7 @@ export function buildOutline(data, opts = {}) {
           item.review = "pending";
           item.meta = { ...item.meta, weekdayMismatch: true };
         }
-        items.push(item);
+        items.push(hit.yearFixed ? noteYearFix(item, termCode) : item);
         itemId = item.id;
       }
       assessments.push({
@@ -485,7 +536,10 @@ export function buildOutline(data, opts = {}) {
       /** @type {string|null} */
       let firstId = null;
       for (const choice of deadlineLines(dlCell.split("\n"), opts.group ?? null)) {
-        const hit = (textDates(choice.text, { now, termCode }) || []).find((h) => h.confidence >= 0.5);
+        const hit = (textDates(choice.text, { now, termCode }) || [])
+          .filter((h) => h.confidence >= 0.5)
+          .map((h) => termGuard(h, termCode))
+          .find(Boolean);
         const cls = classify({ title });
         if (cls.type === "exam" && cls.category === "midterm" && midterms.length) {
           const t = midterms.find((x) => !x.merged) || midterms[0];
@@ -522,7 +576,7 @@ export function buildOutline(data, opts = {}) {
           item.review = "pending";
           item.meta = { ...item.meta, weekdayMismatch: true };
         }
-        items.push(item);
+        items.push(hit.yearFixed ? noteYearFix(item, termCode) : item);
         if (!firstId) firstId = item.id;
       }
       assessments.push({
