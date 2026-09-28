@@ -16,18 +16,18 @@
   See src/sources/learn/live-source.js.
 */
 import { MSG } from "../../core/contract.js";
+import { guardInstance } from "../../capture/guard.js";
 import { readBodyInto } from "../../capture/fetch.js";
 
 (() => {
-  // Re-injected by W1 on install/update/startup — the second copy returns.
-  const g = /** @type {any} */ (globalThis);
-  if (g.__wa1_learn) return;
-  g.__wa1_learn = true;
+  // Re-injected by W1 on install/update/startup — a live copy answers the
+  // ping and we return; an orphan is superseded and runs teardown.
+  if (!guardInstance("learn-content", teardown)) return;
   const isMock = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
   // Contract relay (T2): background asks an open Learn tab to run a GET with
   // the page's own session cookie and answer a contract FetchResult.
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  const onRelayFetch = (/** @type {any} */ msg, /** @type {any} */ _sender, /** @type {any} */ sendResponse) => {
     if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
     const path = String(msg.path || "");
     const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
@@ -56,7 +56,24 @@ import { readBodyInto } from "../../capture/fetch.js";
       }
     })();
     return true;
-  });
+  };
+  chrome.runtime.onMessage.addListener(onRelayFetch);
+
+  /** Superseded by a re-injected copy — drop the listeners we registered. */
+  function teardown() {
+    try {
+      chrome.runtime.onMessage.removeListener(onRelayFetch);
+      chrome.storage.onChanged.removeListener(onCatalogChange);
+    } catch {
+      /* dead context */
+    }
+    try {
+      document.removeEventListener("learn-mock:ready", sendData);
+      document.removeEventListener("learn-mock:submit", onMockSubmit);
+    } catch {
+      /* never wired on non-mock pages */
+    }
+  }
 
   if (!isMock) return;
 
@@ -80,7 +97,7 @@ import { readBodyInto } from "../../capture/fetch.js";
 
   document.addEventListener("learn-mock:ready", sendData);
 
-  document.addEventListener("learn-mock:submit", (e) => {
+  const onMockSubmit = (/** @type {any} */ e) => {
     let d;
     try {
       d = JSON.parse(e.detail);
@@ -88,11 +105,13 @@ import { readBodyInto } from "../../capture/fetch.js";
       return;
     }
     chrome.runtime.sendMessage({ type: "learn:submitted", orgUnitId: d.ou, itemId: d.itemId, kind: d.kind });
-  });
+  };
+  document.addEventListener("learn-mock:submit", onMockSubmit);
 
-  chrome.storage.onChanged.addListener((changes, area) => {
+  const onCatalogChange = (/** @type {any} */ changes, /** @type {any} */ area) => {
     if (area === "local" && changes.catalog) sendData();
-  });
+  };
+  chrome.storage.onChanged.addListener(onCatalogChange);
 
   sendData();
 })();

@@ -34,6 +34,8 @@
 // signed-out; other failures land as 0-item readStats).
 
 import { MSG } from "../../core/contract.js";
+import { CHECK } from "../../core/messages.js";
+import { guardInstance } from "../../capture/guard.js";
 import { zonedParts } from "../../lib/textdates/index.js";
 
 export const API_BASE = "https://portalapi2.uwaterloo.ca";
@@ -284,16 +286,12 @@ async function replay(env, url, res) {
 
 /* ------------------------------ live wiring ------------------------------ */
 
-const CHECK_NOW = "wa1:check-now";
-const CHECK_DONE = "wa1:check-done";
-
 (() => {
   try {
     // W1 re-injects content scripts into open tabs on install/update/startup
-    // — the second copy returns before registering anything.
-    const g = /** @type {any} */ (globalThis);
-    if (g.__wa1_portal) return;
-    g.__wa1_portal = true;
+    // — a live copy answers the ping and we return; an orphan is superseded
+    // and runs teardown. See src/capture/guard.js.
+    if (!guardInstance("portal-content", teardown)) return;
     if (
       typeof location === "undefined" ||
       location.hostname !== "portal.uwaterloo.ca" ||
@@ -383,65 +381,85 @@ const CHECK_DONE = "wa1:check-done";
       run(false).catch(() => {});
     };
     tick(); // this load
-    setInterval(tick, ROUND_INTERVAL_MS); // hourly while the tab stays open
-    try {
-      // "Check again now" (panel → background → tab): reply accepted at
-      // once — signed-out when the page holds no token — then run a forced
-      // round (the 30-min gap bypassed, the 401 stop not) and report
-      // check-done when it lands.
-      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-        if (!msg || msg.type !== CHECK_NOW) return false;
-        if (String(msg.source || "") !== "portal") return false;
-        if (!env.getToken()) {
-          sendResponse({ accepted: false, reason: "signed-out" });
-          return false;
-        }
-        sendResponse({ accepted: true });
-        run(true)
-          .then((res) => {
-            const r = res && typeof res === "object" ? res : {};
-            const skip = String(r.skipped || "");
-            const done = r.stale || skip === "frozen" || r.paused
-              ? { ok: false, reason: "timeout" }
-              : r.error || skip === "no-token"
-                ? { ok: false, reason: skip === "no-token" ? "signed-out" : "error" }
-                : skip
-                  ? { ok: false, reason: "error" }
-                  : { ok: true };
-            env.sendMessage({
-              type: CHECK_DONE,
-              source: "portal",
-              runId: String(msg.runId || ""),
-              checked: Number(r.results) || Number(r.sent) || 0,
-              ...done,
-            });
-          })
-          .catch(() => {});
+    const tickTimer = setInterval(tick, ROUND_INTERVAL_MS); // hourly while the tab stays open
+    // "Check again now" (panel → background → tab): reply accepted at
+    // once — signed-out when the page holds no token — then run a forced
+    // round (the 30-min gap bypassed, the 401 stop not) and report
+    // check-done when it lands.
+    const onCheckNow = (/** @type {any} */ msg, /** @type {any} */ _sender, /** @type {any} */ sendResponse) => {
+      if (!msg || msg.type !== CHECK.NOW) return false;
+      if (String(msg.source || "") !== "portal") return false;
+      if (!env.getToken()) {
+        sendResponse({ accepted: false, reason: "signed-out" });
         return false;
-      });
+      }
+      sendResponse({ accepted: true });
+      run(true)
+        .then((res) => {
+          const r = res && typeof res === "object" ? res : {};
+          const skip = String(r.skipped || "");
+          const done = r.stale || skip === "frozen" || r.paused
+            ? { ok: false, reason: "timeout" }
+            : r.error || skip === "no-token"
+              ? { ok: false, reason: skip === "no-token" ? "signed-out" : "error" }
+              : skip
+                ? { ok: false, reason: "error" }
+                : { ok: true };
+          env.sendMessage({
+            type: CHECK.DONE,
+            source: String(msg.source || ""),
+            runId: String(msg.runId || ""),
+            checked: Number(r.results) || Number(r.sent) || 0,
+            ...done,
+          });
+        })
+        .catch(() => {});
+      return false;
+    };
+    try {
+      chrome.runtime.onMessage.addListener(onCheckNow);
     } catch {
       /* older runtimes */
     }
-    try {
-      // Page Lifecycle: a freeze makes every in-flight fetch stale (the
-      // generation bump); resume/visibility-change clear the flag and
-      // continue the round where it stopped.
-      document.addEventListener("freeze", () => {
-        frozenNow = true;
-        portalFreeze();
-      });
-      document.addEventListener("resume", () => {
+    // Page Lifecycle: a freeze makes every in-flight fetch stale (the
+    // generation bump); resume/visibility-change clear the flag and
+    // continue the round where it stopped.
+    const onFreeze = () => {
+      frozenNow = true;
+      portalFreeze();
+    };
+    const onResume = () => {
+      frozenNow = false;
+      tick();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
         frozenNow = false;
         tick();
-      });
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") {
-          frozenNow = false;
-          tick();
-        }
-      });
+      }
+    };
+    try {
+      document.addEventListener("freeze", onFreeze);
+      document.addEventListener("resume", onResume);
+      document.addEventListener("visibilitychange", onVis);
     } catch {
       /* older runtimes lack the Page Lifecycle events */
+    }
+
+    /**
+     * Everything this instance wired — run by guardInstance's supersede
+     * when a re-injected copy takes over (our chrome.runtime is dead).
+     */
+    function teardown() {
+      clearInterval(tickTimer);
+      try {
+        chrome.runtime.onMessage.removeListener(onCheckNow);
+      } catch {
+        /* dead context */
+      }
+      document.removeEventListener("freeze", onFreeze);
+      document.removeEventListener("resume", onResume);
+      document.removeEventListener("visibilitychange", onVis);
     }
   } catch {
     /* never throw into the page */

@@ -105,7 +105,7 @@ export function handleCheckDone(msg) {
  * close any tabIds the dead run recorded as opened-by-us.
  * @param {{getLocal?: Function, mutateKey: Function}} store
  * @param {Date|number} [now]
- * @param {{remove?: Function}} [tabs]
+ * @param {{remove: Function}} [tabs]
  */
 export async function sweepCheckRuns(store, now = new Date(), tabs) {
   const nowMs = now instanceof Date ? now.getTime() : Number(now);

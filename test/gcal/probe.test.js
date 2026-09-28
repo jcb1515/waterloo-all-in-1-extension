@@ -56,9 +56,9 @@ test("probe: exact counts on the week fixture", () => {
     unread: 1, // "Focus time" has no parseable label and a unique id
     decodedIds: 4,
     own: 1,
-    subscribed: 2,
+    subscribed: 1, // "Reading week opens" carries "Calendar: Shared events"
     wa1: 1, // "ECE 105 · Lecture" is our own feed
-    unknown: 1,
+    unknown: 2, // Thanksgiving has no "Calendar:" segment
     detailPopup: 1,
     account: 1,
   });

@@ -21,12 +21,12 @@ const maskUrl = (u) => {
 
 /**
  * "Reads your own calendars every 6 h · <N> events · last read <ago>" from
- * sourceState.gcal (state.ics counts + the scheduler's lastOkAt), plus a
- * manual re-check and the iCal fallback list.
- * @param {{src: any, st: any, save: (patch: any) => void,
- *   sync: () => void, now?: Date}} p
+ * sourceState.gcal (state.ics counts + the scheduler's lastOkAt) plus the
+ * iCal fallback list. The "Check now" button is W1's CheckNowButton on the
+ * Sources tile — not duplicated here.
+ * @param {{src: any, st: any, save: (patch: any) => void, now?: Date}} p
  */
-export function GcalRead({ src, st, save, sync, now }) {
+export function GcalRead({ src, st, save, now }) {
   const state = (st && st.state) || {};
   const ics = state.ics || null;
   const urls = (Array.isArray(src.icalUrls) ? src.icalUrls : []).filter(
@@ -44,11 +44,6 @@ export function GcalRead({ src, st, save, sync, now }) {
         Existing duplicates disappear from Google Calendar after it next
         refreshes your subscription (up to about a day).
       </p>
-      <div class="source-actions">
-        <button type="button" class="btn btn-sm" onClick={sync}>
-          Check again now
-        </button>
-      </div>
       <Field
         label="Private iCal addresses"
         help="Optional fallback for calendars the export misses. Paste the secret

@@ -15,8 +15,9 @@ separately by `tools/build.mjs`).
   `{source, kind: "dom", url, body: JSON.stringify(extract), at}` only when
   the extract has messages, deduped by body, capped at 2 MB, `.catch`-ed.
   It also schedules the periodic provider check below (every 30 min) and
-  answers the shared `wa1:check-now` message; a double-injection guard
-  (`window.__wa1_email`) keeps a re-injected copy inert.
+  answers the shared `wa1:check-now` message; `guardInstance` (capture/
+  guard.js, name "email-content") keeps a re-injected copy inert and
+  tears down an orphaned one.
 - `dom.js` — `extractFor(doc, href, {now})` → `{v, provider, folder, view,
   messages}`, one per host. `Msg = {key, url, from, fromEmail, subject,
   preview?, receivedText?, receivedAt?, body?, links, fromMe?}`. Bodies exist
@@ -286,9 +287,11 @@ outlook.body-content-type="text"`. No token → the run is skipped
 (check-now reports `"signed-out"`). `graph.microsoft.com` and OWA
 `service.svc`/`FindItem` are never called (403 / 401 live).
 
-`chrome.runtime.onMessage "wa1:check-now"` `{source, runId}` — `source` is
-`"gmail"`, `"outlook"`, or `"email"`; each tab answers for its own provider,
-replies `{accepted:true}` synchronously, runs a forced check, and ends with
+`chrome.runtime.onMessage "wa1:check-now"` (`CHECK.NOW` in
+core/messages.js) `{source, runId}` — `source` is W1's SourceId (`"gmail"`
+or `"outlook"`); each tab answers only its own provider, replies
+`{accepted:true}` (or `{accepted:false, reason}`) synchronously, runs a
+forced check, and ends with
 `chrome.runtime.sendMessage {type:"wa1:check-done", source, runId, ok,
 reason?, checked?}`. A `wa1Settings` change that only touches filters
 replays the tab's in-memory copy of the last run (never persisted) as a

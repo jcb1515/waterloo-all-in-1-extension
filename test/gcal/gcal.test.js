@@ -77,8 +77,10 @@ test("gcal week view: chips, kinds, range and the merged detail popup", () => {
   assert.equal(lec.startAt, "2026-09-30T18:30:00.000Z");
   assert.equal(lec.endAt, "2026-09-30T19:20:00.000Z");
 
+  // A non-own chip with no "Calendar: <name>" segment is unknown — the
+  // holiday id alone can't prove which feed it came from.
   const tday = find(ex.events, "Thanksgiving");
-  assert.equal(tday.calendarKind, "subscribed");
+  assert.equal(tday.calendarKind, "unknown");
   assert.equal(tday.allDay, true);
   assert.equal(tday.startAt, "2026-10-12T04:00:00.000Z");
   assert.equal(tday.endAt, undefined); // single all-day: no range end
@@ -122,7 +124,7 @@ test("gcal month view: 42-day range, descendant label, all-day date range", () =
     end: "2026-11-08T05:00:00.000Z",
   });
   const dinner = find(ex.events, "Dinner");
-  assert.equal(dinner.calendarKind, "subscribed");
+  assert.equal(dinner.calendarKind, "unknown"); // no "Calendar:" segment
   assert.equal(dinner.startAt, "2026-10-02T22:00:00.000Z");
   const hack = find(ex.events, "Hackathon week");
   assert.equal(hack.allDay, true);

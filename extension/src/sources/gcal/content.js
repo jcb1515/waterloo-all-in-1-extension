@@ -14,15 +14,15 @@
 // least every 30 min so an open tab keeps the read fresh.
 
 import { MSG } from "../../core/contract.js";
+import { guardInstance } from "../../capture/guard.js";
 import { hashString } from "../../capture/redact.js";
 import { gcalExtract, gcalGate } from "./dom.js";
 import { GCAL } from "./selectors.js";
 
 (() => {
-  // Re-injected by W1 on install/update/startup — the second copy returns.
-  const g = /** @type {any} */ (globalThis);
-  if (g.__wa1_gcal) return;
-  g.__wa1_gcal = true;
+  // Re-injected by W1 on install/update/startup — a live copy answers the
+  // ping and we return; an orphan is superseded and runs teardown.
+  if (!guardInstance("gcal-content", teardown)) return;
   if (location.hostname !== "calendar.google.com") return;
 
   const DEBOUNCE_MS = 2000;
@@ -33,6 +33,10 @@ import { GCAL } from "./selectors.js";
   let lastHash = null;
   /** @type {number|undefined} */
   let timer;
+  /** @type {number|undefined} */
+  let tickTimer;
+  /** @type {MutationObserver|null} */
+  let observer = null;
 
   const tick = () => {
     try {
@@ -86,16 +90,27 @@ import { GCAL } from "./selectors.js";
     tick();
     // Mutations cover view changes; the interval covers the heartbeat and
     // lets an empty/stable grid reach its settle window.
-    new MutationObserver(schedule).observe(document.documentElement, {
+    observer = new MutationObserver(schedule);
+    observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-    setInterval(tick, TICK_MS);
+    tickTimer = setInterval(tick, TICK_MS);
   };
 
   if (document.readyState === "complete") start();
   else addEventListener("load", start, { once: true });
   addEventListener("hashchange", tick);
   addEventListener("popstate", tick);
+
+  /** Superseded by a re-injected copy — drop timers, observer, listeners. */
+  function teardown() {
+    if (timer !== undefined) clearTimeout(timer);
+    if (tickTimer !== undefined) clearInterval(tickTimer);
+    if (observer) observer.disconnect();
+    removeEventListener("load", start);
+    removeEventListener("hashchange", tick);
+    removeEventListener("popstate", tick);
+  }
 })();

@@ -189,7 +189,6 @@ export function GcalSetup(p) {
         src={src}
         st={st}
         save={save}
-        sync={() => p.actions.sync("gcal")}
         now={p.state.now}
       />
     </SourceBasics>

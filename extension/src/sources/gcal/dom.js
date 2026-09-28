@@ -555,6 +555,8 @@ export function gcalExtract(doc, href, { now } = {}) {
         // unless the event id already proved it one of the user's own —
         // and "Waterloo All-in-1" (or a "<CODE> · <Label>" feed title) is
         // our own subscription, which must never suppress its source items.
+        // A non-own chip with no Calendar segment is "unknown": the id
+        // alone (even @import) can't prove which feed it came from.
         calendarKind:
           kind === "own"
             ? kind
@@ -562,7 +564,7 @@ export function gcalExtract(doc, href, { now } = {}) {
               ? "wa1"
               : calendar
                 ? "subscribed"
-                : kind,
+                : "unknown",
       });
     }
     for (const dlg of doc.querySelectorAll(GCAL.dialog) || []) {

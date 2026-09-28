@@ -26,6 +26,7 @@
 */
 
 import { MSG } from "../../core/contract.js";
+import { CHECK } from "../../core/messages.js";
 import { needsBody } from "./rules.js";
 import { SENT_FOLDERS } from "./extract.js";
 
@@ -39,8 +40,8 @@ export const BF_BATCH = 50;
 export const BF_LOCK_PREFIX = "wa1:mail:backfill:lock:";
 export const BF_FAIL_PREFIX = "wa1:mail:backfill:fail:";
 export const OUTLOOK_COUNTS = [50, 100, 200];
-export const CHECK_NOW = "wa1:check-now";
-export const CHECK_DONE = "wa1:check-done";
+export const CHECK_NOW = CHECK.NOW;
+export const CHECK_DONE = CHECK.DONE;
 
 // Bumped on the Page Lifecycle `freeze` event — a run (or part of one)
 // that started under an older generation drops whatever lands late.
@@ -51,20 +52,6 @@ export function backfillFreeze() {
 /** Test hook — reset the freeze generation. */
 export function __resetBackfill() {
   generation = 0;
-}
-
-/**
- * Content-script double-injection guard: W1 re-injects scripts into open
- * tabs after install/update/startup; the second copy must leave its
- * listeners unregistered. `key` is the source name (__wa1_email etc.).
- * @param {string} key
- */
-export function injectOnce(key) {
-  const g = /** @type {any} */ (globalThis);
-  const k = `__wa1_${key}`;
-  if (g[k]) return false;
-  g[k] = true;
-  return true;
 }
 
 /**
@@ -80,17 +67,18 @@ export function gmailOnInbox(hash) {
 
 /**
  * The check-now decision for one tab: null = the message isn't for this
- * tab (wrong type, or another provider's tab), otherwise the reply to
- * sendResponse. `source` accepts the provider, or "email" (any mail tab).
+ * tab (wrong type, or the other provider's), otherwise the reply to
+ * sendResponse. W1's SourceIds keep gmail and outlook distinct — a tab
+ * answers only its own provider's name.
  * @param {any} msg
  * @param {string} provider  "gmail"|"outlook"
  * @param {{onPage?: () => boolean, hasToken?: () => boolean,
  *   disabled?: () => boolean}} [opts]
  */
 export function checkNowDecision(msg, provider, opts = {}) {
-  if (!msg || msg.type !== CHECK_NOW) return null;
+  if (!msg || msg.type !== CHECK.NOW) return null;
   const src = String(msg.source || "");
-  if (src !== "email" && src !== provider) return null;
+  if (src !== provider) return null;
   if (opts.disabled && opts.disabled()) return { accepted: false, reason: "disabled" };
   if (opts.onPage && !opts.onPage()) return { accepted: false, reason: "not-on-page" };
   if (opts.hasToken && !opts.hasToken()) return { accepted: false, reason: "signed-out" };
