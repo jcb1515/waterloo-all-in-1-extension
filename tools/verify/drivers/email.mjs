@@ -17,8 +17,12 @@ const NOW = new Date("2026-10-01T15:00:00.000Z");
 const HREFS = {
   "gmail-list.html": "https://mail.google.com/mail/u/0/#inbox",
   "gmail-message.html": "https://mail.google.com/mail/u/0/#inbox/thread-abc123",
+  "gmail-invite-card.html": "https://mail.google.com/mail/u/0/#inbox/inv001",
+  "gmail-thread-ask.html": "https://mail.google.com/mail/u/0/#inbox/thr-ask",
+  "gmail-thread-reply.html": "https://mail.google.com/mail/u/0/#inbox/thr-ask",
   "outlook-list.html": "https://outlook.office.com/mail/inbox",
   "outlook-message.html": "https://outlook.office.com/mail/inbox/id/conv-out-1",
+  "outlook-invite-card.html": "https://outlook.cloud.microsoft/mail/inbox/id/conv-inv",
 };
 
 export default {

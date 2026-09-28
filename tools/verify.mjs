@@ -30,6 +30,7 @@ import portalDriver from "./verify/drivers/portal.mjs";
 import emailDriver from "./verify/drivers/email.mjs";
 import waterlooworksDriver from "./verify/drivers/waterlooworks.mjs";
 import discordDriver from "./verify/drivers/discord.mjs";
+import gcalDriver from "./verify/drivers/gcal.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_DIR = path.join(ROOT, "test", "fixtures");
@@ -43,6 +44,7 @@ export const DRIVERS = [
   emailDriver,
   waterlooworksDriver,
   discordDriver,
+  gcalDriver,
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
