@@ -113,11 +113,28 @@ test("probe CHECKLIST: unique ids, filled fields, known pages", () => {
     "gmail-list", "gmail-message", "gmail-other",
     "outlook-list", "outlook-message", "outlook-other", "unknown",
   ]);
+  const hosts = new Set([
+    "mail.google.com",
+    "outlook.office.com",
+    "outlook.cloud.microsoft",
+    "outlook.live.com",
+  ]);
+  let essential = 0;
   for (const c of CHECKLIST) {
     assert.ok(!ids.has(c.id), c.id);
     ids.add(c.id);
     assert.ok(c.label.length > 0, c.id);
     assert.ok(c.how.length > 0, c.id);
     assert.ok(pages.has(c.page), c.id);
+    if (c.url) {
+      const u = new URL(c.url);
+      assert.equal(u.protocol, "https:", c.id);
+      assert.ok(hosts.has(u.hostname), `${c.id}: ${u.hostname}`);
+    }
+    if (c.essential) essential++;
+    if (c.refreshDays !== undefined) {
+      assert.ok(Number.isInteger(c.refreshDays) && c.refreshDays > 0, c.id);
+    }
   }
+  assert.ok(essential >= 1 && essential <= 3, `essential count ${essential}`);
 });

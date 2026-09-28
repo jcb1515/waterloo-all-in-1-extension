@@ -14,20 +14,33 @@ const HINT_ACCOUNT =
   "Couldn't detect your signed-in address — replies won't auto-complete reply to-dos.";
 const HINT_OPEN = "Open your inbox or an email.";
 
+/**
+ * W1's CheckRow plus the v2 checklist fields (`url` is the page an "Open"
+ * button targets, `essential` marks first-run rows, `refreshDays` nudges
+ * when the last good read is older).
+ * @typedef {import("../probes.js").CheckRow & {
+ *   url?: string, essential?: boolean, refreshDays?: number}} CheckRow
+ */
+
 /** Pages the user should open to verify this reader. `page` is the probe
- *  page kind the item expects. */
+ *  page kind the item expects.
+ * @type {CheckRow[]} */
 export const CHECKLIST = [
   {
     id: "gmail-inbox",
     page: "gmail-list",
     label: "Gmail inbox",
     how: "Open mail.google.com and let the inbox load.",
+    url: "https://mail.google.com/mail/u/0/#inbox",
+    essential: true,
+    refreshDays: 3,
   },
   {
     id: "gmail-invite",
     page: "gmail-message",
     label: "A Gmail invite email",
     how: "Open an email with a calendar invite (Yes / No / Maybe buttons).",
+    url: "https://mail.google.com/mail/u/0/#search/filename%3Aics",
   },
   {
     id: "gmail-prof",
@@ -40,12 +53,17 @@ export const CHECKLIST = [
     page: "gmail-list",
     label: "Gmail Sent folder",
     how: "Open Sent — used to mark reply to-dos done.",
+    url: "https://mail.google.com/mail/u/0/#sent",
+    refreshDays: 7,
   },
   {
     id: "outlook-inbox",
     page: "outlook-list",
     label: "Outlook inbox",
     how: "Open Outlook on the web and let the inbox load.",
+    url: "https://outlook.office.com/mail/inbox",
+    essential: true,
+    refreshDays: 3,
   },
   {
     id: "outlook-invite",

@@ -16,14 +16,24 @@ const HINT_OPEN =
 const HINT_SCHEDULE =
   "This outline has no class schedule table — classes can't be read from it.";
 
+/**
+ * W1's CheckRow plus the v2 checklist fields (`url` is the page an "Open"
+ * button targets, `essential` marks first-run rows, `refreshDays` nudges
+ * when the last good read is older).
+ * @typedef {import("../probes.js").CheckRow & {
+ *   url?: string, essential?: boolean, refreshDays?: number}} CheckRow
+ */
+
 /** Pages the user should open to verify this reader. `page` is the probe
- *  page kind the item expects. */
+ *  page kind the item expects.
+ * @type {CheckRow[]} */
 export const CHECKLIST = [
   {
     id: "outline-page",
     page: "outline",
     label: "A course outline",
     how: "Open one of your course outlines, e.g. from Portal → a course → Outline.",
+    url: "https://outline.uwaterloo.ca/",
   },
   {
     id: "outline-schedule",
