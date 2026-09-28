@@ -118,6 +118,7 @@ tables → plain replace.
   messages:    [{ subject, receivedAt, from, priority }],
   messageDetails: [...],               // see privacy note above
   rankings:    { term, open, note, at },
+  jobSearchIds: string[],              // last unfiltered jobs.htm card ids (≤200)
   signedOutAt: string,
   lastJsonAt:  string,                 // WW POSTs return JSON we can't map yet
 }

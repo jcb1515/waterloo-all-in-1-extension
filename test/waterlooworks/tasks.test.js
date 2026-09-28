@@ -453,6 +453,75 @@ test("folder snapshot emits apply deadlines, hides applied + superseded posting 
   );
 });
 
+test("a folder frame matching the last search read is transient; a differing read applies", async () => {
+  const url =
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm";
+  const state = {
+    lastGood: {
+      "jobs-folder": {
+        items: [
+          {
+            id: "waterlooworks:apply:999999",
+            source: "waterlooworks",
+            type: "deadline",
+            title: "Apply: Previously Saved",
+            dueAt: "2026-10-01T13:00:00.000Z",
+            meta: { action: "apply", jobId: "999999" },
+          },
+        ],
+        at: AT,
+      },
+    },
+  };
+  const ctx = makeCtx(state);
+  // Read 1: the unfiltered All Jobs list — 3 cards, no Folders pill.
+  const r1 = await adapter.observe.parse(
+    domPayload("jobs-alljobs.html", url),
+    ctx
+  );
+  assert.deepEqual(r1.state.jobSearchIds, ["151111", "151112", "151113"]);
+  ctx.state = r1.state; // the core persists each result's state
+  // Read 2: the pill renders before the filtered list — the cards are the
+  // same search results. Nothing may be derived and the bucket is kept.
+  const r2 = await adapter.observe.parse(
+    domPayload("jobs-folder.html", url),
+    ctx
+  );
+  assert.ok(!(r2.readOk || []).includes("waterlooworks:jobs-folder"));
+  assert.deepEqual(
+    r2.items.filter((i) => i.meta?.action === "apply").map((i) => i.id),
+    ["waterlooworks:apply:999999"]
+  );
+  // Read 3: the settled folder view — different ids — is accepted.
+  ctx.state = r2.state;
+  const r3 = await adapter.observe.parse(
+    domPayload("jobs-folder-one.html", url),
+    ctx
+  );
+  assert.ok((r3.readOk || []).includes("waterlooworks:jobs-folder"));
+  assert.deepEqual(
+    r3.items.filter((i) => i.meta?.action === "apply").map((i) => i.meta.jobId),
+    ["152222"]
+  );
+});
+
+test("a folder read with no prior search read is accepted", async () => {
+  const result = await adapter.observe.parse(
+    domPayload(
+      "jobs-folder.html",
+      "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/jobs.htm"
+    ),
+    makeCtx()
+  );
+  assert.ok((result.readOk || []).includes("waterlooworks:jobs-folder"));
+  assert.deepEqual(
+    result.items
+      .filter((i) => i.meta?.action === "apply")
+      .map((i) => i.meta.jobId),
+    ["151111"]
+  );
+});
+
 test("a folder view with no cards still reports its page scope", async () => {
   const result = await adapter.observe.parse(
     {
