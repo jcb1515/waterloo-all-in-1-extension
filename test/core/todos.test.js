@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveTodos, autoDoneRule, todoSourceItem } from "../../extension/src/core/todos.js";
+import { deriveTodos, autoDoneRule, todoSourceItem, termKey } from "../../extension/src/core/todos.js";
 import { nextReminders } from "../../extension/src/core/remind.js";
 
 const DAY = 86400000;
@@ -184,6 +184,108 @@ test("deriveTodos: rankings to-do is done once an app is ranked after rankings o
   const ranked = { ...APP, status: "ranked", history: [{ status: "ranked", at: iso(t0 - DAY) }] };
   const todos = deriveTodos({ items, applications: { [APP.id]: ranked }, settings: SETTINGS, now: NOW });
   assert.equal(todos["todo:rank:ww:rank-due"].status, "done");
+});
+
+/* --------- one rankings to-do per work term (live bug: 18 emitted) -------- */
+
+const rankDue = (id, days, workTerm) =>
+  item(id, {
+    source: "waterlooworks",
+    type: "cycle-date",
+    category: "rankings-due",
+    title: `Rankings close — ${workTerm} ${id}`,
+    dueAt: iso(t0 + days * DAY),
+    meta: workTerm ? { workTerm } : {},
+  });
+
+const rankIds = (todos) => Object.keys(todos).filter((k) => k.startsWith("todo:rank:")).sort();
+
+test("deriveTodos: 18 rankings-due dates across 3 terms -> at most one per in-flight term", () => {
+  const items = {};
+  // 6 dates per term; the earliest upcoming one wins for its term.
+  for (const [term, days] of [
+    ["Winter 2027", [5, 9, 12, 20, 30, 40]],
+    ["Spring 2027", [6, 11, 15, 25, 33, 45]],
+    ["Fall 2027", [7, 14, 21, 28, 35, 50]],
+  ]) {
+    for (const [i, d] of days.entries()) items[`ww:${term.split(" ")[0].toLowerCase()}-${i}`] = rankDue(`ww:${term.split(" ")[0].toLowerCase()}-${i}`, d, term);
+  }
+  const applications = {
+    a1: { ...APP, id: "a1", status: "interview-scheduled", cycle: "2027 - Winter" },
+    a2: { ...APP, id: "a2", status: "selected-for-interview", cycle: "Spring 2027" },
+  };
+  const todos = deriveTodos({ items, applications, settings: SETTINGS, now: NOW });
+  assert.deepEqual(rankIds(todos), ["todo:rank:ww:spring-0", "todo:rank:ww:winter-0"]);
+  assert.equal(todos["todo:rank:ww:winter-0"].dueAt, iso(t0 + 5 * DAY));
+  assert.equal(todos["todo:rank:ww:spring-0"].dueAt, iso(t0 + 6 * DAY));
+});
+
+test("deriveTodos: a past rankings-due date is ignored; the next upcoming one wins", () => {
+  const items = {
+    "ww:past": { ...rankDue("ww:past", 5, "Winter 2027"), dueAt: iso(t0 - 5 * DAY) },
+    "ww:next": rankDue("ww:next", 8, "Winter 2027"),
+    "ww:later": rankDue("ww:later", 20, "Winter 2027"),
+  };
+  const applications = { a1: { ...APP, id: "a1", status: "interview-scheduled", cycle: "2027 - Winter" } };
+  const todos = deriveTodos({ items, applications, settings: SETTINGS, now: NOW });
+  assert.deepEqual(rankIds(todos), ["todo:rank:ww:next"]);
+});
+
+test("deriveTodos: an in-flight app with no parseable term gets one fallback to-do", () => {
+  const items = {
+    "ww:spring": rankDue("ww:spring", 3, "Spring 2027"),
+    "ww:winter": rankDue("ww:winter", 7, "Winter 2027"),
+  };
+  const applications = { a1: { ...APP, id: "a1", status: "interview-scheduled", cycle: "n/a" } };
+  const todos = deriveTodos({ items, applications, settings: SETTINGS, now: NOW });
+  // The earliest upcoming date overall carries the single fallback to-do.
+  assert.deepEqual(rankIds(todos), ["todo:rank:ww:spring"]);
+});
+
+test("deriveTodos: no in-flight applications -> no rankings to-dos even with unkeyed dates", () => {
+  const items = {
+    "ww:w": rankDue("ww:w", 5, "Winter 2027"),
+    "ww:u": rankDue("ww:u", 6, null),
+  };
+  const applications = { a1: { ...APP, id: "a1", status: "applied", cycle: "2027 - Winter" } };
+  const todos = deriveTodos({ items, applications, settings: SETTINGS, now: NOW });
+  assert.deepEqual(rankIds(todos), []);
+});
+
+test("deriveTodos: a term ranked after rankings opened keeps its to-do as done", () => {
+  const items = {
+    "ww:rank-open": item("ww:rank-open", {
+      source: "waterlooworks",
+      type: "cycle-date",
+      category: "rankings-open",
+      dueAt: iso(t0 - 2 * DAY),
+    }),
+    "ww:w": rankDue("ww:w", 5, "Winter 2027"),
+    "ww:s": rankDue("ww:s", 9, "Spring 2027"),
+  };
+  const ranked = {
+    ...APP,
+    status: "ranked",
+    cycle: "2027 - Winter",
+    history: [{ status: "ranked", at: iso(t0 - DAY) }],
+  };
+  const todos = deriveTodos({ items, applications: { [APP.id]: ranked }, settings: SETTINGS, now: NOW });
+  assert.deepEqual(rankIds(todos), ["todo:rank:ww:w"]);
+  assert.equal(todos["todo:rank:ww:w"].status, "done");
+});
+
+test("termKey normalises term text to '<Season> <YYYY>'", () => {
+  assert.equal(termKey("2027 - Winter"), "Winter 2027");
+  assert.equal(termKey("Winter 2027"), "Winter 2027");
+  assert.equal(termKey("Winter 2027 main round"), "Winter 2027");
+  assert.equal(termKey("spring 2027"), "Spring 2027");
+  assert.equal(termKey("Fall 2026"), "Fall 2026");
+  assert.equal(termKey("SUMMER 2027"), "Summer 2027");
+  assert.equal(termKey("Winter 2027"), "Winter 2027");
+  assert.equal(termKey("Spring 2027") === termKey("Summer 2027"), false);
+  for (const junk of [null, undefined, "", "n/a", "Winter", "2027", "co-op term"]) {
+    assert.equal(termKey(junk), null, JSON.stringify(junk));
+  }
 });
 
 /* ----------------------------- autoDoneRule ---------------------------- */

@@ -79,6 +79,8 @@ test("first applications read stores applications and emits no updates", async (
   assert.deepEqual(result.state.lastReadOk, ["applications"]);
   assert.equal(result.state.applications.length, 3);
   assert.equal(result.state.applications[0].status, "applied");
+  // The Job Status column is kept on the stored application.
+  assert.equal(result.state.applications[0].jobStatus, "Interview Selections Complete");
   assert.equal(result.state.applications[1].status, "not-selected");
   assert.deepEqual(result.updates, []);
   assert.equal(result.state.lastUpdates, undefined);
@@ -146,6 +148,62 @@ test("unknown status preserves the previous status", async () => {
   );
   assert.equal(second.state.applications[0].status, "applied");
   assert.equal(second.updates.length, 0);
+});
+
+test("applications accumulate across paginated reads; absent apps are kept", async () => {
+  const ctx = makeCtx();
+  const page1 = await adapter.observe.parse(
+    payload("applications-pending.html", `${WW}/applications.htm`, "net"),
+    ctx
+  );
+  assert.deepEqual(
+    page1.state.applications.map((a) => a.jobId).sort(),
+    ["611001", "611002", "611003"]
+  );
+  assert.equal(page1.updates.length, 0); // first ever read seeds silently
+
+  // The grid paginates 45 per page, so a read carries only part of the
+  // list. Page 2 shows two other jobs: the stored list becomes the union
+  // and the three absent page-1 apps stay unchanged. Only the two newly
+  // seen apps produce "new" updates — absence never emits anything.
+  const page2 = await adapter.observe.parse(
+    payload("applications-page2.html", `${WW}/applications.htm`, "net"),
+    makeCtx(page1.state)
+  );
+  assert.deepEqual(
+    page2.state.applications.map((a) => a.jobId).sort(),
+    ["611001", "611002", "611003", "611010", "611011"]
+  );
+  assert.deepEqual(
+    page2.updates.map((u) => u.id).sort(),
+    ["waterlooworks:611010:new", "waterlooworks:611011:new"]
+  );
+  assert.equal(
+    page2.state.applications.find((a) => a.jobId === "611001").status,
+    "applied"
+  );
+
+  // A status change on a page-2 app emits exactly one update; the carried
+  // page-1 rows still emit nothing.
+  const changed = fixture("applications-page2.html").replace(
+    ">Applied</span>",
+    ">Selected for Interview</span>"
+  );
+  const page2b = await adapter.observe.parse(
+    {
+      source: "waterlooworks",
+      kind: "net",
+      url: `${WW}/applications.htm`,
+      body: changed,
+      at: "2026-09-22T12:00:00.000Z",
+    },
+    makeCtx(page2.state)
+  );
+  assert.equal(page2b.state.applications.length, 5);
+  assert.deepEqual(
+    page2b.updates.map((u) => u.id),
+    ["waterlooworks:611010:selected-for-interview"]
+  );
 });
 
 test("logged-out payload preserves items and marks the session", async () => {
