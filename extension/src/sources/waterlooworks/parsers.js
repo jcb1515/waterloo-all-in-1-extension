@@ -968,17 +968,44 @@ export function parseDashboard(doc) {
             : joined
         ).replace(/\s+/g, " ").trim();
         // Cell 2: <b> event name, optional .label registration badge and a
-        // <small> location.
+        // <small> location. Snapshots carry the event's digits on the row
+        // (data-wa1-event-id); a raw DOM still has them in the View button's
+        // buildForm handler.
         const nameEl = cells[1].querySelector("b");
         const small = cells[1].querySelector("small");
         const labelEl = cells[1].querySelector(".label");
+        let eventId;
+        const evAttr =
+          tr.getAttribute && tr.getAttribute("data-wa1-event-id");
+        if (evAttr && /^\d+$/.test(evAttr)) eventId = evAttr;
+        if (!eventId && typeof tr.querySelectorAll === "function") {
+          for (const el of tr.querySelectorAll("[onclick]")) {
+            const m = /'eventId'\s*:\s*'(\d+)'/.exec(
+              String(el.getAttribute("onclick") || "")
+            );
+            if (m) {
+              eventId = m[1];
+              break;
+            }
+          }
+        }
+        let link;
+        const linkEl = cells[1].querySelector("a[href]");
+        const href = linkEl ? String(linkEl.getAttribute("href") || "") : "";
+        if (/^https?:/i.test(href)) link = href;
+        const name = (nameEl ? cleanText(nameEl) : cleanText(cells[1]))
+          .replace(/\s*\|\s*-\s*/g, " — ")
+          .replace(/\s+/g, " ")
+          .trim();
         events.rows.push({
           dayText,
           date: parseWwDate(dayText) || undefined,
           startAt: range ? range.startAt : undefined,
           endAt: range ? range.endAt : undefined,
           category: category || undefined,
-          name: nameEl ? cleanText(nameEl) : cleanText(cells[1]),
+          name,
+          eventId,
+          link,
           location: small ? cleanText(small) || undefined : undefined,
           registration: labelEl ? cleanText(labelEl) || undefined : undefined,
         });

@@ -289,7 +289,9 @@ test("parseDashboard reads schedule, events, counts and the rankings notice", ()
       startAt: "2026-09-28T15:30:00.000Z", // 11:30 AM Toronto (EDT)
       endAt: "2026-09-28T17:30:00.000Z",
       category: "Employer Information Sessions",
-      name: "Initech Corp | - IN-PERSON Information Session with Initech",
+      name: "Initech Corp — IN-PERSON Information Session with Initech",
+      eventId: undefined,
+      link: undefined,
       location: "Tatham Centre 2218",
       registration: "Registration Required",
     });

@@ -401,21 +401,55 @@ const isRegistered = (text) => {
 };
 
 /**
- * Dashboard "Upcoming Events / Workshops" rows -> event Items. The day comes
- * from each table's colspan'd header, times from the row's range text.
+ * Host/employer display name from an event title: a "with X" / "hosted by
+ * X" / "presented by X" clause on the last " — " segment, with trailing
+ * modality words stripped. Titles without an em-dash segment yield nothing
+ * (a bare "with" inside the event name is not a host). Never "WaterlooWorks".
+ * @param {unknown} title
+ */
+const MODALITY_TAIL_RE =
+  /(?:\s*[-–—(,]?\s*\b(?:in[-\s]?person|virtual|hybrid|online|remote|on[-\s]?site|information session|info session|session|workshop|webinar|networking|fair)\b)+[\s.,;)]*$/i;
+export function eventOrg(title) {
+  const segs = String(title || "").split(" — ");
+  const last = segs[segs.length - 1];
+  // "hosted by"/"presented by" are unambiguous on any title; a bare "with X"
+  // only counts on an em-dash segment, else "…with AI" names a fake org.
+  const m =
+    /\bhosted\s+by\s+(.+)$/i.exec(last) ||
+    /\bpresented\s+by\s+(.+)$/i.exec(last) ||
+    (segs.length > 1 ? /\bwith\s+(.+)$/i.exec(last) : null);
+  if (!m) return undefined;
+  const org = m[1]
+    .replace(MODALITY_TAIL_RE, "")
+    .replace(/\s*[-–—(,]\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!org || org.length > 80 || /^waterlooworks$/i.test(org)) return undefined;
+  return org;
+}
+
+/**
+ * Dashboard "Upcoming Events / Workshops" rows -> event Items — every dated
+ * row now emits one (registered = auto, everything else = pending review).
+ * The day comes from each table's colspan'd header, times from the row's
+ * range text; a dated row with no parseable time is all-day.
  * @param {any[]} rows  parseDashboard events rows
  * @param {Date} now
+ * @param {{url?: string}} [opts]  url = the page the rows were read on
  * @returns {Item[]}
  */
-export function dashboardEventItems(rows, now) {
+export function dashboardEventItems(rows, now, { url } = {}) {
   const nowIso = iso(now);
   const used = new Set();
   const items = [];
   for (const row of arr(rows)) {
-    if (!row?.startAt) continue;
-    if (!isRegistered(row.registration)) continue;
+    // Never a time without a date: every emitted row anchors on a real day.
+    if (!row || !row.date) continue;
+    const timed = Boolean(row.startAt);
     /** @type {string} */
-    let key = `event:${fnv(`${row.category || ""}|${row.name || ""}|${row.startAt}`)}`;
+    let key = row.eventId
+      ? `event:${row.eventId}`
+      : `event:${fnv(`${row.category || ""}|${row.name || ""}|${row.startAt || row.date}`)}`;
     let id = itemId(SOURCE, key);
     let n = 2;
     while (used.has(id)) {
@@ -423,20 +457,32 @@ export function dashboardEventItems(rows, now) {
       id = itemId(SOURCE, key);
     }
     used.add(id);
-    items.push({
+    const registered = row.registration
+      ? isRegistered(row.registration)
+      : undefined;
+    const waitlisted =
+      row.registration && /waitlist/i.test(row.registration) ? true : undefined;
+    /** @type {any} */
+    const item = {
       id,
       source: SOURCE,
       type: "event",
       title: row.name || "Event",
-      org: row.category || undefined,
-      startAt: row.startAt,
-      endAt: row.endAt || undefined,
-      location: row.location || undefined,
+      org: eventOrg(row.name),
+      startAt: timed ? row.startAt : row.date,
+      endAt: timed ? row.endAt || undefined : undefined,
+      location: row.link || row.location || undefined,
+      url: row.link || undefined,
       status: cancelled(row.registration) ? "cancelled" : "open",
       confidence: "exact",
-      review: "auto",
+      review: registered ? "auto" : "pending",
+      evidence: { method: "html", url: url || undefined },
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       meta: {
+        eventId: row.eventId || undefined,
+        category: row.category || undefined,
+        registered,
+        waitlisted,
         registrationStatus: row.registration,
         facts: factsOf([
           ["Category", row.category],
@@ -444,7 +490,9 @@ export function dashboardEventItems(rows, now) {
           ["Location", row.location],
         ]),
       },
-    });
+    };
+    if (!timed) item.allDay = true;
+    items.push(item);
   }
   return items;
 }

@@ -136,10 +136,30 @@ function scrubAttrs(root) {
     for (const attr of [...root.attributes]) {
       const name = String(attr?.name || "");
       const value = String(attr?.value ?? "");
-      if (
-        /^on/i.test(name) ||
-        (name.toLowerCase() === "href" &&
-          /^\s*javascript\s*:/i.test(value))
+      if (/^on/i.test(name)) {
+        // A View button's buildForm token dies with the attribute; the
+        // digits-only eventId it carried survives on the row so the parser
+        // can still key the event — nothing else from the handler is kept.
+        const ev = /'eventId'\s*:\s*'(\d+)'/.exec(value);
+        if (ev && typeof root.closest === "function") {
+          const tr = root.closest("tr");
+          if (tr && !tr.getAttribute?.("data-wa1-event-id")) {
+            try {
+              tr.setAttribute("data-wa1-event-id", ev[1]);
+            } catch {
+              /* readonly attr — ignore */
+            }
+          }
+        }
+        try {
+          root.removeAttribute(name);
+        } catch {
+          // unreadable attr — leave it; the outerHTML below stays token-free
+          // only if removal worked, so a failure here is acceptable rarity.
+        }
+      } else if (
+        name.toLowerCase() === "href" &&
+        /^\s*javascript\s*:/i.test(value)
       ) {
         try {
           root.removeAttribute(name);
