@@ -26,7 +26,9 @@
   Upcoming and goes to your Google Calendar. **Remove from calendar** takes
   it back off. Items already on your Google Calendar say so.
 - **Edit & add**: fix the title or time before adding.
-- **Add to To-do / Remove from To-do** on any dated item.
+- **Add to To-do / Remove from To-do** on any dated item — your pick wins
+  over the automatic rules (a pinned item lists even while it's still
+  pending review, and a removed one never auto-lists).
 - **Found, not added yet** in Upcoming lists what the extension found in
   the next three weeks but hasn't added, with Add, Add to To-do and
   Dismiss on each row.
@@ -40,6 +42,9 @@
   more tab jumping to a search). Outlook reads your newest 50/100/200
   messages. Every dated email find can now be added, and trusted senders'
   clear dates are added automatically.
+- **Much faster email checks**: messages that haven't changed aren't
+  re-read, so a Gmail/Outlook Check now finishes in seconds — a real
+  Outlook read went from about three minutes to about ten seconds.
 - **Google Calendar duplicate check** recognises classes that are already
   on your calendar from UW Flow or Quest schedules. On one real schedule
   that kept about 230 classes from being published twice. Your
