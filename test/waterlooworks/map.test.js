@@ -153,24 +153,48 @@ test("scheduleItems maps dashboard rows, reusing interview ids per job", () => {
   assert.equal(jobless.type, "interview");
 });
 
-test("dashboardEventItems maps upcoming events with date, time and place", () => {
+test("dashboardEventItems keeps only rows the student registered for", () => {
   const { events } = parsers.parseDashboard(doc("dashboard-live.html"));
+  // The fixture models the Career Centre's public listing — "Registration
+  // Required" and no-badge rows are invites, not the student's plans. Only
+  // the synthetic "Registered" row becomes an item.
   const items = dashboardEventItems(events.rows, NOW);
-  assert.equal(items.length, 5);
-  const first = items[0];
-  assert.match(first.id, /^waterlooworks:event:[0-9a-f]+$/);
-  assert.equal(first.type, "event");
-  assert.equal(
-    first.title,
-    "Initech Corp | - IN-PERSON Information Session with Initech"
-  );
-  assert.equal(first.org, "Employer Information Sessions");
-  assert.equal(first.startAt, "2026-09-28T15:30:00.000Z");
-  assert.equal(first.endAt, "2026-09-28T17:30:00.000Z");
-  assert.equal(first.location, "Tatham Centre 2218");
-  assert.equal(first.meta.registrationStatus, "Registration Required");
-  assert.equal(items[4].location, undefined);
-  assert.equal(items[4].meta.registrationStatus, undefined);
+  assert.equal(items.length, 1);
+  const kept = items[0];
+  assert.match(kept.id, /^waterlooworks:event:[0-9a-f]+$/);
+  assert.equal(kept.type, "event");
+  assert.equal(kept.title, "Mock Interview Workshop");
+  assert.equal(kept.org, "Career Centre Events");
+  assert.equal(kept.startAt, "2026-09-29T22:00:00.000Z");
+  assert.equal(kept.endAt, "2026-09-29T23:30:00.000Z");
+  assert.equal(kept.location, "TC 3317");
+  assert.equal(kept.meta.registrationStatus, "Registered");
+});
+
+test("dashboardEventItems drops required / not-registered / waitlist rows", () => {
+  const base = { startAt: "2026-09-29T14:00:00.000Z", name: "E", category: "C" };
+  for (const registration of [
+    "Registration Required",
+    "Not Registered",
+    "Waitlist",
+    "Waitlisted",
+    "required",
+    undefined,
+    "",
+  ]) {
+    assert.equal(
+      dashboardEventItems([{ ...base, registration }], NOW).length,
+      0,
+      `"${registration}" must not emit an item`
+    );
+  }
+  for (const registration of ["Registered", "Registered — seat confirmed"]) {
+    assert.equal(
+      dashboardEventItems([{ ...base, registration }], NOW).length,
+      1,
+      `"${registration}" must emit an item`
+    );
+  }
 });
 
 test("postingItems only emits a deadline while it is still in the future", () => {

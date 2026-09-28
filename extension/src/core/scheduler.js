@@ -175,14 +175,44 @@ export function adapterSettings(adapterId, settings, extras) {
  * @param {Date|string} now
  * @param {"sync"|"observe"} kind
  * @param {number} [itemCount] items stored under the source's raw key
+ * @param {string} [sourceId] the sourceState key — an observe's scopeOkAt
+ *   fallback when the result carries no `scope`
  */
-export function nextSourceState(prev, result, now, kind, itemCount) {
+export function nextSourceState(prev, result, now, kind, itemCount, sourceId) {
   const p = prev || {};
   const nowIso = (now instanceof Date ? now : new Date(now)).toISOString();
+
+  // scopeOkAt[<scope>] = when that scope last *produced* items — a real
+  // read, not a re-served cache. no-tab/signed-out syncs return the cached
+  // union without reading anything; cached observe early-returns carry
+  // complete:false and no readOk. An error or an empty read never clears it.
+  /** @type {Set<string>} */
+  const okScopes = new Set();
+  const badSession =
+    result.session === "no-tab" || result.session === "signed-out";
+  const realRead =
+    kind !== "observe" ||
+    (Array.isArray(result.readOk)
+      ? result.readOk.length > 0
+      : result.complete !== false);
+  if (
+    !result.error &&
+    Array.isArray(result.items) &&
+    result.items.length >= 1 &&
+    !badSession &&
+    realRead
+  ) {
+    const s = result.scope || (kind === "sync" ? "sync" : sourceId);
+    if (s) okScopes.add(s);
+    if (kind === "observe" && Array.isArray(result.readOk)) {
+      for (const r of result.readOk) if (r) okScopes.add(r);
+    }
+  }
 
   if (kind === "observe") {
     const st = { ...p };
     if (result.state !== undefined) st.state = result.state;
+    if (okScopes.size) st.scopeOkAt = nextScopeOkAt(p.scopeOkAt, okScopes, nowIso);
     if (result.session) {
       st.session = result.session;
     } else if (Array.isArray(result.readOk) && result.readOk.length) {
@@ -205,6 +235,7 @@ export function nextSourceState(prev, result, now, kind, itemCount) {
       ? Math.min(nextBackoff(failures), 30 * MINUTE)
       : nextBackoff(failures)
     : 0;
+  const scopeOkAt = nextScopeOkAt(p.scopeOkAt, okScopes, nowIso);
   return {
     state: result.state !== undefined ? result.state : p.state || {},
     lastRunAt: nowIso,
@@ -215,7 +246,29 @@ export function nextSourceState(prev, result, now, kind, itemCount) {
     failures,
     backoffUntil: backoffMs ? new Date(Date.parse(nowIso) + backoffMs).toISOString() : null,
     itemCount: itemCount ?? p.itemCount ?? 0,
+    ...(Object.keys(scopeOkAt).length ? { scopeOkAt } : {}),
   };
+}
+
+/** scopeOkAt keeps at most this many scopes per source. */
+const SCOPE_OK_CAP = 50;
+
+/**
+ * The next scopeOkAt map: `scopes` all get `nowIso`; over the cap, drop the
+ * entries with the oldest timestamps.
+ * @param {Record<string, string>|undefined} prev
+ * @param {Iterable<string>} scopes
+ * @param {string} nowIso
+ */
+function nextScopeOkAt(prev, scopes, nowIso) {
+  const out = { ...(prev || {}) };
+  for (const s of scopes) if (s) out[s] = nowIso;
+  const keys = Object.keys(out);
+  if (keys.length > SCOPE_OK_CAP) {
+    keys.sort((a, b) => Date.parse(out[a] || "") - Date.parse(out[b] || ""));
+    for (const k of keys.slice(0, keys.length - SCOPE_OK_CAP)) delete out[k];
+  }
+  return out;
 }
 
 /* --------------------------- runSync --------------------------- */
@@ -360,7 +413,7 @@ async function doSync(adapter, settings, reason) {
     const rawItems = /** @type {any} */ (await getLocal(rawKey(id))) || { items: [] };
     await mutateKey("sourceState", (cur) => ({
       ...(cur || {}),
-      [id]: nextSourceState((cur || {})[id], result, now, "sync", (rawItems.items || []).length),
+      [id]: nextSourceState((cur || {})[id], result, now, "sync", (rawItems.items || []).length, id),
     }));
     await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
     await recordReadStat({
@@ -469,7 +522,8 @@ export async function handleObserved(payload) {
           result,
           new Date(),
           "observe",
-          (raw.items || []).length
+          (raw.items || []).length,
+          adapter.id
         ),
       }));
       await recomputeAll(new Date(), resultUpdates(result));

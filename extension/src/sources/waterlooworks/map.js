@@ -378,6 +378,19 @@ export function scheduleItems(rows, applications, now) {
 }
 
 /**
+ * The dashboard's "Upcoming Events / Workshops" table is the Career Centre's
+ * public listing — a row only belongs on the student's calendar when it
+ * shows they're actually registered ("Registration Required" and
+ * "Waitlist…" are invites, not plans). The student's own registrations also
+ * arrive from the events grid page.
+ * @param {any} text  the row's registration badge text
+ */
+const isRegistered = (text) => {
+  const t = String(text || "");
+  return /\bregistered\b/i.test(t) && !/required|not registered|waitlist/i.test(t);
+};
+
+/**
  * Dashboard "Upcoming Events / Workshops" rows -> event Items. The day comes
  * from each table's colspan'd header, times from the row's range text.
  * @param {any[]} rows  parseDashboard events rows
@@ -390,6 +403,7 @@ export function dashboardEventItems(rows, now) {
   const items = [];
   for (const row of arr(rows)) {
     if (!row?.startAt) continue;
+    if (!isRegistered(row.registration)) continue;
     /** @type {string} */
     let key = `event:${fnv(`${row.category || ""}|${row.name || ""}|${row.startAt}`)}`;
     let id = itemId(SOURCE, key);

@@ -144,13 +144,20 @@ export function probe(doc, href) {
 
 /**
  * Pages the "Check readers" flow asks the user to open.
- * @type {{id: string, label: string, how: string}[]}
+ * `url` (when set) is a page the row's Open button can go to; `essential`
+ * marks the rows onboarding insists on; `refreshDays` is how often the row
+ * should see a fresh read.
+ * @type {{id: string, label: string, how: string, url?: string,
+ *   essential?: boolean, refreshDays?: number}[]}
  */
 export const CHECKLIST = [
   {
     id: "channel",
     label: "A watched channel with recent messages",
     how: "Open the server, then a channel people post dates in",
+    url: "https://discord.com/channels/@me",
+    essential: true,
+    refreshDays: 3,
   },
   {
     id: "timestamp",
@@ -161,6 +168,9 @@ export const CHECKLIST = [
     id: "events",
     label: "The server's Events list",
     how: "Server dropdown → Events; mark one event Interested",
+    url: "https://discord.com/channels/@me",
+    essential: true,
+    refreshDays: 7,
   },
   {
     id: "event-detail",

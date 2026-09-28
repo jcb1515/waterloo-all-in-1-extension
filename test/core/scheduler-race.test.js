@@ -111,6 +111,8 @@ test("an observe fired during a sync parses only after the sync's fold", async (
     const st = (await seen())[SOURCE];
     assert.equal(st.state.from, "obs");
     assert.equal(st.error, null);
+    // A real observe records when its scope last produced items.
+    assert.ok(st.scopeOkAt && st.scopeOkAt["m"], "scopeOkAt recorded for the observe's scope");
   } finally {
     ADAPTERS.splice(ADAPTERS.indexOf(/** @type {any} */ (adapter)), 1);
     store.clear();
