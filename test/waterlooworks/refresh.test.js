@@ -75,6 +75,8 @@ test("allowedClick accepts the Booked/Unscheduled interview Views", async () => 
   const { allowedClick } = await import(MOD);
   assert.equal(allowedClick(row("Booked Interviews", 3, booked).a, "interviews"), true);
   assert.equal(allowedClick(row("Unscheduled Interviews", 1, unsched).a, "interviews"), true);
+  // Live rows can carry a trailing colon.
+  assert.equal(allowedClick(row("Booked Interviews:", 2, booked).a, "interviews"), true);
   // Spacing/quote variants around the filter (&quot; keeps the attr parseable).
   const variant = `orbisAppSr.buildForm({'action':'x', selectedFilter : &quot;unscheduled&quot; }, '/x', '').submit();`;
   assert.equal(allowedClick(row("Unscheduled Interviews", 2, variant).a, "interviews"), true);
@@ -103,10 +105,13 @@ test("allowedClick: the applications View only on the Total row, no status key",
   const { allowedClick } = await import(MOD);
   const totalOc = `orbisAppSr.buildForm({'action':'${TOKEN}','numOfDays':'0'}, '/myAccount/co-op/full/applications.htm', '').submit();`;
   const statusOc = `orbisAppSr.buildForm({'action':'${TOKEN}','status':'applied'}, '/x', '').submit();`;
+  // The live row spells the label "Total Submitted:" — trailing colon.
+  assert.equal(allowedClick(row("Total Submitted:", 100, totalOc).a, "applications"), true);
+  // The bare spelling stays accepted too.
   assert.equal(allowedClick(row("Total Submitted", 100, totalOc).a, "applications"), true);
   assert.equal(allowedClick(row("Applied", 97, statusOc).a, "applications"), false);
-  assert.equal(allowedClick(row("Total Submitted", 100, statusOc).a, "applications"), false, "status key must fail");
-  assert.equal(allowedClick(row("Total Submitted", 100, totalOc, "Open").a, "applications"), false, "non-View text");
+  assert.equal(allowedClick(row("Total Submitted:", 100, statusOc).a, "applications"), false, "status key must fail");
+  assert.equal(allowedClick(row("Total Submitted:", 100, totalOc, "Open").a, "applications"), false, "non-View text");
   assert.equal(allowedClick(row("Mock Interviews", 2, totalOc).a, "applications"), false);
 });
 
@@ -477,12 +482,13 @@ test("a full round walks dashboard, interviews and applications; every payload i
 
     const appsLanding = mkDoc({
       title: "Applications",
-      text: "Total Submitted 100 Applied 97",
+      text: "Total Submitted: 100 Applied 97",
     });
+    // Live spelling — the first cell ends with a colon.
     const totalRow = {
-      cells: [{ textContent: "Total Submitted" }, { textContent: "100" }],
+      cells: [{ textContent: "Total Submitted:" }, { textContent: "100" }],
       querySelectorAll: (sel) => (sel === "a" ? [totalView] : []),
-      querySelector: () => ({ textContent: "Total Submitted" }),
+      querySelector: () => ({ textContent: "Total Submitted:" }),
     };
     const totalView = {
       tagName: "A",

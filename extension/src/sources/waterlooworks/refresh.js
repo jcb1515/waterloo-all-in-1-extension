@@ -58,6 +58,13 @@ const docText = (doc) =>
     doc?.body?.textContent ?? doc?.documentElement?.textContent ?? ""
   ).replace(/\s+/g, " ");
 
+/**
+ * A landing-row label with the live spelling normalised: WW writes the
+ * applications summary row as "Total Submitted:" with a trailing colon.
+ * @param {any} el
+ */
+const labelText = (el) => text(el).replace(/\s*:\s*$/, "");
+
 const docOf = (frame) => {
   try {
     return frame?.contentDocument || frame?.contentWindow?.document || null;
@@ -174,7 +181,7 @@ export function allowedClick(el, step) {
     );
     if (!/buildForm\s*\(/.test(onclick)) return false;
     const row = typeof el.closest === "function" ? el.closest("tr") : null;
-    const label = text(row?.cells?.[0] ?? row?.querySelector?.("td"));
+    const label = labelText(row?.cells?.[0] ?? row?.querySelector?.("td"));
     if (step === "interviews") {
       const m = onclick.match(
         /selectedFilter['"]?\s*:\s*['"]([A-Za-z]+)['"]/
@@ -303,11 +310,10 @@ const readyDashboard = (d) =>
 
 const rows = (d) => qsa(d, "tr");
 const firstCell = (row) => row?.cells?.[0] ?? row?.querySelector?.("td");
+const rowLabel = (row) => labelText(firstCell(row));
 
 const readyInterviewsLanding = (d) =>
-  rows(d).some(
-    (r) => text(firstCell(r)) === INTERVIEW_LABELS.booked
-  );
+  rows(d).some((r) => rowLabel(r) === INTERVIEW_LABELS.booked);
 
 const readyInterviewView = (d) => {
   for (const th of qsa(d, "th")) {
@@ -349,7 +355,7 @@ const makeFrame = (doc) => {
 /** The Booked/Unscheduled landing rows with a nonzero count, in order. */
 function interviewRows(d, done) {
   return rows(d).filter((r) => {
-    const label = text(firstCell(r));
+    const label = rowLabel(r);
     if (
       (label !== INTERVIEW_LABELS.booked &&
         label !== INTERVIEW_LABELS.unscheduled) ||
@@ -369,7 +375,7 @@ async function interviewViews(frame, send) {
     if (!d) return;
     const row = interviewRows(d, done)[0];
     if (!row) return;
-    done.add(text(firstCell(row)));
+    done.add(rowLabel(row));
     const anchor = qsa(row, "a").find((a) => allowedClick(a, "interviews"));
     if (!anchor) continue;
     if (!(await clickStep(anchor, "interviews", frame, readyInterviewView))) {
@@ -388,7 +394,7 @@ async function interviewViews(frame, send) {
 async function applicationsPages(frame, send) {
   const d = docOf(frame);
   if (!d) return;
-  const row = rows(d).find((r) => text(firstCell(r)) === "Total Submitted");
+  const row = rows(d).find((r) => rowLabel(r) === "Total Submitted");
   const anchor = row
     ? qsa(row, "a").find((a) => allowedClick(a, "applications"))
     : null;
