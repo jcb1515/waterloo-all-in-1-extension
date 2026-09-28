@@ -108,7 +108,7 @@ export function handleCheckDone(msg) {
  * @param {Date|number} [now]
  * @param {{remove?: Function}} [tabs]
  */
-export async function sweepCheckRuns(store, now = new Date(), tabs = null) {
+export async function sweepCheckRuns(store, now = new Date(), tabs) {
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
   /** @type {number[]} */
   const orphans = [];
@@ -135,7 +135,7 @@ export async function sweepCheckRuns(store, now = new Date(), tabs = null) {
     }
     return changed ? out : runs;
   });
-  if (tabs) {
+  if (tabs && typeof tabs.remove === "function") {
     for (const id of orphans) {
       try {
         await tabs.remove(id);
