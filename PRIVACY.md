@@ -28,6 +28,12 @@ refreshes or extends your Portal session. The replies are turned into
 calendar items on your computer, and only those items (course, date, time,
 room, seat) are stored. If you're signed out, nothing is fetched.
 
+**Course outlines.** While any outline.uwaterloo.ca page is open, the
+extension re-reads the outline pages for your enrolled courses (the links
+Portal and your settings provide) at most every 6 hours, using the outline
+site's normal sign-in. It stops if the site asks you to sign in, and it never
+submits anything.
+
 **WaterlooWorks refresh.** While a WaterlooWorks page is open and visible,
 the extension re-reads your WaterlooWorks dashboard, your booked and
 unscheduled interviews, and every page of your applications, at most once
@@ -84,6 +90,13 @@ published or sent anywhere.
 
 **Email** compares your account address against senders to detect your
 own replies — the address itself is never stored or sent.
+
+**Gmail.** While a Gmail tab is open, the extension reads Gmail's own
+unread-mail feed (the same list of unread subjects and previews Gmail shows
+you) at most once every 30 minutes, using the sign-in Gmail already has. It
+reads only the entries, never your account details, and it only adds items:
+reading an email never deletes anything. Outlook is never fetched; it's read
+only while you view it.
 
 **Check readers** (panel → Sources → Check readers) run counts-only
 probes on pages you open and can download a diagnostic report — the
