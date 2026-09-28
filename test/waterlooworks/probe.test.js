@@ -218,3 +218,51 @@ test("CHECKLIST is a list of {id, label, how} entries", () => {
     assert.ok(item.id && item.label && item.how);
   }
 });
+
+test("CHECKLIST url/essential/refreshDays: exact values and invariants", () => {
+  const byId = Object.fromEntries(CHECKLIST.map((r) => [r.id, r]));
+  assert.equal(
+    byId["applications"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm"
+  );
+  assert.equal(byId["applications"].essential, true);
+  assert.equal(byId["applications"].refreshDays, 7);
+  assert.equal(
+    byId["interviews"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm"
+  );
+  assert.equal(byId["interviews"].essential, true);
+  assert.equal(byId["interviews"].refreshDays, 3);
+  assert.equal(
+    byId["dashboard"].url,
+    "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm"
+  );
+  assert.equal(byId["dashboard"].essential, true);
+  assert.equal(byId["dashboard"].refreshDays, 3);
+
+  // Every url is https on the source's own origin; ≤3 essential rows;
+  // essential implies url; refreshDays is a positive integer.
+  let essential = 0;
+  for (const r of CHECKLIST) {
+    if (r.url !== undefined) {
+      const u = new URL(r.url);
+      assert.equal(u.protocol, "https:", `${r.id} url must be https`);
+      assert.equal(
+        u.hostname,
+        "waterlooworks.uwaterloo.ca",
+        `${r.id} url must stay on WaterlooWorks`
+      );
+    }
+    if (r.essential) {
+      essential++;
+      assert.ok(r.url, `${r.id} is essential but has no url`);
+    }
+    if (r.refreshDays !== undefined) {
+      assert.ok(
+        Number.isInteger(r.refreshDays) && r.refreshDays > 0,
+        `${r.id} refreshDays must be a positive integer`
+      );
+    }
+  }
+  assert.ok(essential <= 3, `too many essential rows: ${essential}`);
+});
