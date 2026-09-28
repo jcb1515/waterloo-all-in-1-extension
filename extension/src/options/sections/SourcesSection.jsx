@@ -62,7 +62,7 @@ export function SourcesSection({ settings, save, state }) {
         const groups = adapterGroups(a.id);
         const optional = groups.length > 0;
         return (
-          <Card key={a.id}>
+          <Card key={a.id} id={`src-${a.id}`}>
             <div class="src-row">
               <div class="src-main">
                 <div class="src-name">

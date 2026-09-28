@@ -266,6 +266,7 @@ export function previewState(nowD = new Date(), variants = {}) {
     meta: {
       guildId: "9102",
       channelId: "9912",
+      onCalendar: "google", // suppressed: it matches an own-calendar event
       recurrence: { freq: "WEEKLY", byDay: "MO", time: "19:00", tz: "America/Toronto", weeks: 4 },
       facts: [
         { label: "Server", value: "WATonomous" },
@@ -530,6 +531,37 @@ export function previewState(nowD = new Date(), variants = {}) {
     meta: { provider: "outlook", facts: [{ label: "From", value: "J. Rivera" }] },
     seenIn: seen("outlook", "mail:k52", "email:outlook:k52", today),
   });
+  add("gmail:book:thr-book", {
+    source: "gmail",
+    type: "task",
+    category: "book-call",
+    title: "Book a call with Priya — ECE 198 mentor",
+    org: "ECE 198",
+    dueAt: dayAt(nowD, 2, 17, 0),
+    url: "https://mail.google.com/mail/u/0/#inbox/thr-book",
+    status: "open",
+    confidence: "tentative",
+    evidence: {
+      method: "text",
+      snippet: "Could you book a 20-minute call this week?",
+      url: "https://mail.google.com/mail/u/0/#inbox/thr-book",
+    },
+    meta: { provider: "gmail", messageKey: "thr-book" },
+    seenIn: seen("gmail", "book:thr-book", "email:gmail:thr-book", today),
+  });
+  add("gmail:book:thr-mentor", {
+    source: "gmail",
+    type: "task",
+    category: "book-call",
+    title: "Book a call with Dana — co-op advisor",
+    org: "Co-op",
+    dueAt: dayAt(nowD, 0, 15, 0),
+    url: "https://mail.google.com/mail/u/0/#inbox/thr-mentor",
+    status: "done", // an invite for this booking arrived -> Invite received
+    confidence: "tentative",
+    meta: { provider: "gmail", messageKey: "thr-mentor" },
+    seenIn: seen("gmail", "book:thr-mentor", "email:gmail:thr-mentor", today),
+  });
   add("discord:reply-mentor", {
     source: "discord",
     type: "task",
@@ -702,6 +734,36 @@ export function previewState(nowD = new Date(), variants = {}) {
       failures: 0,
       itemCount: 24,
       state: {},
+    },
+    gcal: {
+      lastRunAt: iso(now - 10 * MIN),
+      lastOkAt: iso(now - 10 * MIN),
+      session: "signed-in",
+      error: null,
+      complete: true,
+      failures: 0,
+      itemCount: 0,
+      state: {
+        lastSeenAt: iso(now - 10 * MIN),
+        events: [
+          // The own event suppressing discord:wato-electrical-sync.
+          {
+            title: "Electrical sync (weekly)",
+            startAt: dayAt(nowD, 1, 19, 0),
+            endAt: dayAt(nowD, 1, 19, 45),
+            allDay: false,
+            calendarKind: "own",
+          },
+          // Our own feed shows up as subscribed — it can never suppress.
+          {
+            title: "WATonomous Electrical sync (weekly)",
+            startAt: dayAt(nowD, 1, 19, 0),
+            endAt: dayAt(nowD, 1, 19, 45),
+            allDay: false,
+            calendarKind: "subscribed",
+          },
+        ],
+      },
     },
     outlook: {
       lastRunAt: iso(now - 30 * MIN),
@@ -1022,6 +1084,7 @@ export function previewState(nowD = new Date(), variants = {}) {
     termCode: 1269,
     agenda: { showClasses: "today" },
     sources: {
+      gcal: { enabled: true },
       discord: {
         enabled: true,
         watched: { WATonomous: { focus: ["electrical"], channels: [] }, "ECE 2027": { focus: [], channels: [] } },
@@ -1208,6 +1271,23 @@ export function previewState(nowD = new Date(), variants = {}) {
         at: iso(now - 3 * MIN),
       },
     },
+    gcal: {
+      "gcal-week": {
+        counts: {
+          eventChips: 12,
+          labeled: 12,
+          decodedIds: 12,
+          own: 9,
+          subscribed: 2,
+          unknown: 1,
+          detailPopup: 1,
+          account: 1,
+        },
+        ok: true,
+        hints: [],
+        at: iso(now - 7 * MIN),
+      },
+    },
     outlook: {
       "outlook-list": {
         counts: { listRows: 18, unread: 3, datedRows: 5 },
@@ -1221,6 +1301,7 @@ export function previewState(nowD = new Date(), variants = {}) {
     { source: "learn", at: iso(now - 12 * MIN), kind: "sync", scope: "learn", items: 30 },
     { source: "waterlooworks", at: iso(now - 5 * MIN), kind: "observe", path: "/applications", scope: "waterlooworks", items: 3 },
     { source: "discord", at: iso(now - 2 * MIN), kind: "observe", path: "/api/channels/<id>", scope: "discord", items: 2 },
+    { source: "gcal", at: iso(now - 7 * MIN), kind: "observe", path: "/calendar/u/0/r/week", scope: "gcal", items: 0 },
   ];
 
   return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt, projects, probes, readStats };

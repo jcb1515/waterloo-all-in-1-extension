@@ -144,7 +144,15 @@ const SHOTS_POST3 = [
   { name: "panel-check-readers-dark", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=waterlooworks:applications", size: [400, 900], dark: true },
 ];
 
+const SHOTS_FINAL = [
+  { name: "options-sources-gcal-light", url: "/src/options/options.html?preview=1#sources", size: [1280, 900], scroll: "#src-gcal" },
+  { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=gcal:gcal-week", size: [400, 900] },
+  { name: "panel-todo-light", url: "/src/panel/panel.html?preview=1&tab=todo", size: [400, 900] },
+  { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+];
+
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "final" ? SHOTS_FINAL :
   process.env.WA1_SHOT_DIR === "post3" ? SHOTS_POST3 :
   process.env.WA1_SHOT_DIR === "cp3" ? SHOTS_CP3 :
   process.env.WA1_SHOT_DIR === "phase3b" ? SHOTS_3B :
