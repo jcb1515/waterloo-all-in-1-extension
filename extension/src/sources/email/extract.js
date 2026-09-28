@@ -563,8 +563,10 @@ export function taskItems(prod, frame, prev, opts) {
   const replyTitle = (m) =>
     `Reply to ${m.from || "the sender"}: ${cleanSubject(m.subject)}`.slice(0, 100);
 
-  /* ---- message views: the ask, then whether an answer came after ---- */
-  if (frame.view === "message") {
+  /* ---- thread views: the ask, then whether an answer came after ----
+   * Backfill threads carry per-message `parts`, expanded into rows by the
+   * adapter, so a multi-part backfill thread behaves like a message view. */
+  if (frame.view === "message" || frame.view === "backfill") {
     /** @type {Map<string, {m: Msg, invited: boolean, gate: any, bulk: boolean}[]>} */
     const groups = new Map();
     for (const r of rows) {
@@ -673,7 +675,7 @@ export function taskItems(prod, frame, prev, opts) {
 
   /* ---- a sent-folder row closes its reply (and nothing else) ---- */
   if (
-    frame.view === "list" &&
+    (frame.view === "list" || frame.view === "backfill") &&
     SENT_FOLDERS.has(String(frame.folder || "").toLowerCase())
   ) {
     for (const r of rows) {

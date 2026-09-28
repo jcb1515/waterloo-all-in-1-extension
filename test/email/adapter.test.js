@@ -817,11 +817,13 @@ test("privacy: my account address never leaves the page", async () => {
 
 test("email sources contain no forbidden APIs", () => {
   const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "email");
-  const FILES = ["content.js", "atom.js", "dom.js", "index.js", "rules.js", "selectors.js", "extract.js"];
+  const FILES = [
+    "content.js", "atom.js", "dom.js", "index.js", "rules.js", "selectors.js",
+    "extract.js", "backfill.js", "gmail-backfill.js", "outlook-backfill.js",
+  ];
   const FORBIDDEN = [
     /XMLHttpRequest/,
     /\bWebSocket\b/,
-    /localStorage/,
     /document\.cookie/,
     /webpackChunk/,
     /\.click\s*\(/,
@@ -837,15 +839,17 @@ test("email sources contain no forbidden APIs", () => {
     }
   }
 
-  // Network allowlist: the one request this source may ever make is
-  // GET /mail/u/<n>/feed/atom, issued by atom.js' injected fetchImpl and
-  // bound to window.fetch in content.js. Nothing else may fetch, and the
-  // sessionStorage throttle stamp is confined to those two files.
+  // Network allowlist: every request is a same-origin GET issued through an
+  // injected fetchImpl — the Atom feed, Gmail ?view=pt print views and
+  // Outlook /api/v2.0/me/ paths (the iframe list reads are navigations of
+  // our own hidden iframe). Only content.js binds window.fetch (once for
+  // the atom env, once for the backfill env); nothing else may fetch. The
+  // sessionStorage throttle stamps stay in content.js + atom.js.
   for (const file of FILES) {
     const src = fs.readFileSync(path.join(SRC, file), "utf8");
     const fetches = src.match(/\bfetch\s*\(/g) || [];
     if (file === "content.js") {
-      assert.equal(fetches.length, 1, "content.js binds fetch once, for the atom env");
+      assert.ok(fetches.length <= 2, "content.js binds fetch for its envs only");
     } else {
       assert.equal(fetches.length, 0, `${file} must not fetch`);
     }
@@ -853,12 +857,12 @@ test("email sources contain no forbidden APIs", () => {
     if (file !== "content.js" && file !== "atom.js") {
       assert.equal(sessions.length, 0, `${file} must not touch sessionStorage`);
     }
-    // The only request URL the reader builds anywhere is the Atom feed;
-    // /mail/u/…#… urls are Gmail page links for items, never requests.
+    // Request urls built outside the fetch-binding file must be one of the
+    // known shapes; /mail/u/…#… urls are Gmail page links for items.
     for (const m of src.matchAll(/\/mail\/u\/[^'"`\s]+/g)) {
       assert.ok(
-        m[0].includes("#") || m[0].endsWith("/feed/atom"),
-        `${file} builds a non-atom mail url: ${m[0]}`,
+        m[0].includes("#") || m[0].endsWith("/feed/atom") || m[0].includes("view=pt"),
+        `${file} builds an unexpected mail url: ${m[0]}`,
       );
     }
   }

@@ -30,6 +30,10 @@ import {
  * @property {string} [body]         message view only, <=20000 chars
  * @property {string[]} links        meeting/co-op links found in the body
  * @property {boolean} [fromMe]      sender is the signed-in account
+ * @property {boolean} [unread]      the row/thread is unread (list feeds)
+ * @property {boolean} [bodyFetched] backfill: this thread's body was read
+ * @property {string} [messageId]    outlook backfill: the REST item Id
+ * @property {Msg[]} [parts]         gmail backfill: per-message print parts
  * @property {{whenText: string, title?: string, where?: string, organizer?: string}} [invite]
  *   the invite card the client renders above the message (first Msg only)
  */
