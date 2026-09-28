@@ -34,12 +34,16 @@ export const CHECKLIST = [
     label: "A course outline",
     how: "Open one of your course outlines, e.g. from Portal → a course → Outline.",
     url: "https://outline.uwaterloo.ca/",
+    // The observe read scopes per course code (e.g. "ECE 198") — no fixed
+    // stat.scope; any outline observe read that produced items satisfies.
+    stat: { kind: "observe", itemsMin: 1 },
   },
   {
     id: "outline-schedule",
     page: "outline",
     label: "An outline with a class schedule",
     how: "Open an outline whose Class Schedule table lists your section.",
+    stat: { kind: "observe", itemsMin: 1 },
   },
 ];
 

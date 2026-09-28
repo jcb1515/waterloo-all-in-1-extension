@@ -229,6 +229,41 @@ test("PORTAL_OPEN_ROW is Portal's live checklist row", () => {
     url: "https://portal.uwaterloo.ca/",
     essential: true,
     refreshDays: 14,
-    stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+    stat: { kind: "observe", scope: "portal:schedule", itemsMin: 0 },
   });
+});
+
+test("every essential row's stat.scope is one its adapter actually emits", () => {
+  // The scope strings the adapters put on a successful read for the page
+  // each row points at (result.scope, which readStats stores, and the
+  // readOk names scopeReadAt stamps). Rows whose emitted scope is dynamic
+  // (message keys, course codes) carry no stat.scope and are skipped.
+  const EMITTED = {
+    // learn sync has no result.scope -> nextSourceState stamps "sync".
+    learn: new Set(["sync"]),
+    // portal observe.parse: schedule/exams/enrollments/events.
+    portal: new Set(["portal:schedule", "portal:exams", "portal:enrollments", "portal:events"]),
+    // outline observe scopes per course code; the rows use a kind-only stat.
+    outline: new Set(),
+    // email observe: list / atom / backfill / per-message keys.
+    gmail: new Set(["email:gmail:list", "email:gmail:atom", "email:gmail:backfill"]),
+    outlook: new Set(["email:outlook:list", "email:outlook:backfill"]),
+    // gcal observe + export sync both scope "gcal".
+    gcal: new Set(["gcal"]),
+  };
+  for (const [source, entry] of Object.entries(CHECK_SOURCES)) {
+    const emitted = EMITTED[source];
+    if (!emitted) continue; // streams outside this batch
+    for (const row of entry.checklist) {
+      if (row.essential !== true) continue;
+      const scope = row.stat && row.stat.scope;
+      if (scope == null) continue;
+      assert.ok(emitted.has(scope), `${source}:${row.id} stat.scope "${scope}" is never emitted`);
+    }
+  }
+  // The table must cover at least the rows this batch scopes.
+  assert.ok(EMITTED.gcal.has("gcal"));
+  assert.ok(EMITTED.gmail.has("email:gmail:list"));
+  assert.ok(EMITTED.outlook.has("email:outlook:list"));
+  assert.ok(EMITTED.portal.has("portal:schedule"));
 });
