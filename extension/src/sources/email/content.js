@@ -1,15 +1,25 @@
 // @ts-check
-// Email (Outlook web + Gmail) content script — PASSIVE DOM reader (T3).
-// Bundled as an IIFE by tools/build.mjs so imports are fine.
+// Email (Outlook web + Gmail) content script — PASSIVE DOM reader (T3),
+// plus on Gmail the one allowed request: the unread-mail Atom feed
+// (atom.js — README "Network"). Bundled as an IIFE by tools/build.mjs so
+// imports are fine.
 //
 // Hard rules (README repeats them):
-//   - never send a request (no fetch/XHR/web-socket),
-//   - never navigate or click, never touch storage or tokens,
+//   - no requests except GET /mail/u/<n>/feed/atom on Gmail (atom.js),
+//   - never navigate or click, never touch storage or tokens
+//     (atom.js' sessionStorage throttle stamp aside — see ATOM_KEY),
 //   - mail text travels only as a transient DOM extract to OUR OWN
 //     background; the adapter persists at most a per-message date snippet.
 
 import { MSG } from "../../core/contract.js";
 import { extractFor } from "./dom.js";
+import {
+  atomRound,
+  atomFreeze,
+  gmailAccountIndex,
+  ATOM_GAP_MS,
+  ATOM_KEY,
+} from "./atom.js";
 
 (() => {
   const DEBOUNCE_MS = 2000;
@@ -64,4 +74,62 @@ import { extractFor } from "./dom.js";
   else addEventListener("load", start, { once: true });
   addEventListener("hashchange", send);
   addEventListener("popstate", send);
+
+  // Gmail only: the unread-mail Atom feed, delivered as the same observed
+  // payload the passive reader sends. Only advances while not frozen.
+  if (location.hostname === "mail.google.com") {
+    let frozenNow = false;
+    const env = {
+      fetchImpl: (/** @type {any} */ url, /** @type {any} */ init) => fetch(url, init),
+      sendMessage: (/** @type {any} */ msg) => {
+        try {
+          Promise.resolve(chrome.runtime.sendMessage(msg)).catch(() => {});
+        } catch {
+          /* context invalidated */
+        }
+      },
+      parseXml: (/** @type {string} */ t) => new DOMParser().parseFromString(t, "text/xml"),
+      getLast: () => {
+        try {
+          const raw = sessionStorage.getItem(ATOM_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      },
+      setLast: (/** @type {any} */ stamp) => {
+        try {
+          sessionStorage.setItem(ATOM_KEY, JSON.stringify(stamp));
+        } catch {
+          /* storage can be disabled */
+        }
+      },
+      isFrozen: () => frozenNow,
+      account: gmailAccountIndex(location.pathname),
+      pageUrl: location.href,
+    };
+    const atomTick = () => {
+      atomRound(env).catch(() => {});
+    };
+    atomTick(); // this load
+    setInterval(atomTick, ATOM_GAP_MS); // while the tab stays open
+    try {
+      document.addEventListener("freeze", () => {
+        frozenNow = true;
+        atomFreeze();
+      });
+      document.addEventListener("resume", () => {
+        frozenNow = false;
+        atomTick();
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          frozenNow = false;
+          atomTick();
+        }
+      });
+    } catch {
+      /* older runtimes lack the Page Lifecycle events */
+    }
+  }
 })();

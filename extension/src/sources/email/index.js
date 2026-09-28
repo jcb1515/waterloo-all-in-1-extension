@@ -206,12 +206,17 @@ const adapter = {
       }
 
       // A single message view scopes narrowly so that message's items are
-      // replaced; a list view's scope matches no item, so nothing is removed.
+      // replaced; a list view's scope matches no item, so nothing is
+      // removed. The Atom feed scopes as `email:gmail:atom` — likewise no
+      // item's seenIn scope ever matches it, so an entry leaving the unread
+      // feed can never delete its item.
       const keys = new Set(msgs.map((m) => String(m.key)));
       const scope =
-        allowed && data.view === "message" && keys.size === 1
-          ? `email:${provider}:${[...keys][0]}`
-          : `email:${provider}:list`;
+        data.view === "atom"
+          ? `email:${provider}:atom`
+          : allowed && data.view === "message" && keys.size === 1
+            ? `email:${provider}:${[...keys][0]}`
+            : `email:${provider}:list`;
 
       const state = {
         ...prev,
