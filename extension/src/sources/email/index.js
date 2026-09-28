@@ -248,8 +248,12 @@ const adapter = {
       // removed. The Atom feed scopes as `email:gmail:atom` — likewise no
       // item's seenIn scope ever matches it, so an entry leaving the unread
       // feed can never delete its item. Backfill batches scope as
-      // `email:<provider>:backfill`; their per-message readOk entries mean a
-      // body re-read marks that message's scope fresh.
+      // `email:<provider>:backfill`; EVERY listed message in a sent batch
+      // also re-reads its own `email:<provider>:<key>` scope, so a re-read
+      // under current rules drops items/tasks it no longer produces. (A
+      // payload only ever contains fully processed rows — an aborted page
+      // is never sent — and needsBody is deterministic per row+settings,
+      // so a still-gated row got its body this pass too.)
       const keys = new Set(msgs.map((m) => String(m.key)));
       const scope =
         data.view === "atom"
@@ -262,11 +266,7 @@ const adapter = {
       const readOk = isBackfill
         ? [
             scope,
-            ...new Set(
-              msgs
-                .filter((m) => m.bodyFetched)
-                .map((m) => `email:${provider}:${String(m.key)}`),
-            ),
+            ...new Set(msgs.map((m) => `email:${provider}:${String(m.key)}`)),
           ]
         : [scope];
 
@@ -284,22 +284,38 @@ const adapter = {
       /** @type {any} */
       let backfillState = prev.backfill;
       const bf = isBackfill ? data.backfill : null;
-      if (bf && bf.final) {
+      // A replay (in-memory cache after a filter change) never touches
+      // state.backfill — it would fake a fresh lookbackDays and retrigger
+      // a full.
+      if (bf && bf.final && !bf.replay) {
         const pb = ((prev.backfill || {})[provider] || {});
-        const newest = msgs
+        // The cursor: the run's own newest receivedAt wins, else the prior
+        // one stays; a first run that saw no mail at all seeds from the
+        // run's START time (an empty 30 days is still "read").
+        const markerNewest = Date.parse(bf.newestAt || "") || 0;
+        const msgsNewest = msgs
           .map((m) => Date.parse(m.receivedAt || "") || 0)
           .reduce((a, b) => Math.max(a, b), 0);
         const prevNewest = Date.parse(pb.newestAt || "") || 0;
+        const runStart = Date.parse(bf.runStartedAt || "") || 0;
+        const resolved =
+          Math.max(markerNewest, msgsNewest, prevNewest) ||
+          prevNewest ||
+          runStart ||
+          Date.parse(at) ||
+          0;
         backfillState = {
           ...(prev.backfill || {}),
           [provider]: {
+            // v:2 — entries stamped by the old ruleset count as never-ran
+            // (the content script's decideRun treats a missing v:2 like a
+            // lookback increase: one full, still 6 h apart).
+            v: 2,
             lastRunAt: at,
             lastFullAt: bf.full ? at : pb.lastFullAt || at,
             lookbackDays: bf.lookbackDays,
             checked: bf.checked,
-            newestAt: newest
-              ? new Date(Math.max(newest, prevNewest)).toISOString()
-              : pb.newestAt || at,
+            newestAt: new Date(resolved).toISOString(),
           },
         };
       }

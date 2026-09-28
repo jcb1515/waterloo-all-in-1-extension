@@ -105,11 +105,34 @@ async function settleList(env, frame) {
   }
 }
 
+const EMAIL_RE_G = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+
+/**
+ * The To:/Cc:/Bcc: recipient block of one print-view message:
+ * `<font class="recipient"><div>To: a@b, c@d</div><div>Cc: e@f</div></font>`.
+ * Returns the address list (lowercased), or null when the block is absent.
+ * @param {any} t  one table.message element
+ */
+function recipientAddrs(t) {
+  /** @type {string[]} */
+  const out = [];
+  for (const d of t.querySelectorAll(".recipient div")) {
+    const line = textOf(d);
+    const m = /^(?:to|cc|bcc)\s*:\s*(.+)$/i.exec(line);
+    if (m) out.push(...(m[1].match(EMAIL_RE_G) || []).map((e) => e.toLowerCase()));
+  }
+  return out.length ? out : null;
+}
+
 /**
  * The print view of one thread -> one Msg part per rendered message.
- * Real print markup varies a little across builds, so every lookup keeps a
- * text fallback; a table that yields neither sender nor body is skipped.
- * `acct` (the account address learned from the list page) flags fromMe.
+ * Current markup (verified live): `table.message`, first cell holds
+ * `<b>Name</b> &lt;addr&gt;`, the right-aligned cell the date, a
+ * `.recipient` block the To/Cc lines, `div[dir]` the body. Older builds
+ * used .gD/.g3/.a3s — every lookup keeps that fallback; a table that
+ * yields neither sender nor body is skipped.
+ * `acct` (the account address learned from the list page) flags fromMe
+ * and drives toMe — the address itself never lands on the Msg.
  * @param {any} doc
  * @param {{acct?: string, now?: Date|number|string}} [opts]
  */
@@ -127,6 +150,19 @@ export function printViewParts(doc, { acct = "", now } = {}) {
     if (senderEl) {
       from = senderEl.getAttribute("name") || textOf(senderEl);
       fromEmail = senderEl.getAttribute("email") || "";
+    }
+    if (!from) {
+      // Current header: first cell is "<b>Name</b> <addr>" — take the name
+      // from the b, never the whole row (it trails the date text).
+      const firstTd = t.querySelector("td");
+      if (firstTd) {
+        const b = firstTd.querySelector("b");
+        from = b ? textOf(b) : "";
+        if (!fromEmail) {
+          const m = /<([^<>\s@()]+@[^<>\s@()]+)>/.exec(textOf(firstTd));
+          if (m) fromEmail = m[1];
+        }
+      }
     }
     if (!fromEmail) {
       // Header fallback: a "<b>Name</b> <a@b>" shaped line in the first rows.
@@ -149,7 +185,9 @@ export function printViewParts(doc, { acct = "", now } = {}) {
     }
     /** @type {string|undefined} */
     let receivedText;
-    const dateEl = t.querySelector(".g3[title], td[title], [title]");
+    const dateEl =
+      t.querySelector('td[align="right"] [title], td[align="right"]') ||
+      t.querySelector(".g3[title], td[title], [title]");
     if (dateEl) receivedText = dateEl.getAttribute("title") || textOf(dateEl);
     let receivedAt = receivedText && parseListLabel(receivedText, ref);
     if (!receivedAt && receivedText) {
@@ -185,12 +223,14 @@ export function printViewParts(doc, { acct = "", now } = {}) {
         }
       }
     }
-    const bodyEl = t.querySelector(".a3s") || t;
+    const bodyEl =
+      t.querySelector(".a3s") || t.querySelector("div[dir]") || t;
     const body = textWithBreaks(bodyEl, QUOTE_SEL).slice(0, BODY_CAP);
     if (!from && !body) continue;
     const self =
       String(from).trim().toLowerCase() === "me" ||
       (!!acct && String(fromEmail).toLowerCase() === acct);
+    const recips = recipientAddrs(t);
     parts.push({
       from,
       fromEmail: self ? "" : fromEmail,
@@ -199,6 +239,12 @@ export function printViewParts(doc, { acct = "", now } = {}) {
       receivedAt,
       body: body || undefined,
       links: linksOf(bodyEl),
+      ...(recips
+        ? {
+            recipients: recips.length,
+            toMe: !!acct && recips.includes(String(acct).toLowerCase()),
+          }
+        : {}),
     });
   }
   return parts;

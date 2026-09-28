@@ -2,28 +2,32 @@
 <html>
 <head><title>Lab sections</title></head>
 <body>
-<!-- Synthetic redacted Gmail ?view=pt print view: two table.message parts. -->
+<!-- Synthetic redacted Gmail ?view=pt print view: two table.message parts.
+     Mirrors the live markup: <b>name</b> <addr> in the first cell, the date
+     right-aligned, a .recipient block for To/Cc, div[dir] for the body. -->
 <h2>Lab sections</h2>
 <table class="message" cellpadding="0">
   <tr>
-    <td><span class="gD" name="Jane Smith" email="jsmith@uwaterloo.ca">Jane Smith</span></td>
-    <td class="g3" title="Tue, Sep 29, 2026, 2:00 PM">Sep 29</td>
+    <td colspan="2"><font size="-1"><b>Jane Smith </b>&lt;jsmith@uwaterloo.ca&gt;</font></td>
+    <td align="right">Tue, Sep 29, 2026 at 2:00 PM</td>
   </tr>
   <tr>
-    <td>
-      <div class="a3s">Hi all, can you make the lab meeting on Thursday, October 1 at 2 PM? Please reply and let me know.</div>
-    </td>
+    <td colspan="2"><font size="-1" class="recipient"><div>To: jane.student@example.com</div></font></td>
+  </tr>
+  <tr>
+    <td colspan="2"><div dir="ltr">Hi all, can you make the lab meeting on Thursday, October 1 at 2 PM? Please reply and let me know.</div></td>
   </tr>
 </table>
 <table class="message" cellpadding="0">
   <tr>
-    <td><span class="gD" name="me" email="jane.student@example.com">me</span></td>
-    <td class="g3" title="Tue, Sep 29, 2026, 3:05 PM">Sep 29</td>
+    <td colspan="2"><font size="-1"><b>me</b> &lt;jane.student@example.com&gt;</font></td>
+    <td align="right">Tue, Sep 29, 2026 at 3:05 PM</td>
   </tr>
   <tr>
-    <td>
-      <div class="a3s">Yes, 2 PM works for me.</div>
-    </td>
+    <td colspan="2"><font size="-1" class="recipient"><div>To: jsmith@uwaterloo.ca</div></font></td>
+  </tr>
+  <tr>
+    <td colspan="2"><div dir="ltr">Yes, 2 PM works for me.</div></td>
   </tr>
 </table>
 </body>

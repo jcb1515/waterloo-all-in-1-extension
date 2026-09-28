@@ -66,8 +66,8 @@ export function outlookListPath(folder, plan, now) {
   const sent = folder === "sent";
   const stamp = sent ? "SentDateTime" : "ReceivedDateTime";
   const select = sent
-    ? "Id,SentDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId"
-    : "Id,ReceivedDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId";
+    ? "Id,SentDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients"
+    : "Id,ReceivedDateTime,IsRead,Subject,From,BodyPreview,WebLink,ConversationId,ToRecipients,CcRecipients";
   /** @type {string} */
   let filter;
   const since = plan && plan.since && Date.parse(String(plan.since));
@@ -106,12 +106,21 @@ export function outlookNextPath(link) {
 }
 
 /**
- * One REST message -> the Msg shape the adapter reads.
- * @param {any} m @param {boolean} sent
+ * One REST message -> the Msg shape the adapter reads. To/Cc recipients are
+ * collapsed to a count plus a toMe flag — the addresses themselves never
+ * leave the page.
+ * @param {any} m @param {boolean} sent @param {string} [acct] my address (lowercased)
  */
-export function outlookMsg(m, sent) {
+export function outlookMsg(m, sent, acct = "") {
   const ea = (m && m.From && m.From.EmailAddress) || {};
   const when = m && (sent ? m.SentDateTime || m.ReceivedDateTime : m.ReceivedDateTime);
+  /** @type {string[]} */
+  const recips = [];
+  for (const r of [...((m && m.ToRecipients) || []), ...((m && m.CcRecipients) || [])]) {
+    const a = String((r && r.EmailAddress && r.EmailAddress.Address) || "").toLowerCase();
+    if (a && !recips.includes(a)) recips.push(a);
+  }
+  const me = String(acct || "").toLowerCase();
   return {
     key: String((m && m.ConversationId) || ""),
     messageId: String((m && m.Id) || ""),
@@ -124,6 +133,7 @@ export function outlookMsg(m, sent) {
       ? new Date(when).toISOString()
       : undefined,
     unread: (m && m.IsRead) === false || undefined,
+    ...(recips.length ? { recipients: recips.length, toMe: !!me && recips.includes(me) } : {}),
     links: [],
   };
 }
@@ -174,6 +184,27 @@ export const outlookBackfill = {
   },
 
   async listPage(env, { ctx, folder, cursor, plan, request }) {
+    // Once per round: who am I? — one GET /me?$select=EmailAddress, held in
+    // the round-local ctx like the token (never sent, never stored). Used
+    // only to flag toMe/recipients on each row.
+    if (ctx.acct === undefined) {
+      ctx.acct = "";
+      try {
+        const me = await request("/api/v2.0/me?$select=EmailAddress", {
+          method: "GET",
+          headers: H(ctx.secret),
+        });
+        if (me && me.status === 200 && !me.redirected) {
+          const ct = (me.headers && me.headers.get("content-type")) || "";
+          if (/json/i.test(ct)) {
+            const d = JSON.parse(await me.text());
+            ctx.acct = String((d && d.EmailAddress) || "").toLowerCase();
+          }
+        }
+      } catch {
+        ctx.acct = ""; // no toMe this round — degrade, don't abort
+      }
+    }
     const path =
       typeof cursor === "string" && cursor
         ? cursor
@@ -204,7 +235,7 @@ export const outlookBackfill = {
     if (!data || !Array.isArray(data.value)) return null;
     const sent = folder === "sent";
     const messages = data.value
-      .map((/** @type {any} */ m) => outlookMsg(m, sent))
+      .map((/** @type {any} */ m) => outlookMsg(m, sent, ctx.acct))
       .filter((/** @type {any} */ m) => m.key);
     return {
       messages,
