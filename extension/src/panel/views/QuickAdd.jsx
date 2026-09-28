@@ -4,6 +4,7 @@
 
 import { useState } from "preact/hooks";
 import { parseQuickAdd, manualItemFrom } from "../../core/quickadd.js";
+import { stripProjectPrefix, projectByName, projectById } from "../../core/projects.js";
 import { TYPE_LABELS } from "../components/ItemRow.jsx";
 import { fmtDay } from "../model/agenda.js";
 
@@ -39,6 +40,7 @@ function fieldsFrom(parsed) {
     endTime: parsed.endAt ? toTime(new Date(parsed.endAt)) : "",
     allDay: !!parsed.allDay,
     location: parsed.location || "",
+    projectId: parsed.projectId || (parsed.meta && parsed.meta.projectId) || "",
   };
 }
 
@@ -48,11 +50,24 @@ function fieldsFrom(parsed) {
  */
 export function QuickAdd({ state, actions, now, orgs, editItem, initialText = "", onClose }) {
   const [text, setText] = useState(initialText);
+  const parseText = (v) => {
+    // A leading "#project" routes the item into that project.
+    const sp = stripProjectPrefix(v, state.projects);
+    const parsed = parseQuickAdd(sp.text, { now, orgs });
+    const f = fieldsFrom(parsed);
+    const proj = sp.project || projectByName(state.projects, parsed.org);
+    if (proj) {
+      f.org = proj.name;
+      f.projectId = proj.id;
+    }
+    return f;
+  };
+
   const [fields, setFields] = useState(() =>
     editItem
       ? fieldsFrom(editItem)
       : initialText
-        ? fieldsFrom(parseQuickAdd(initialText, { now, orgs }))
+        ? parseText(initialText)
         : fieldsFrom({})
   );
 
@@ -60,7 +75,7 @@ export function QuickAdd({ state, actions, now, orgs, editItem, initialText = ""
 
   const onText = (v) => {
     setText(v);
-    setFields(fieldsFrom(parseQuickAdd(v, { now, orgs })));
+    setFields(parseText(v));
   };
 
   const timed = TIMED_TYPES.has(fields.type);
@@ -88,6 +103,17 @@ export function QuickAdd({ state, actions, now, orgs, editItem, initialText = ""
         f.dueAt = iso;
       }
     }
+    // Keep the item's meta (project link, calendar opt-out) on edit; an org
+    // matching a project name links it.
+    const meta = { ...((editItem && editItem.meta) || {}) };
+    const proj = fields.projectId
+      ? projectById(state.projects, fields.projectId)
+      : projectByName(state.projects, fields.org);
+    if (proj) {
+      meta.projectId = proj.id;
+      f.org = proj.name;
+    }
+    if (Object.keys(meta).length) f.meta = meta;
     const item = manualItemFrom(f, { id: editItem && editItem.id, now });
     actions.manualUpsert(item);
     actions.toast(editItem ? "Item updated" : `Added ${item.title}`);

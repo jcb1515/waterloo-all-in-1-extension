@@ -28,10 +28,30 @@ test("buildBackup produces the v1 payload shape", () => {
   // No feed secret, discovery or raw source data keys.
   for (const k of Object.keys(b)) {
     assert.ok(
-      ["version", "exportedAt", "settings", "userState", "manualItems", "outlineFiles"].includes(k),
+      ["version", "exportedAt", "settings", "userState", "manualItems", "outlineFiles", "projects"].includes(k),
       `unexpected key ${k}`,
     );
   }
+});
+
+test("projects round-trip through build/validate/apply; old backups stay valid", () => {
+  const b = buildBackup({
+    projects: [{ id: "proj_a", name: "Hack", color: 2, status: "active", calendar: true }],
+    now: NOW,
+  });
+  const res = validateBackup(b);
+  assert.equal(res.ok, true);
+  assert.equal(res.summary.projects, 1);
+  const writes = applyBackup(b, {});
+  assert.deepEqual(writes.projects, [{ id: "proj_a", name: "Hack", color: 2, status: "active", calendar: true }]);
+
+  // A backup without the key validates and never emits a projects write.
+  const old = { version: 1, settings: {}, userState: {}, manualItems: [] };
+  assert.equal(validateBackup(old).ok, true);
+  assert.equal(validateBackup(old).summary.projects, 0);
+  assert.equal("projects" in applyBackup(old, {}), false);
+  // Malformed projects are rejected.
+  assert.equal(validateBackup({ version: 1, projects: {} }).ok, false);
 });
 
 test("buildBackup tolerates missing slices", () => {
@@ -60,6 +80,7 @@ test("validateBackup counts the summary", () => {
     itemEdits: 3,
     manualItems: 1,
     outlineFiles: 0,
+    projects: 0,
   });
 });
 

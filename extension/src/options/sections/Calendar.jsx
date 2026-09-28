@@ -144,6 +144,7 @@ export function CalendarSection({ settings, save, state }) {
     const now = new Date();
     const { payload } = buildFeedPayload(state.items || {}, state.userState || {}, cal, now, {
       acceptPending: !!(settings.review && settings.review.showPending),
+      projects: state.projects,
     });
     const { state: feedState } = applyPublish(null, payload, now);
     const ics = buildCalendar(feedState, {});

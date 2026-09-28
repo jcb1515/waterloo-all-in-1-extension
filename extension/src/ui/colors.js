@@ -24,13 +24,33 @@ export function orgColorIndex(org) {
 }
 
 /**
+ * Palette index for an org, honouring a user-chosen project colour: when the
+ * org string is a project name (case-insensitive), that project's colour
+ * wins; everything else keeps the stable hash.
+ * @param {unknown} org
+ * @param {any[]|null|undefined} projects
+ * @returns {number}
+ */
+export function orgColorFor(org, projects) {
+  if (org != null && org !== "" && Array.isArray(projects)) {
+    const n = String(org).trim().toLowerCase();
+    const p = projects.find(
+      (p) => p && typeof p.name === "string" && p.name.trim().toLowerCase() === n
+    );
+    if (p && Number.isInteger(p.color)) return ((p.color % ORG_COLOR_COUNT) + ORG_COLOR_COUNT) % ORG_COLOR_COUNT;
+  }
+  return orgColorIndex(org);
+}
+
+/**
  * CSS custom-property style for an org chip/bar: {--org, --org-soft, --org-ink}.
  * @param {unknown} org
+ * @param {any[]|null|undefined} [projects]  project names use their own colour
  * @returns {Record<string, string> | undefined}
  */
-export function orgStyle(org) {
+export function orgStyle(org, projects) {
   if (org == null || org === "") return undefined;
-  const i = orgColorIndex(org);
+  const i = orgColorFor(org, projects);
   return {
     "--org": `var(--org-${i})`,
     "--org-soft": `var(--org-${i}-soft)`,

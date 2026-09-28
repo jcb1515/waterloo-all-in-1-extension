@@ -79,6 +79,13 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
   const item = effectiveItem(raw, us);
   const Icon = typeIcon(item.type);
   const link = primaryLink(item);
+  // A derived to-do points at the source row it replaces (meta.linkedItemId).
+  const linkedSrc =
+    item.meta && item.meta.linkedItemId ? state.items[item.meta.linkedItemId] || null : null;
+  const project =
+    item.meta && item.meta.projectId
+      ? (state.projects || []).find((p) => p && p.id === item.meta.projectId) || null
+      : null;
   const done = us.done || item.status === "done" || item.status === "submitted";
   const facts = (item.meta && Array.isArray(item.meta.facts) && item.meta.facts) || [];
   const seenIn = Array.isArray(item.seenIn) ? item.seenIn : [];
@@ -118,12 +125,12 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
     <div class="sheet">
       <section class="card sheet-card">
         <div class="sheet-head">
-          <span class="item-icon" aria-hidden="true" style={orgStyle(item.org)}>
+          <span class="item-icon" aria-hidden="true" style={orgStyle(item.org, state.projects)}>
             <Icon size={18} />
           </span>
           <h2 class="sheet-title">{item.title}</h2>
           {item.org ? (
-            <span class="chip chip-org" style={orgStyle(item.org)}>{item.org}</span>
+            <span class="chip chip-org" style={orgStyle(item.org, state.projects)}>{item.org}</span>
           ) : null}
         </div>
         <dl class="sheet-facts tabular">
@@ -172,8 +179,40 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
               <dt>Calendar</dt>
               <dd>On your Google Calendar — the feed skips it to avoid a duplicate</dd>
             </>
+          ) : project ? (
+            <>
+              <dt>Calendar</dt>
+              <dd>
+                <label class="sheet-cal-toggle">
+                  <input
+                    type="checkbox"
+                    checked={!(item.meta && item.meta.calendar === false)}
+                    onChange={(e) => {
+                      const on = /** @type {any} */ (e.target).checked;
+                      const meta = { ...(raw.meta || {}) };
+                      if (on) delete meta.calendar;
+                      else meta.calendar = false;
+                      actions.manualUpsert({ ...raw, meta });
+                    }}
+                  />
+                  Include in calendar
+                </label>
+              </dd>
+            </>
           ) : null}
         </dl>
+        {linkedSrc ? (
+          <p class="help sheet-linked-src">
+            From {sourceLabel(linkedSrc.source)}:{" "}
+            <button
+              type="button"
+              class="linklike"
+              onClick={() => actions.openItem && actions.openItem(linkedSrc)}
+            >
+              {linkedSrc.title}
+            </button>
+          </p>
+        ) : null}
         {item.meta && item.meta.auto === "study" ? (
           <StudyTodoCard
             item={item}

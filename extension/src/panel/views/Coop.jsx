@@ -56,7 +56,7 @@ function PrepCard({ item, state, actions, now, open, onToggle }) {
           </span>
         </span>
         {item.org ? (
-          <span class="chip chip-org" style={orgStyle(item.org)}>{item.org}</span>
+          <span class="chip chip-org" style={orgStyle(item.org, state.projects)}>{item.org}</span>
         ) : null}
       </button>
       {open ? (
@@ -118,7 +118,7 @@ function AppCard({ app, state, actions, now }) {
   return (
     <section class="card app-card">
       <div class="app-head">
-        <span class="chip chip-org" style={orgStyle(app.employer)}>{app.employer}</span>
+        <span class="chip chip-org" style={orgStyle(app.employer, state.projects)}>{app.employer}</span>
         <div class="app-main">
           <strong>{app.jobTitle || "Untitled posting"}</strong>
           <span class="app-sub tabular">
@@ -164,7 +164,7 @@ function AppCard({ app, state, actions, now }) {
       {linked.length ? (
         <div class="app-linked">
           {linked.map((it) => (
-            <ItemRow key={it.id} item={it} now={now} actions={actions} />
+            <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
           ))}
         </div>
       ) : null}
@@ -209,7 +209,7 @@ export function Coop({ state, actions, now }) {
           <h3 class="coop-h">Coming up</h3>
           <div class="card row-card" role="list">
             {soon.map((it) => (
-              <ItemRow key={it.id} item={it} now={now} actions={actions} />
+              <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
             ))}
           </div>
         </section>

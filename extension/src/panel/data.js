@@ -24,6 +24,7 @@ const KEYS = [
   "outlineFiles",
   "updates",
   "updatesSeenAt",
+  "projects",
   SETTINGS_KEY,
 ];
 
@@ -66,6 +67,7 @@ async function readAll() {
     outlineFiles: Array.isArray(all.outlineFiles) ? all.outlineFiles : [],
     updates: Array.isArray(all.updates) ? all.updates : [],
     updatesSeenAt: typeof all.updatesSeenAt === "string" ? all.updatesSeenAt : null,
+    projects: Array.isArray(all.projects) ? all.projects : [],
     settings: mergeSettings(all[SETTINGS_KEY]),
   };
 }
@@ -83,6 +85,7 @@ function blank() {
     outlineFiles: [],
     updates: [],
     updatesSeenAt: null,
+    projects: [],
     settings: mergeSettings(null),
   });
 }
@@ -116,6 +119,7 @@ export function useStore() {
         outlineFiles: Array.isArray(fx.outlineFiles) ? fx.outlineFiles : [],
         updates: Array.isArray(fx.updates) ? fx.updates : [],
         updatesSeenAt: fx.updatesSeenAt || null,
+        projects: Array.isArray(fx.projects) ? fx.projects : [],
         settings: mergeSettings(fx.settings),
       });
       return;
@@ -194,6 +198,12 @@ export function useStore() {
       manualDelete(id) {
         return send({ type: UI.MANUAL_DELETE, id });
       },
+      projectUpsert(project) {
+        return send({ type: UI.PROJECT_UPSERT, project });
+      },
+      projectDelete(id) {
+        return send({ type: UI.PROJECT_DELETE, id });
+      },
     }),
     [state.userState]
   );
@@ -215,6 +225,7 @@ function emptyPreviewState() {
     outlineFiles: [],
     updates: [],
     updatesSeenAt: null,
+    projects: [],
     settings: null,
   };
 }

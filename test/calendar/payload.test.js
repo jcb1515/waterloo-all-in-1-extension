@@ -244,6 +244,31 @@ test("class uids stay stable as the window slides", () => {
   assert.equal(later.payload.events[0].calendar.uid, "c@wa1");
 });
 
+test("project exclusions: calendar off, archived project, per-item opt-out", () => {
+  const items = {
+    on: mk("on", { source: "manual", title: "Paint the banner", meta: { projectId: "p_on" } }),
+    off: mk("off", { source: "manual", title: "Book the venue", meta: { projectId: "p_off" } }),
+    arch: mk("arch", { source: "manual", title: "Order stickers", meta: { projectId: "p_arch" } }),
+    itemOff: mk("itemOff", {
+      source: "manual",
+      title: "Rehearse the pitch",
+      meta: { projectId: "p_on", calendar: false },
+    }),
+    plain: mk("plain", { title: "Return the ladder" }),
+  };
+  const projects = [
+    { id: "p_on", name: "On", status: "active", calendar: true },
+    { id: "p_off", name: "Off", status: "active", calendar: false },
+    { id: "p_arch", name: "Archived", status: "archived", calendar: true },
+  ];
+  const { payload } = buildFeedPayload(items, {}, CAL, NOW, { projects });
+  assert.deepEqual(payload.events.map((e) => e.id).sort(), ["on", "plain"]);
+  // Without the projects arg nothing project-scoped is excluded — but the
+  // per-item meta.calendar flag applies either way.
+  const all = buildFeedPayload(items, {}, CAL, NOW);
+  assert.deepEqual(all.payload.events.map((e) => e.id).sort(), ["arch", "off", "on", "plain"]);
+});
+
 test("stableHash is key-order independent", () => {
   const a = { version: 2, events: [{ id: "x", title: "T" }], timeZone: "America/Toronto" };
   const b = { timeZone: "America/Toronto", events: [{ title: "T", id: "x" }], version: 2 };

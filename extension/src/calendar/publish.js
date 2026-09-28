@@ -131,6 +131,7 @@ async function publishNow(opts) {
       : mv.items;
   const { payload, count, collapsed } = buildFeedPayload(items, mv.userState, cal, new Date(d.now()), {
     acceptPending: !!(settings.review && settings.review.showPending),
+    projects: mv.projects,
   });
   const hash = stableHash(payload);
 

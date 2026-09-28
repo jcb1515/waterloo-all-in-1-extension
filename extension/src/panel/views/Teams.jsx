@@ -44,7 +44,7 @@ export function Teams({ state, actions, now, onOpenReview }) {
       {teams.map((t) => (
         <section class="card team-card" key={t.name}>
           <div class="team-head">
-            <span class="chip chip-org" style={orgStyle(t.name)}>{t.name}</span>
+            <span class="chip chip-org" style={orgStyle(t.name, state.projects)}>{t.name}</span>
             {t.focus.map((f) => (
               <span key={f} class="chip chip-focus">{f}</span>
             ))}
@@ -81,7 +81,7 @@ export function Teams({ state, actions, now, onOpenReview }) {
               <span class="team-label">Your tasks</span>
               <div class="team-rows" role="list">
                 {t.tasks.map((it) => (
-                  <ItemRow key={it.id} item={it} now={now} actions={actions} />
+                  <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
                 ))}
               </div>
             </div>
@@ -92,7 +92,7 @@ export function Teams({ state, actions, now, onOpenReview }) {
               <span class="team-label">Deadlines</span>
               <div class="team-rows" role="list">
                 {t.deadlines.map((it) => (
-                  <ItemRow key={it.id} item={it} now={now} actions={actions} />
+                  <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
                 ))}
               </div>
             </div>
@@ -130,7 +130,7 @@ export function Teams({ state, actions, now, onOpenReview }) {
               <span class="team-label">This week</span>
               <div class="team-rows" role="list">
                 {t.week.map((it) => (
-                  <ItemRow key={it.id} item={it} now={now} actions={actions} />
+                  <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
                 ))}
               </div>
             </div>

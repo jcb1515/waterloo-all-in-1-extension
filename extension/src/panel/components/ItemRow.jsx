@@ -27,11 +27,12 @@ const NO_CHECK = new Set(["class", "tutorial", "exam", "term-date"]);
 
 /**
  * @param {{item: any, now: Date, actions: any, done?: boolean,
- *   clashes?: any[], items?: Record<string, any>, priority?: string}} props
+ *   clashes?: any[], items?: Record<string, any>, priority?: string,
+ *   projects?: any[]}} props
  */
-export function ItemRow({ item, now, actions, done, clashes, items, priority }) {
+export function ItemRow({ item, now, actions, done, clashes, items, priority, projects }) {
   const v = rowView(item, now);
-  const style = orgStyle(item.org) || {};
+  const style = orgStyle(item.org, projects) || {};
   const Icon = typeIcon(item.type);
   const dimmed = done || item.status === "done" || item.status === "submitted";
   const checkable = !NO_CHECK.has(item.type);

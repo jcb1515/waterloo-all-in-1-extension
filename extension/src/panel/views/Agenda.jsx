@@ -137,7 +137,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
         {agenda.nextClass ? (
           <div
             class="next-class"
-            style={orgStyle(agenda.nextClass.org)}
+            style={orgStyle(agenda.nextClass.org, state.projects)}
             role="status"
           >
             <span class="chip chip-org">{agenda.nextClass.org}</span>
@@ -238,6 +238,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
                   clashes={agenda.clashById.get(item.id)}
                   items={state.items}
                   priority={rowPriority(item, now)}
+                  projects={state.projects}
                 />
               ))}
             </div>

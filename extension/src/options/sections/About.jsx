@@ -53,6 +53,7 @@ export function AboutSection({ state }) {
         userState: state && state.userState,
         manualItems: [],
         outlineFiles: state && state.outlineFiles,
+        projects: state && state.projects,
       });
     } else {
       const all = await chrome.storage.local.get([
@@ -60,6 +61,7 @@ export function AboutSection({ state }) {
         "userState",
         "raw:manual",
         "outlineFiles",
+        "projects",
       ]);
       const raw = all["raw:manual"];
       payload = buildBackup({
@@ -67,6 +69,7 @@ export function AboutSection({ state }) {
         userState: all.userState,
         manualItems: raw && Array.isArray(raw.items) ? raw.items : [],
         outlineFiles: all.outlineFiles,
+        projects: all.projects,
       });
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -112,6 +115,7 @@ export function AboutSection({ state }) {
       await setLocal(SETTINGS_KEY, writes.settings);
       await setLocal("userState", writes.userState);
       await setLocal("outlineFiles", writes.outlineFiles);
+      if (writes.projects) await setLocal("projects", writes.projects);
       await send({ type: UI.MANUAL_SET, items: writes.manualItems });
     }
     setPending(null);

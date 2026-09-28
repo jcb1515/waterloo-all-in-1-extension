@@ -22,13 +22,14 @@ export function backupFileName(now = new Date()) {
 /**
  * Build the backup payload.
  * @param {{settings?: any, userState?: any, manualItems?: any[],
- *   outlineFiles?: any[], now?: Date}} input
+ *   outlineFiles?: any[], projects?: any[], now?: Date}} input
  */
 export function buildBackup({
   settings,
   userState,
   manualItems,
   outlineFiles,
+  projects,
   now = new Date(),
 } = {}) {
   return {
@@ -38,6 +39,7 @@ export function buildBackup({
     userState: isObj(userState) ? userState : {},
     manualItems: Array.isArray(manualItems) ? manualItems : [],
     outlineFiles: Array.isArray(outlineFiles) ? outlineFiles : [],
+    projects: Array.isArray(projects) ? projects : [],
   };
 }
 
@@ -54,7 +56,7 @@ export function validateBackup(obj) {
     if (obj[key] != null && !isObj(obj[key]))
       return { ok: false, error: `Backup field "${key}" is malformed.` };
   }
-  for (const key of ["manualItems", "outlineFiles"]) {
+  for (const key of ["manualItems", "outlineFiles", "projects"]) {
     if (obj[key] != null && !Array.isArray(obj[key]))
       return { ok: false, error: `Backup field "${key}" is malformed.` };
   }
@@ -62,6 +64,7 @@ export function validateBackup(obj) {
   const userState = isObj(obj.userState) ? obj.userState : {};
   const manualItems = Array.isArray(obj.manualItems) ? obj.manualItems : [];
   const outlineFiles = Array.isArray(obj.outlineFiles) ? obj.outlineFiles : [];
+  const projects = Array.isArray(obj.projects) ? obj.projects : [];
   return {
     ok: true,
     summary: {
@@ -69,6 +72,7 @@ export function validateBackup(obj) {
       itemEdits: Object.keys(userState).length,
       manualItems: manualItems.length,
       outlineFiles: outlineFiles.length,
+      projects: projects.length,
     },
   };
 }
@@ -76,7 +80,8 @@ export function validateBackup(obj) {
 /**
  * Produce the storage writes for an import. Settings, manual items and
  * outline files are replaced; userState is merged per id with the imported
- * values winning.
+ * values winning. Projects are replaced only when the backup carries them —
+ * an older backup without the key keeps the existing list.
  * @param {any} backup a backup that passed validateBackup
  * @param {{userState?: any}} current current storage slices used for merging
  */
@@ -86,5 +91,6 @@ export function applyBackup(backup, { userState } = {}) {
     userState: { ...(isObj(userState) ? userState : {}), ...(isObj(backup.userState) ? backup.userState : {}) },
     manualItems: Array.isArray(backup.manualItems) ? backup.manualItems : [],
     outlineFiles: Array.isArray(backup.outlineFiles) ? backup.outlineFiles : [],
+    ...(Array.isArray(backup.projects) ? { projects: backup.projects } : {}),
   };
 }

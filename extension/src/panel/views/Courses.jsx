@@ -86,7 +86,7 @@ function CourseDetail({ card, state, actions, now, onBack }) {
       </button>
 
       <div class="card course-detail-head">
-        <span class="chip chip-org" style={orgStyle(code)}>{code}</span>
+        <span class="chip chip-org" style={orgStyle(code, state.projects)}>{code}</span>
         <h3>{course.name || code}</h3>
         <p class="help">
           {card.sections.join(" · ")}
@@ -234,7 +234,7 @@ function CourseDetail({ card, state, actions, now, onBack }) {
           <h3 class="coop-h">Upcoming</h3>
           <div class="card row-card" role="list">
             {upcoming.map((it) => (
-              <ItemRow key={it.id} item={it} now={now} actions={actions} />
+              <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
             ))}
           </div>
         </section>
@@ -285,7 +285,7 @@ export function Courses({ state, actions, now }) {
           onClick={() => setSelCode(c.code)}
         >
           <div class="course-card-head">
-            <span class="chip chip-org" style={orgStyle(c.code)}>{c.code}</span>
+            <span class="chip chip-org" style={orgStyle(c.code, state.projects)}>{c.code}</span>
             <span class="course-name">{c.name}</span>
             <ChevronRightIcon size={14} />
           </div>

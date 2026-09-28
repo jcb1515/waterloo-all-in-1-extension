@@ -5,6 +5,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { buildTodos, doneLine, dueLabel } from "../model/todo.js";
 import { parseQuickAdd, manualItemFrom } from "../../core/quickadd.js";
+import { stripProjectPrefix, projectByName } from "../../core/projects.js";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import { CheckIcon, PlusIcon, SparklesIcon } from "../../ui/icons.jsx";
@@ -24,9 +25,9 @@ const FILTERS = [
 const TIMED_TYPES = new Set(["exam", "meeting", "interview", "event", "class", "tutorial"]);
 
 /** One to-do row: checkbox, title, org chip, auto badge, due/done line. */
-function TodoRow({ row, now, actions }) {
+function TodoRow({ row, now, actions, projects }) {
   const { item } = row;
-  const style = orgStyle(item.org) || {};
+  const style = orgStyle(item.org, projects) || {};
   const open = () => {
     if (actions.openItem) actions.openItem(item);
     else if (item.url) actions.open(item.url);
@@ -104,28 +105,33 @@ export function Todo({ state, actions, now, orgs = [] }) {
         applications: state.applications || {},
         userState: state.userState || {},
         settings: state.settings || {},
+        projects: state.projects || [],
         now,
         filter,
       }),
-    [state.items, state.todos, state.applications, state.userState, state.settings, now, filter]
+    [state.items, state.todos, state.applications, state.userState, state.settings, state.projects, now, filter]
   );
 
   const addTask = () => {
     const text = draft.trim();
     if (!text) return;
-    const p = parseQuickAdd(text, { now, orgs });
+    // "#project …" files the task under that project.
+    const sp = stripProjectPrefix(text, state.projects);
+    const p = parseQuickAdd(sp.text, { now, orgs });
+    const proj = sp.project || projectByName(state.projects, p.org);
     // Default to task; a type keyword ("quiz …") may still set another type.
     const type = TIMED_TYPES.has(p.type) && !p.startAt ? "task" : p.type || "task";
     actions.manualUpsert(
       manualItemFrom({
         title: p.title,
-        org: p.org,
+        org: proj ? proj.name : p.org,
         type,
         dueAt: p.dueAt,
         startAt: p.startAt,
         endAt: p.endAt,
         allDay: p.allDay,
         location: p.location,
+        meta: proj ? { projectId: proj.id } : undefined,
       })
     );
     setDraft("");
@@ -192,7 +198,7 @@ export function Todo({ state, actions, now, orgs = [] }) {
               {isCollapsed ? null : (
                 <div class="agenda-rows">
                   {g.rows.map((r) => (
-                    <TodoRow key={r.item.id} row={r} now={now} actions={actions} />
+                    <TodoRow key={r.item.id} row={r} now={now} actions={actions} projects={state.projects} />
                   ))}
                 </div>
               )}

@@ -87,9 +87,10 @@ const TYPE_ALARMS = {
  * @param {any} us userState[it.id] (may be undefined)
  * @param {any} cal settings.calendar
  * @param {number} nowMs
+ * @param {Set<string>} [excludedProjects]  project ids kept off the feed
  * @returns {any|null} the event to publish, or null to exclude
  */
-function toEvent(it, us, cal, nowMs) {
+function toEvent(it, us, cal, nowMs, excludedProjects) {
   if (!it || !it.id) return null;
   if (it.review === "pending" || it.review === "dismissed") return null;
   if (us && us.hidden) return null;
@@ -97,6 +98,11 @@ function toEvent(it, us, cal, nowMs) {
   // Gmail invitations are already on the user's Google Calendar — publishing
   // them again would duplicate the event. The panel still shows them.
   if (it.meta && it.meta.onCalendar) return null;
+  // Per-item and per-project calendar opt-outs.
+  if (it.meta && it.meta.calendar === false) return null;
+  if (it.meta && it.meta.projectId && excludedProjects && excludedProjects.has(it.meta.projectId)) {
+    return null;
+  }
 
   const done = it.status === "done" || it.status === "submitted" || !!(us && us.done);
   const inc = (cal && cal.include) || {};
@@ -172,8 +178,11 @@ function toEvent(it, us, cal, nowMs) {
  * @param {Record<string, any>} userState
  * @param {any} calSettings            settings.calendar
  * @param {Date} [now]
- * @param {{acceptPending?: boolean}} [opts]  review.showPending — pending
- *   items publish as accepted instead of being skipped.
+ * @param {{acceptPending?: boolean, projects?: any[]}} [opts]
+ *   acceptPending: review.showPending — pending items publish as accepted
+ *   instead of being skipped. projects: items whose project has
+ *   calendar:false or is archived are excluded, as is any item carrying
+ *   meta.calendar === false.
  * @returns {{payload: any, count: number, trimmed: boolean, collapsed: number}}
  */
 /**
@@ -257,11 +266,19 @@ export function buildFeedPayload(items, userState, calSettings, now = new Date()
   const cal = calSettings || {};
   const effOpts = { acceptPending: !!opts.acceptPending };
 
+  /** @type {Set<string>} */
+  const excludedProjects = new Set();
+  for (const p of Array.isArray(opts.projects) ? opts.projects : []) {
+    if (p && p.id && (p.calendar === false || p.status === "archived")) {
+      excludedProjects.add(p.id);
+    }
+  }
+
   /** @type {{ev: any, it: any, anchor: number}[]} */
   const pickedRaw = [];
   for (const it of Object.values(items || {})) {
     const eff = effectiveItem(it, us[it && it.id], effOpts);
-    const ev = toEvent(eff, us[it && it.id], cal, nowMs);
+    const ev = toEvent(eff, us[it && it.id], cal, nowMs, excludedProjects);
     if (!ev) continue;
     const a = Math.max(
       ev.dueAt ? Date.parse(ev.dueAt) : -Infinity,

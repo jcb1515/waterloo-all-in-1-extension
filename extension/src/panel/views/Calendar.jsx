@@ -75,7 +75,7 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
                     key={it.id}
                     type="button"
                     class="cal-due-pill"
-                    style={orgStyle(it.org)}
+                    style={orgStyle(it.org, state.projects)}
                     title={`${it.title}${typeof it.weight === "number" ? ` · ${it.weight}%` : ""}`}
                     onClick={() => onPick(it)}
                   >
@@ -138,7 +138,7 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
                       .filter(Boolean)
                       .join(" ")}
                     style={{
-                      ...orgStyle(ev.item.org),
+                      ...orgStyle(ev.item.org, state.projects),
                       top: ev.top * PX_PER_MIN,
                       height: ev.height * PX_PER_MIN,
                       left: `${(ev.col / ev.cols) * 100}%`,
@@ -206,7 +206,7 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
                   class={`cal-mark${m.type === "exam" || m.type === "interview" ? " major" : ""}`}
                   title={m.title}
                 >
-                  <i style={orgStyle(m.org)} />
+                  <i style={orgStyle(m.org, state.projects)} />
                   {m.title}
                 </span>
               ))}
@@ -234,7 +234,7 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
           <div class="card row-card" role="list">
             {sel.items.length ? (
               sel.items.map((it) => (
-                <ItemRow key={it.id} item={it} now={now} actions={actions} />
+                <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
               ))
             ) : (
               <p class="help cal-empty-day">Nothing on this day.</p>
