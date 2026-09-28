@@ -705,11 +705,15 @@ function coopWorkTerm(e) {
 /** Event text minus the time phrase / "(ET)" / "by end of day" — for titles. */
 function coopTextWithoutTime(text) {
   let t = String(text || "").replace(COOP_END_OF_DAY_RE, "");
-  const tm = COOP_TIME_RE.exec(t);
-  if (tm) t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  for (let i = 0; i < 4; i++) {
+    const tm = COOP_TIME_RE.exec(t);
+    if (!tm) break;
+    t = t.slice(0, tm.index) + t.slice(tm.index + tm[0].length);
+  }
   t = t.replace(COOP_ZONE_RE, " ");
   return t
     .replace(/\s*(?:at|by)\s*$/i, "")
+    .replace(/\s*\d{1,2}\s*-\s*$/, "") // a range's orphaned lower bound ("… 2 -")
     .replace(/[\s,;:–—-]+$/, "")
     .replace(/\s+/g, " ")
     .trim();

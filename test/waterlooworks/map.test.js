@@ -459,6 +459,31 @@ test("coopDateItems maps the fixture: times, ranges, ids, exclusions", () => {
   assert.ok(byId.has("waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-open"));
   assert.ok(byId.has("waterlooworks:cycle:winter-2027:cycle-1-posting-a:postings-open-2"));
   assert.ok(items.every((i) => !/\d{4}-\d{2}-\d{2}/.test(i.id)));
+
+  // Ranking lines: "Student ranking consults" are advising sessions —
+  // 'other', never rankings-due; only the close line is the deadline.
+  const consult = items.find((i) => /ranking consults/i.test(i.title));
+  assert.equal(consult.category, "other");
+  assert.equal(consult.title, "Cycle 1: Student ranking consults");
+  const rankingsDue = items.filter((i) => i.category === "rankings-due");
+  assert.deepEqual(
+    rankingsDue.map((i) => i.title),
+    ["Cycle 1: Student rankings close"]
+  );
+
+  // Word-boundary zone strip: "request" keeps its "est", and a <br>
+  // mid-phrase joins back into one event line.
+  const removal1 = items.find((i) => /Cycle 1 Match/.test(i.title));
+  const removal2 = items.find((i) => /Cycle 2 Match/.test(i.title));
+  assert.equal(
+    removal1.title,
+    "Cycle 1: Due date to request removal from Cycle 1 Match"
+  );
+  assert.equal(
+    removal2.title,
+    "Cycle 2: Due date to request removal from Cycle 2 Match"
+  );
+  assert.ok(!items.some((i) => /^Cycle \d: from Cycle/.test(i.title)));
 });
 
 test("coopDateItems: endOfDay -> 23:59 Toronto dueAt", () => {
