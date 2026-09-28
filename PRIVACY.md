@@ -39,13 +39,28 @@ No passwords, session tokens or credentials are stored.
 
 ## Optional permissions
 
-Discord and the email sites (Outlook, Gmail) are **optional host
-permissions**. The browser asks for them only when you enable those
-sources — in Settings → Sources, the panel's Sources overlay or the
-Welcome checklist. Without the grant, the extension simply doesn't read
-those sites; everything else keeps working. Revoking a grant in the
+Discord, the email sites (Outlook, Gmail) and Google Calendar are
+**optional host permissions**. The browser asks for them only when you
+enable those sources — in Settings → Sources, the panel's Sources overlay
+or the Welcome checklist. Without the grant, the extension simply doesn't
+read those sites; everything else keeps working. Revoking a grant in the
 browser's extension details stops the reading; clearing the source in
 Settings → Sources removes its stored data.
+
+**Google Calendar** (`calendar.google.com`) is the duplicate check:
+when enabled, the extension reads event titles and times from your *own*
+calendars only — no descriptions, guests or locations, and never from
+subscribed calendars (including the extension's own published feed). What
+it reads is only ever compared against your items locally; it is never
+published or sent anywhere.
+
+**Email** compares your account address against senders to detect your
+own replies — the address itself is never stored or sent.
+
+**Check readers** (panel → Sources → Check readers) run counts-only
+probes on pages you open and can download a diagnostic report — the
+report contains counts and redacted structural outlines only, never page
+text, names or addresses.
 
 ## Third parties
 

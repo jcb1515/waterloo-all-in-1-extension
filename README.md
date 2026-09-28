@@ -27,6 +27,12 @@ passwords, no OAuth setup.
 - **Email (Outlook + Gmail)** — calendar invites and dated mail
   (interviews, offer deadlines, course mail) read passively in the mail
   tabs you open, with a separate optional permission per provider.
+- **Google Calendar** — an optional duplicate check: the extension reads
+  event titles and times from your *own* calendars only, so events
+  already on your calendar are skipped on the published feed. Subscribed
+  calendars (including this extension's own feed) are never used, and
+  nothing it reads leaves the browser. Off by default — enable it in
+  Settings → Sources.
 - **Agenda panel** — click the toolbar icon for today's classes and
   deadlines, what's next, and a searchable, filterable list. Press `/` to
   search, `+` to quick-add your own items.
@@ -95,10 +101,11 @@ The extension asks for the smallest set it can work with:
   behalf as you browse: Learn, the course-outline site, Portal (and its
   API), WaterlooWorks, and the public co-op dates page.
 - **Optional hosts** are asked for only when you enable the source:
-  `discord.com` for the Teams view, and Outlook and Gmail separately for
-  reading email invites. Grant them from Settings → Sources, the panel's
-  Sources overlay or the Welcome checklist; revoke them any time from the
-  browser's extension details.
+  `discord.com` for the Teams view, Outlook and Gmail separately for
+  reading email invites, and `calendar.google.com` for the "skip events
+  already on my calendar" duplicate check. Grant them from Settings →
+  Sources, the panel's Sources overlay or the Welcome checklist; revoke
+  them any time from the browser's extension details.
 - `storage`, `alarms` and `notifications` keep your data on-device, run
   background syncs and fire reminders. `tabs` lets "Open site" focus an
   existing tab. `scripting` registers content scripts for the optional

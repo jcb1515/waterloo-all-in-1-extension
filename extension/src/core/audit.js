@@ -376,7 +376,7 @@ export function auditStore(snapshot = {}, now = new Date()) {
   }
   // A dev profile must live in the bundle, not in storage.
   if (Object.keys(snapshot).some((k) => /dev[-_]?profile/i.test(k))) {
-    leaks.push("dev-profile key");
+    leaks.push("developer profile key");
   }
   if (leaks.length) {
     issue("secrets-leak", "error", "secrets",

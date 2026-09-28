@@ -59,6 +59,7 @@ Optional host permissions (requested only when the user enables the source):
 - `https://discord.com/*` — passive, read-only capture of dated messages and events in Discord servers the user watches. The extension never posts and never reads the account token.
 - `https://outlook.office.com/*`, `https://outlook.cloud.microsoft/*`, `https://outlook.live.com/*` — reads calendar invites and dated mail in Outlook web tabs the user opens (requested separately from Gmail).
 - `https://mail.google.com/*` — the same passive reading for Gmail tabs (requested separately from Outlook).
+- `https://calendar.google.com/*` — the optional "skip events already on my calendar" duplicate check. Reads event titles and times from the user's own calendars only — never subscribed calendars and never the extension's own published feed — purely to avoid publishing duplicates. Nothing read there is transmitted. Off by default; the browser prompt appears only when the user turns the feature on.
 
 ## Data-use disclosures
 

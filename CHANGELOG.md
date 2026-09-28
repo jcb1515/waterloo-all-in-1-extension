@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.1.0
+
+### To-do and Projects (new)
+
+- A **To-do** tab: a quick-add box, filter chips, and auto-completing
+  tasks — Learn submissions, WaterlooWorks applies and offers, interview
+  slot picks, email replies and book-a-calls, and derived study prep all
+  finish themselves when the source shows it happened.
+- A **Projects** tab: make your own projects with a colour, due date and
+  milestones/tasks; they land in the agenda, the calendar feed (per-item
+  and per-project opt-outs) and the To-do tab. `#project` quick-add.
+- Customisable panel tabs: reorder and hide tabs in Settings → General.
+
+### Email and Discord tasks
+
+- Email detection fixes: a looser sender gate, a bulk-mail filter,
+  call/meeting keyword coverage and employer senders counted.
+- Reply-needed tasks ("Reply to …") and book-a-call tasks ("Book a call
+  with …") from Outlook, Gmail and Discord — auto-completing on "You
+  replied" / "Invite received".
+- **Scan my mail** — guided per-provider walk through older mail, driven
+  by clicks from the extension, never on its own.
+
+### Duplicate protection
+
+- Gmail calendar invites mark items "On your Google Calendar" and keep
+  them off the published feed.
+- Org-aware cross-source matching (course codes and team names), a
+  publish-time guard that collapses same-event stragglers, and the new
+  **Google Calendar** reader: enable it in Settings → Sources and events
+  already on your own calendar are skipped automatically. It reads titles
+  and times only, from your own calendars only — never subscribed
+  calendars (so the extension's own feed can't suppress itself) and never
+  sends anything anywhere.
+
+### Reliability
+
+- **Health check** in Settings → About: audits the store for malformed
+  items, duplicates, orphans and secrets hygiene, with safe fixes and a
+  downloadable report; runs weekly in the background.
+- **Check readers** in the panel's Sources overlay: per-source checklists
+  that verify each reader sees what it expects on the pages you open,
+  with counts-only probes and a redacted report download.
+
 ## 1.0.0
 
 ### Email (new)
