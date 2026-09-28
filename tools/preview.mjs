@@ -81,13 +81,13 @@ const SHOTS_2C = [
   { name: "panel-coop-light", url: "/src/panel/panel.html?preview=1&tab=coop&prep=waterlooworks:int-acme", size: [400, 900] },
   { name: "panel-courses-light", url: "/src/panel/panel.html?preview=1&tab=courses", size: [400, 900] },
   { name: "panel-course-detail-light", url: "/src/panel/panel.html?preview=1&tab=courses&course=MATH%20117", size: [400, 900] },
-  { name: "panel-sources-overlay-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-sources-overlay-light", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
   { name: "panel-review-light", url: "/src/panel/panel.html?preview=1&view=review", size: [400, 900] },
   { name: "panel-week-360", url: "/src/panel/panel.html?preview=1&tab=calendar", size: [360, 900] },
 ];
 
 const SHOTS_CP2 = [
-  { name: "panel-sources-discord-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-sources-discord-light", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
   { name: "options-sources-discord-light", url: "/src/options/options.html?preview=1&adv=1&imports=1#sources", size: [1280, 900] },
   { name: "panel-agenda-cp2-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
   { name: "panel-updates-cp2-light", url: "/src/panel/panel.html?preview=1&view=updates", size: [400, 900] },
@@ -100,7 +100,7 @@ const SHOTS_3A = [
   { name: "panel-quickadd-light", url: "/src/panel/panel.html?preview=1&quickadd=1&q=" + encodeURIComponent("Team meeting tomorrow 6-7pm E7 2324"), size: [400, 900] },
   { name: "panel-teams-light", url: "/src/panel/panel.html?preview=1&tab=teams", size: [400, 900] },
   { name: "panel-teams-dark", url: "/src/panel/panel.html?preview=1&tab=teams", size: [400, 900], dark: true },
-  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
   { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
   { name: "options-general-hidden-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900] },
   { name: "options-about-backup-light", url: "/src/options/options.html?preview=1&backup=import#about", size: [1280, 900] },
@@ -112,7 +112,7 @@ const SHOTS_3B = [
   { name: "panel-header-400", url: "/src/panel/panel.html?preview=1", size: [400, 520] },
   { name: "panel-header-480", url: "/src/panel/panel.html?preview=1", size: [480, 520] },
   { name: "panel-item-sheet-light", url: "/src/panel/panel.html?preview=1&item=learn%3Aece105-quiz3", size: [400, 900] },
-  { name: "panel-sources-permission-light", url: "/src/panel/panel.html?preview=1&view=sources&noperms=discord", size: [400, 900] },
+  { name: "panel-sources-permission-light", url: "/src/panel/panel.html?preview=1&tab=sources&noperms=discord", size: [400, 900] },
   { name: "options-sources-permission-light", url: "/src/options/options.html?preview=1&noperms=discord#sources", size: [1280, 900] },
   { name: "options-calendar-download-light", url: "/src/options/options.html?preview=1&cal=published#calendar", size: [1280, 900] },
 ];
@@ -120,7 +120,7 @@ const SHOTS_3B = [
 const SHOTS_CP3 = [
   { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
   { name: "panel-agenda-dark", url: "/src/panel/panel.html?preview=1", size: [400, 900], dark: true },
-  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&view=sources", size: [400, 900] },
+  { name: "panel-sources-light", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900] },
   { name: "options-sources-email-light", url: "/src/options/options.html?preview=1&adv=1#sources", size: [1280, 900] },
   { name: "panel-course-instructors-light", url: "/src/panel/panel.html?preview=1&tab=courses&course=MATH%20117", size: [400, 900] },
   { name: "panel-coop-linked-light", url: "/src/panel/panel.html?preview=1&tab=coop", size: [400, 900] },
@@ -138,10 +138,26 @@ const SHOTS_POST3 = [
   { name: "options-general-todos-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#todos" },
   { name: "options-general-tabs-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#panel-tabs" },
   { name: "options-sources-mailscan-light", url: "/src/options/options.html?preview=1&mailscan=outlook#sources", size: [1280, 900] },
-  { name: "panel-sources-mailscan-light", url: "/src/panel/panel.html?preview=1&mailscan=1&view=sources", size: [400, 900] },
+  { name: "panel-sources-mailscan-light", url: "/src/panel/panel.html?preview=1&mailscan=1&tab=sources", size: [400, 900] },
   { name: "options-about-health-light", url: "/src/options/options.html?preview=1&health=1#about", size: [1280, 900], scroll: "#health" },
   { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=waterlooworks:applications", size: [400, 900] },
   { name: "panel-check-readers-dark", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=waterlooworks:applications", size: [400, 900], dark: true },
+];
+
+const SHOTS_V2 = [
+  { name: "upcoming-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [360, 900] },
+  { name: "upcoming-dark-400", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [400, 900], dark: true },
+  { name: "upcoming-source-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming&src=waterlooworks", size: [360, 900] },
+  { name: "sources-tiles-light-360", url: "/src/panel/panel.html?preview=1&tab=sources", size: [360, 900] },
+  { name: "sources-tiles-dark-400", url: "/src/panel/panel.html?preview=1&tab=sources", size: [400, 900], dark: true },
+  { name: "source-picked-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=waterlooworks&seg=picked", size: [360, 900] },
+  { name: "source-setup-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=discord&seg=setup", size: [360, 900] },
+  { name: "source-check-dark-400", url: "/src/panel/panel.html?preview=1&tab=sources&source=learn&seg=check", size: [400, 900], dark: true },
+  { name: "item-sheet-light-360", url: "/src/panel/panel.html?preview=1&item=waterlooworks%3Aint-acme", size: [360, 900] },
+  { name: "more-light-360", url: "/src/panel/panel.html?preview=1&more=1", size: [360, 900] },
+  { name: "more-dark-400", url: "/src/panel/panel.html?preview=1&more=1", size: [400, 900], dark: true },
+  { name: "settings-light-360", url: "/src/options/options.html?preview=1#general", size: [360, 900] },
+  { name: "settings-dark-400", url: "/src/options/options.html?preview=1#general", size: [400, 900], dark: true },
 ];
 
 const SHOTS_FINAL = [
@@ -152,6 +168,7 @@ const SHOTS_FINAL = [
 ];
 
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "v2" ? SHOTS_V2 :
   process.env.WA1_SHOT_DIR === "final" ? SHOTS_FINAL :
   process.env.WA1_SHOT_DIR === "post3" ? SHOTS_POST3 :
   process.env.WA1_SHOT_DIR === "cp3" ? SHOTS_CP3 :

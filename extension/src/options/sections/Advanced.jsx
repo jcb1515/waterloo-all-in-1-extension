@@ -102,7 +102,7 @@ function DiscordAdvanced({ src, save }) {
         <input
           class="input"
           defaultValue={src.userId || ""}
-          placeholder="e.g. 123456789012345678"
+          placeholder="e.g. 000000000000000001"
           onBlur={(e) => patch({ userId: /** @type {any} */ (e.target).value.trim() })}
         />
       </Field>

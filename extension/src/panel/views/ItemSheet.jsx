@@ -11,7 +11,9 @@ import {
   fmtEstimate,
   primaryLink,
   sourceLabel,
+  sourceOpenLink,
 } from "../model/itemsheet.js";
+import { ADAPTERS } from "../../core/registry.js";
 import { Checklist } from "../components/Checklist.jsx";
 import { typeLabelFor } from "../components/ItemRow.jsx";
 import { orgStyle } from "../../ui/colors.js";
@@ -236,15 +238,28 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
         {seenIn.length ? (
           <div class="sheet-sources">
             <h3 class="sheet-h">Sources</h3>
-            {seenIn.map((s, i) => (
-              <div class="sheet-src" key={`${s.source}-${s.scope || ""}-${i}`}>
-                <span class="sheet-src-name">{sourceLabel(s.source)}</span>
-                {s.scope ? <span class="badge badge-muted">{s.scope}</span> : null}
-                {s.at ? (
-                  <span class="sheet-src-at tabular">{fmtAgo(s.at, now)}</span>
-                ) : null}
-              </div>
-            ))}
+            {seenIn.map((s, i) => {
+              const openUrl = sourceOpenLink(item, s, ADAPTERS);
+              return (
+                <div class="sheet-src" key={`${s.source}-${s.scope || ""}-${i}`}>
+                  <span class="sheet-src-name">{sourceLabel(s.source)}</span>
+                  {s.scope ? <span class="badge badge-muted">{s.scope}</span> : null}
+                  {s.at ? (
+                    <span class="sheet-src-at tabular">{fmtAgo(s.at, now)}</span>
+                  ) : null}
+                  {openUrl ? (
+                    <button
+                      type="button"
+                      class="linklike sheet-src-open"
+                      title={openUrl}
+                      onClick={() => actions.open(openUrl)}
+                    >
+                      Open <ExternalLinkIcon size={10} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
             {item.evidence && item.evidence.snippet ? (
               <p class="review-evidence">{item.evidence.snippet}</p>
             ) : null}

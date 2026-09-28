@@ -1,13 +1,15 @@
 // @ts-check
 /*
-  Options-page PDF -> text. W2's pdfText() dynamically imports pdfjs; because
-  the bundle maps both imports to one module instance, setting workerSrc here
-  covers it. Only extension pages load this — the worker file ships at
-  dist/vendor/pdf.worker.min.mjs. Without a chrome.runtime (tests, preview)
-  pdfjs falls back to its fake worker.
+  Options-page PDF -> text. pdfjs is ~1.9 MB, so it must never land in a
+  static bundle: both this module and W2's pdfText() import it dynamically,
+  and esbuild splits it into a lazy chunk loaded on first PDF import.
+  Because the bundle maps both dynamic imports to one module instance,
+  setting workerSrc here covers pdfText's documents too. Only extension
+  pages load this — the worker file ships at dist/vendor/pdf.worker.min.mjs.
+  Without a chrome.runtime (tests, preview) pdfjs falls back to its fake
+  worker.
 */
 
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { pdfText } from "../sources/outline/pdf.js";
 
 let configured = false;
@@ -17,6 +19,7 @@ let configured = false;
  * @returns {Promise<string>}
  */
 export async function pdfToText(bytes) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   if (!configured) {
     configured = true;
     try {
