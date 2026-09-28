@@ -647,7 +647,7 @@ export async function runRefreshRound() {
         step: name,
         ok: false,
         ms: Date.now() - t,
-        reason: e === SIGNED_OUT ? "signed-out" : `error:${e?.name || "Error"}`,
+        reason: e === SIGNED_OUT ? "signed-out" : `error:${/** @type {any} */ (e)?.name || "Error"}`,
       });
       throw e;
     }
