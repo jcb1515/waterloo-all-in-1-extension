@@ -562,6 +562,100 @@ export function previewState(nowD = new Date(), variants = {}) {
     seenIn: seen("manual", "email-advisor", "manual", today),
   });
 
+  // ——— Projects: three user projects; their items are ordinary manual
+  // items with meta.projectId and org = the project name. ———
+  const projects = [
+    {
+      id: "proj_communihacks",
+      name: "CommuniHacks (MLH)",
+      color: 2,
+      description: "36-hour hackathon — team of four, hardware track.",
+      dueAt: dayAt(nowD, 12, 9, 0),
+      allDay: true,
+      status: "active",
+      calendar: true,
+      createdAt: iso(now - 6 * DAY),
+    },
+    {
+      id: "proj_uwasic",
+      name: "UWASIC tapeout prep",
+      color: 5,
+      description: "Get the tile ready for the shuttle run.",
+      status: "active",
+      calendar: false, // kept off the calendar feed
+      createdAt: iso(now - 14 * DAY),
+    },
+    {
+      id: "proj_coopapps",
+      name: "Co-op applications",
+      color: 6,
+      status: "active",
+      calendar: true,
+      createdAt: iso(now - 3 * DAY),
+    },
+  ];
+  /** @param {string} key @param {string} pid @param {Record<string, any>} f */
+  const padd = (key, pid, f) =>
+    add(`manual:proj:${key}`, {
+      source: "manual",
+      org: projects.find((p) => p.id === pid).name,
+      confidence: "exact",
+      evidence: { method: "manual" },
+      meta: { projectId: pid },
+      seenIn: seen("manual", `proj:${key}`, "manual", today),
+      ...f,
+    });
+  // CommuniHacks: due item synced from project.dueAt + milestones/tasks.
+  padd("communihacks-due", "proj_communihacks", {
+    id: "manual:project:proj_communihacks:due",
+    type: "deadline",
+    title: "CommuniHacks (MLH) due",
+    dueAt: dayAt(nowD, 12, 23, 59),
+    allDay: true,
+    meta: { projectId: "proj_communihacks", projectDue: true },
+  });
+  padd("communihacks-video", "proj_communihacks", {
+    type: "task",
+    title: "Film the 2-minute demo video",
+    dueAt: dayAt(nowD, 4, 20, 0),
+  });
+  padd("communihacks-proto", "proj_communihacks", {
+    type: "deadline",
+    title: "Milestone: working prototype",
+    dueAt: dayAt(nowD, 9, 23, 59),
+  });
+  padd("communihacks-sync", "proj_communihacks", {
+    type: "meeting",
+    title: "Team sync — hackathon plan",
+    startAt: dayAt(nowD, 2, 18, 0),
+    endAt: dayAt(nowD, 2, 18, 45),
+  });
+  padd("communihacks-parts", "proj_communihacks", {
+    type: "task",
+    title: "Order sensor parts",
+    status: "done",
+  });
+  // UWASIC: calendar off, mixed dates.
+  padd("uwasic-checklist", "proj_uwasic", {
+    type: "task",
+    title: "Tapeout checklist review",
+    dueAt: dayAt(nowD, 7, 12, 0),
+  });
+  padd("uwasic-pcb", "proj_uwasic", {
+    type: "task",
+    title: "Order test PCBs",
+  });
+  // Co-op applications: no project due date.
+  padd("coopapps-resume", "proj_coopapps", {
+    type: "task",
+    title: "Tailor resume for firmware roles",
+  });
+  padd("coopapps-batch", "proj_coopapps", {
+    type: "task",
+    title: "Submit three more applications",
+    dueAt: dayAt(nowD, 5, 17, 0),
+  });
+
   const userState = {
     "learn:math115-asn4": { done: true, doneAt: iso(now - 30 * HOUR) },
     "learn:ece105-quiz3": {
@@ -1088,5 +1182,5 @@ export function previewState(nowD = new Date(), variants = {}) {
   // exactly what recompute would store.
   const todos = deriveTodos({ items, applications, userState, settings, now: nowD });
 
-  return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt };
+  return { items, todos, userState, sourceState, courses, applications, terms: {}, settings, discovery, calendarFeed, outlineFiles, updates, updatesSeenAt, projects };
 }

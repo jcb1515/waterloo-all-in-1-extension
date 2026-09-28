@@ -129,6 +129,11 @@ const SHOTS_CP3 = [
 const SHOTS_POST3 = [
   { name: "panel-todo-light", url: "/src/panel/panel.html?preview=1&tab=todo", size: [400, 900] },
   { name: "panel-todo-dark", url: "/src/panel/panel.html?preview=1&tab=todo", size: [400, 900], dark: true },
+  { name: "panel-agenda-light", url: "/src/panel/panel.html?preview=1", size: [400, 900] },
+  { name: "panel-projects-light", url: "/src/panel/panel.html?preview=1&tab=projects", size: [400, 900] },
+  { name: "panel-projects-dark", url: "/src/panel/panel.html?preview=1&tab=projects", size: [400, 900], dark: true },
+  { name: "panel-project-detail-light", url: "/src/panel/panel.html?preview=1&tab=projects&project=proj_communihacks", size: [400, 900] },
+  { name: "panel-project-new-light", url: "/src/panel/panel.html?preview=1&tab=projects&newproject=1", size: [400, 900] },
   { name: "panel-tabs-360", url: "/src/panel/panel.html?preview=1", size: [360, 900] },
   { name: "options-general-todos-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#todos" },
   { name: "options-general-tabs-light", url: "/src/options/options.html?preview=1#general", size: [1280, 900], scroll: "#panel-tabs" },
