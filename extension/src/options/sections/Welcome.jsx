@@ -45,6 +45,7 @@ export function WelcomeSection({ settings, state }) {
   const ss = ((state && state.sourceState) || {});
   const learnOk = !!(ss.learn && ss.learn.lastOkAt);
   const discordOk = useSourceAccess("discord");
+  const gcalOk = useSourceAccess("gcal");
   const emailNeeded = neededGroups(
     "outlook",
     settings.sources && settings.sources.outlook
@@ -65,7 +66,7 @@ export function WelcomeSection({ settings, state }) {
     <div class="opt-stack">
       <Card title="Get set up">
         <p class="help">
-          Six quick steps — everything happens in your browser, nothing is sent
+          A few quick steps — everything happens in your browser, nothing is sent
           anywhere until calendar sync ships.
         </p>
         <ol class="welcome-list">
@@ -144,6 +145,31 @@ export function WelcomeSection({ settings, state }) {
                 />
               </>
             ))}
+          </Step>
+          <Step
+            n={8}
+            done={gcalOk === true}
+            title={
+              <>
+                Google Calendar: skip what's already on it{" "}
+                <a class="welcome-link" href="#sources">Sources</a>
+              </>
+            }
+          >
+            Optional — reads event titles and times from your <em>own</em> calendars
+            only, so an event already on your calendar isn't published again.
+            Nothing is read unless you turn it on; subscribed calendars
+            (including this extension's feed) are never used.
+            {gcalOk === false ? (
+              <>
+                {" "}
+                <AllowSourceButton
+                  sourceId="gcal"
+                  label="Allow calendar.google.com"
+                  className="btn btn-sm"
+                />
+              </>
+            ) : null}
           </Step>
         </ol>
       </Card>

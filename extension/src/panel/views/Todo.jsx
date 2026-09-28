@@ -18,7 +18,7 @@ const FILTERS = [
   ["coop", "Co-op"],
   ["teams", "Teams"],
   ["projects", "Projects"],
-  ["replies", "Replies"],
+  ["replies", "Replies & calls"],
   ["mine", "Mine"],
 ];
 

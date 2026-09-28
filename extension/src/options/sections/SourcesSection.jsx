@@ -30,20 +30,24 @@ export function SourcesSection({ settings, save, state }) {
   const [denied, setDenied] = useState(/** @type {Record<string, boolean>} */ ({}));
 
   const patchSource = (id, patch) => save({ sources: { [id]: { ...(src[id] || {}), ...patch } } });
-  const enabledOf = (id) => !src[id] || src[id].enabled !== false;
+  // gcal is the one source that's off until the user turns it on — nothing
+  // reads Google Calendar unless the toggle (and its permission) is on.
+  const enabledOf = (id) =>
+    id === "gcal" ? !!(src[id] && src[id].enabled === true) : !src[id] || src[id].enabled !== false;
 
   /**
-   * Enabling Discord asks for its host group inside this click — denied ->
-   * the toggle stays off with a note. The email adapter's master toggle only
-   * flips the flag; its per-provider toggles ask for their own groups.
+   * Enabling Discord or Google Calendar asks for its host group inside this
+   * click — denied -> the toggle stays off with a note. The email adapter's
+   * master toggle only flips the flag; its per-provider toggles ask for
+   * their own groups.
    * @param {string} id adapter id
    * @param {boolean} v
    */
   const onToggle = async (id, v) => {
-    if (v && !IS_PREVIEW && id === "discord") {
-      const ok = await requestSourceAccess("discord");
+    if (v && !IS_PREVIEW && (id === "discord" || id === "gcal")) {
+      const ok = await requestSourceAccess(id);
       if (!ok) {
-        setDenied((d) => ({ ...d, discord: true }));
+        setDenied((d) => ({ ...d, [id]: true }));
         return;
       }
     }
@@ -101,6 +105,14 @@ export function SourcesSection({ settings, save, state }) {
                 <OutlineUrls src={src.outline || {}} save={save} />
                 <OutlineFiles files={(state && state.outlineFiles) || []} />
               </>
+            ) : null}
+            {a.id === "gcal" ? (
+              <p class="help">
+                Skip events already on my calendar — reads event titles and times from your own
+                calendars only, so nothing is published twice. Subscribed calendars (including this
+                extension's own feed) never suppress anything, and nothing it reads leaves your
+                browser.
+              </p>
             ) : null}
             {a.id === "outlook" ? (
               <>

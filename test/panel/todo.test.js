@@ -96,6 +96,7 @@ test("buildTodos: filters split school/coop/replies/mine", () => {
     dl: item("dl", { dueAt: iso(t0 + DAY), org: "ECE 105" }), // school
     ww: item("ww", { source: "waterlooworks", type: "offer-deadline", dueAt: iso(t0 + DAY) }), // coop
     rep: item("rep", { source: "outlook", type: "task", category: "reply", dueAt: iso(t0 + DAY) }), // reply
+    book: item("book", { source: "gmail", type: "task", category: "book-call", dueAt: iso(t0 + DAY) }), // reply
     man: item("man", { source: "manual", type: "task" }), // mine
     team: item("team", { source: "discord", type: "task", dueAt: iso(t0 + DAY) }), // teams
   };
@@ -104,12 +105,41 @@ test("buildTodos: filters split school/coop/replies/mine", () => {
       .flatMap((g) => g.rows)
       .map((r) => r.item.id)
       .sort();
-  assert.deepEqual(pick("all"), ["dl", "man", "rep", "team", "ww"]);
+  assert.deepEqual(pick("all"), ["book", "dl", "man", "rep", "team", "ww"]);
   assert.deepEqual(pick("school"), ["dl"]);
   assert.deepEqual(pick("coop"), ["ww"]);
-  assert.deepEqual(pick("replies"), ["rep"]);
+  assert.deepEqual(pick("replies"), ["book", "rep"], "book-call rows count under Replies & calls");
   assert.deepEqual(pick("mine"), ["man"]);
   assert.deepEqual(pick("teams"), ["team"]);
+  const model = buildTodos({ items, settings: SETTINGS, now: NOW });
+  assert.equal(model.counts.reply, 2, "the Replies & calls chip counts replies + book-calls");
+});
+
+test("buildTodos: a book-call row done via an invite shows 'Invite received'", () => {
+  const items = {
+    book: item("book", {
+      source: "gmail",
+      type: "task",
+      category: "book-call",
+      title: "Book a call with Jane Recruiter",
+      status: "done",
+      dueAt: iso(t0 + DAY),
+    }),
+    rep: item("rep", {
+      source: "gmail",
+      type: "task",
+      category: "reply",
+      title: "Reply to Prof: midterm",
+      status: "done",
+      dueAt: iso(t0 + DAY),
+    }),
+  };
+  const out = buildTodos({ items, settings: SETTINGS, now: NOW });
+  const rows = Object.fromEntries(
+    out.groups.flatMap((g) => g.rows).map((r) => [r.item.id, r]),
+  );
+  assert.equal(rows.book.doneReason, "Invite received");
+  assert.equal(rows.rep.doneReason, "You replied");
 });
 
 test("buildTodos: done reasons — Checked off, Submitted on Learn, auto rules", () => {

@@ -207,6 +207,21 @@ test("autoDoneRule: a reply task completes when its status is done", () => {
   assert.equal(autoDoneRule({ ...r, status: "done" }).done, true);
 });
 
+test("autoDoneRule: a book-call task completes as 'Invite received'", () => {
+  const b = item("gmail:book:thr-1", { source: "gmail", type: "task", category: "book-call" });
+  assert.deepEqual(autoDoneRule(b), { done: false, reason: "Invite received" });
+  assert.deepEqual(autoDoneRule({ ...b, status: "done" }), {
+    done: true,
+    reason: "Invite received",
+  });
+});
+
+test("todoSourceItem: book-call tasks follow the replies toggle", () => {
+  const b = item("gmail:book:thr-1", { source: "gmail", type: "task", category: "book-call" });
+  assert.equal(todoSourceItem(b, SETTINGS), true);
+  assert.equal(todoSourceItem(b, { todos: { replies: false } }), false);
+});
+
 test("autoDoneRule: a timeslot pick completes when an interview item exists for the job", () => {
   const slot = item("w:slot", { source: "waterlooworks", type: "deadline", category: "interview-timeslot", meta: { jobId: "7" } });
   assert.equal(autoDoneRule(slot, { items: {} }).done, false);

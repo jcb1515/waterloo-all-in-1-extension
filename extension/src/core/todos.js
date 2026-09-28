@@ -257,10 +257,10 @@ export function todoSourceItem(item, settings = {}) {
   if (auto === "offer" || auto === "rank") return cfg.coop !== false;
   if (auto) return true; // project and future derived rules always list
   if (item.type === "task") {
-    if (item.category === "reply") return cfg.replies !== false;
+    if (item.category === "reply" || item.category === "book-call") return cfg.replies !== false;
     return true; // manual + future project tasks always list
   }
-  if (item.category === "reply") return cfg.replies !== false;
+  if (item.category === "reply" || item.category === "book-call") return cfg.replies !== false;
   // WaterlooWorks timeslot picks and co-op deadlines.
   if (
     item.type === "application-deadline" ||
@@ -323,6 +323,11 @@ export function autoDoneRule(item, { applications = {}, items = {}, now = new Da
       ? Object.values(applications || {}).some((a) => a && a.jobId === jobId)
       : false;
     return { done: !!done, reason: "Applied on WaterlooWorks" };
+  }
+  if (item.category === "book-call") {
+    // The email adapter flips the task's status to done when an invite for
+    // the booking lands — a different story than "you replied".
+    return { done: item.status === "done", reason: "Invite received" };
   }
   if (item.category === "reply") {
     return { done: item.status === "done", reason: "You replied" };

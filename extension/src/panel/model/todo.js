@@ -27,7 +27,7 @@ function kindOf(/** @type {any} */ item) {
   if (meta.auto === "study") return "study";
   if (meta.auto === "offer" || meta.auto === "rank") return "coop";
   if (meta.auto === "project" || meta.projectId || item.source === "projects") return "project";
-  if (item.category === "reply") return "reply";
+  if (item.category === "reply" || item.category === "book-call") return "reply";
   if (
     item.type === "application-deadline" ||
     item.type === "offer-deadline" ||
