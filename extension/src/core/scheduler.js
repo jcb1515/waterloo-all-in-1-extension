@@ -182,12 +182,26 @@ export function nextSourceState(prev, result, now, kind, itemCount, sourceId) {
   const p = prev || {};
   const nowIso = (now instanceof Date ? now : new Date(now)).toISOString();
 
-  // scopeOkAt[<scope>] = when that scope last produced items. An error or an
-  // empty read never clears it — it's "when did this last work?", not "when
-  // did it last run". An observe's readOk scopes count as ok reads too.
+  // scopeOkAt[<scope>] = when that scope last *produced* items — a real
+  // read, not a re-served cache. no-tab/signed-out syncs return the cached
+  // union without reading anything; cached observe early-returns carry
+  // complete:false and no readOk. An error or an empty read never clears it.
   /** @type {Set<string>} */
   const okScopes = new Set();
-  if (!result.error && Array.isArray(result.items) && result.items.length >= 1) {
+  const badSession =
+    result.session === "no-tab" || result.session === "signed-out";
+  const realRead =
+    kind !== "observe" ||
+    (Array.isArray(result.readOk)
+      ? result.readOk.length > 0
+      : result.complete !== false);
+  if (
+    !result.error &&
+    Array.isArray(result.items) &&
+    result.items.length >= 1 &&
+    !badSession &&
+    realRead
+  ) {
     const s = result.scope || (kind === "sync" ? "sync" : sourceId);
     if (s) okScopes.add(s);
     if (kind === "observe" && Array.isArray(result.readOk)) {

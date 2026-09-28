@@ -249,6 +249,79 @@ test("scopeOkAt: empty/error results never write it, prior entries survive", () 
   assert.deepEqual(syncErr.scopeOkAt, prior, "sync error -> kept");
 });
 
+test("scopeOkAt: cached re-serves and dead sessions never stamp", () => {
+  const prior = { waterlooworks: new Date(NOW - 86400000).toISOString() };
+  const prev = { scopeOkAt: prior };
+
+  // WW sync returns the cached union with session:"no-tab" — nothing read.
+  const noTab = nextSourceState(
+    prev,
+    { items: [{ id: "a" }], complete: true, session: "no-tab", state: {} },
+    new Date(NOW),
+    "sync",
+    1,
+    "waterlooworks"
+  );
+  assert.deepEqual(noTab.scopeOkAt, prior, "no-tab sync must not stamp");
+
+  // An observe's incomplete DOM snapshot / JSON-body early return: cached
+  // items, complete:false, no readOk — the page wasn't really read.
+  const cached = nextSourceState(
+    prev,
+    { items: [{ id: "a" }], complete: false, scope: "waterlooworks", state: {} },
+    new Date(NOW),
+    "observe",
+    1,
+    "waterlooworks"
+  );
+  assert.deepEqual(cached.scopeOkAt, prior, "incomplete observe must not stamp");
+
+  // Signed-out reads produce items from cache but prove nothing worked.
+  const signedOut = nextSourceState(
+    prev,
+    {
+      items: [{ id: "a" }],
+      complete: false,
+      scope: "waterlooworks",
+      session: "signed-out",
+      state: {},
+    },
+    new Date(NOW),
+    "observe",
+    1,
+    "waterlooworks"
+  );
+  assert.deepEqual(signedOut.scopeOkAt, prior, "signed-out must not stamp");
+
+  // The real observe does stamp: readOk proves the page was read.
+  const real = nextSourceState(
+    prev,
+    {
+      items: [{ id: "a" }],
+      complete: true,
+      scope: "waterlooworks",
+      readOk: ["waterlooworks"],
+      state: {},
+    },
+    new Date(NOW),
+    "observe",
+    1,
+    "waterlooworks"
+  );
+  assert.equal(real.scopeOkAt["waterlooworks"], new Date(NOW).toISOString());
+
+  // A complete observe with no readOk field at all still counts.
+  const completeNoReadOk = nextSourceState(
+    {},
+    { items: [{ id: "a" }], complete: true, scope: "manual", state: {} },
+    new Date(NOW),
+    "observe",
+    1,
+    "manual"
+  );
+  assert.equal(completeNoReadOk.scopeOkAt["manual"], new Date(NOW).toISOString());
+});
+
 test("scopeOkAt caps at 50 scopes, dropping the oldest timestamps", () => {
   /** @type {Record<string, string>} */
   const prev = {};
