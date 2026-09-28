@@ -6,17 +6,18 @@ extension against real pages: "does the tab see what the parser expects?" and
 
 ## Setup
 
-Remote debugging must be enabled once per Edge session:
+Since Chromium 136, Edge ignores `--remote-debugging-port` on the default
+profile — it must run on a dedicated profile:
 
-1. Close **every** Edge window (check the tray too) — the flag only applies to a
-   fresh process.
-2. Start Edge with the debug port:
+1. Start a dedicated profile (no need to close normal Edge):
 
    ```powershell
-   & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222
+   & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\wa1-edge-debug"
    ```
 
-3. Reload the unpacked extension (`edge://extensions`) if it was rebuilt.
+2. First run only: load the unpacked `dist/` in that profile and sign in to
+   each site (logins persist in that folder).
+3. Verify with `curl.exe http://127.0.0.1:9222/json/version`.
 
 If the port isn't reachable, every command exits with a pointer back here.
 `WA1_CDP` overrides the endpoint (default `http://127.0.0.1:9222`).
@@ -54,6 +55,16 @@ npm run live -- watch --source waterlooworks --secs 120
 plus up to five `type | Toronto date+time | title` rows. Learn and Portal are
 passive API sources — they have no DOM extract, so `probe` reports that.
 
-`storage`/`watch` locate the extension's own service worker (a
-`chrome-extension://` target whose manifest name is `Waterloo All-in-1`) and
-read `chrome.storage.local`. Nothing is ever written.
+`storage`/`watch` locate the extension's own service worker: for each
+`chrome-extension://` service-worker target the tool opens its websocket and
+evaluates `chrome.runtime.getManifest().name`, keeping the ones that answer
+`Waterloo All-in-1`. If several copies match (two unpacked `dist/` builds can
+be loaded side by side), the command lists them and exits — pick one with
+`--ext <id>` or the `WA1_EXT_ID` environment variable:
+
+```sh
+npm run live -- storage --ext maihpiennplbbcopdcklaobaoipbejjb
+set WA1_EXT_ID=maihpiennplbbcopdcklaobaoipbejjb && npm run live -- watch
+```
+
+Nothing is ever written.

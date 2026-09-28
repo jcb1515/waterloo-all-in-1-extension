@@ -6,6 +6,7 @@ import { Card, Field, Toggle } from "../bits.jsx";
 import { IS_PREVIEW } from "../../panel/data.js";
 import { previewState } from "../../panel/preview-fixtures.js";
 import { replaceRedactWords } from "../../capture/redact.js";
+import { enqueue, getLocal, mutateKey } from "../../core/store.js";
 import { fmtAgo } from "../../panel/model/agenda.js";
 import { AlertTriangleIcon } from "../../ui/icons.jsx";
 
@@ -23,28 +24,29 @@ const discoDefaults = { enabled: true, redactWords: [] };
 
 async function readDiscoverySettings() {
   if (IS_PREVIEW) return { ...discoDefaults, redactWords: [] };
-  const { discoverySettings } = await chrome.storage.local.get("discoverySettings");
-  const s = discoverySettings && typeof discoverySettings === "object" ? discoverySettings : {};
+  const s = await getLocal("discoverySettings");
+  const o = s && typeof s === "object" ? s : {};
   return {
-    enabled: s.enabled !== false,
-    redactWords: Array.isArray(s.redactWords) ? s.redactWords : [],
+    enabled: o.enabled !== false,
+    redactWords: Array.isArray(o.redactWords) ? o.redactWords : [],
   };
 }
 
 async function writeDiscoverySettings(patch) {
   if (IS_PREVIEW) return;
-  const cur = await readDiscoverySettings();
-  await chrome.storage.local.set({ discoverySettings: { ...cur, ...patch } });
+  await mutateKey("discoverySettings", (cur) => ({
+    ...(cur && typeof cur === "object" ? cur : {}),
+    ...patch,
+  }));
 }
 
 async function readDiscoveryData() {
   if (IS_PREVIEW) return previewState(new Date()).discovery;
-  const keys = DISCOVERY_SITES.map((s) => `discovery:${s.id}`);
-  const all = await chrome.storage.local.get(keys);
   /** @type {Record<string, any>} */
   const out = {};
   for (const s of DISCOVERY_SITES) {
-    if (all[`discovery:${s.id}`]) out[s.id] = all[`discovery:${s.id}`];
+    const v = await getLocal(`discovery:${s.id}`);
+    if (v) out[s.id] = v;
   }
   return out;
 }
@@ -52,7 +54,7 @@ async function readDiscoveryData() {
 async function downloadDiscovery(siteId, redactWords) {
   const data = IS_PREVIEW
     ? previewState(new Date()).discovery[siteId]
-    : (await chrome.storage.local.get(`discovery:${siteId}`))[`discovery:${siteId}`];
+    : await getLocal(`discovery:${siteId}`);
   const version = IS_PREVIEW ? "preview" : chrome.runtime.getManifest().version;
   const report = {
     kind: "wa1-discovery",
@@ -114,13 +116,15 @@ export function PrivacySection({ now }) {
       });
       return;
     }
-    await chrome.storage.local.remove(`discovery:${id}`);
+    await enqueue(() => chrome.storage.local.remove(`discovery:${id}`));
     load();
   };
 
   const deleteEverything = async () => {
     if (!IS_PREVIEW) {
-      await chrome.storage.local.clear();
+      // clear() isn't covered by the store helpers — enqueue it so a
+      // pending write can't resurrect a key the user just wiped.
+      await enqueue(() => chrome.storage.local.clear());
       location.reload();
     }
     setConfirming(false);

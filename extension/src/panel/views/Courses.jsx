@@ -6,18 +6,14 @@
 import { useMemo, useState } from "preact/hooks";
 import { courseCards, courseItems, gradeSummary, weekTopics } from "../model/courses.js";
 import { fmtDay, fmtTime } from "../model/agenda.js";
-import { normCourseCode } from "../../core/contract.js";
 import {
   groupPatch,
-  outlineUrlPatch,
   sectionsPatch,
   termLabel,
 } from "../model/setup.js";
 import {
-  AddOutlineCard,
-  OutlineFileList,
   OutlineLinkEditor,
-  saveOutlineUrls,
+  OutlineManager,
   useOutlineFiles,
 } from "../components/OutlineSetup.jsx";
 import { orgStyle } from "../../ui/colors.js";
@@ -28,7 +24,6 @@ import {
   ExternalLinkIcon,
   GraduationCapIcon,
   PlusIcon,
-  TrashIcon,
 } from "../../ui/icons.jsx";
 
 const pct = (n) => (n == null ? "—" : `${Math.round(n * 10) / 10}%`);
@@ -326,9 +321,8 @@ export function Courses({ state, actions, now }) {
     [state.courses, state.items, state.userState, now]
   );
   const [selCode, setSelCode] = useState(() => query0("course"));
-  // ?add=1 opens the Add outline card straight away (deep link/screenshots).
+  // ?add=1 opens the outline manager straight away (deep link/screenshots).
   const [adding, setAdding] = useState(() => query0("add") === "1");
-  const outlineLib = useOutlineFiles(state, actions);
   const sel = selCode ? cards.find((c) => c.code === selCode) : null;
 
   if (sel) {
@@ -342,18 +336,6 @@ export function Courses({ state, actions, now }) {
       />
     );
   }
-
-  // Outline URLs configured for courses the sync hasn't produced yet.
-  const urls =
-    (state.settings &&
-      state.settings.sources &&
-      state.settings.sources.outline &&
-      state.settings.sources.outline.urls) ||
-    {};
-  const known = new Set(Object.keys(state.courses || {}).map(normCourseCode));
-  const waiting = Object.keys(urls)
-    .filter((c) => !known.has(normCourseCode(c)))
-    .sort();
 
   return (
     <div class="courses">
@@ -378,43 +360,7 @@ export function Courses({ state, actions, now }) {
           </p>
         </div>
       ) : null}
-      {adding || !cards.length ? (
-        <AddOutlineCard
-          state={state}
-          actions={actions}
-          addFiles={outlineLib.addFiles}
-          fileError={outlineLib.error}
-        />
-      ) : null}
-      <OutlineFileList files={outlineLib.files} write={outlineLib.write} />
-      {waiting.length ? (
-        <div class="card">
-          <h3>Waiting to sync</h3>
-          {waiting.map((c) => (
-            <div class="waiting-row" key={c}>
-              <span class="chip chip-org" style={orgStyle(c, state.projects)}>{c}</span>
-              <span class="waiting-url" title={urls[c]}>{urls[c]}</span>
-              <button
-                type="button"
-                class="btn-icon"
-                aria-label={`Remove ${c}`}
-                onClick={() =>
-                  saveOutlineUrls(
-                    state,
-                    actions,
-                    outlineUrlPatch(state.settings, c, null)
-                  )
-                }
-              >
-                <TrashIcon size={14} />
-              </button>
-            </div>
-          ))}
-          <p class="help">
-            Saved outline links the next outline sync picks up.
-          </p>
-        </div>
-      ) : null}
+      {adding || !cards.length ? <OutlineManager state={state} actions={actions} /> : null}
       {cards.map((c) => (
         <button
           key={c.code}

@@ -14,6 +14,8 @@ import {
   fmtWhen,
   fmtRow,
   serviceWorkerTargets,
+  swExtId,
+  pickServiceWorker,
 } from "../../tools/live/cdp.mjs";
 
 const TARGETS = [
@@ -111,4 +113,32 @@ test("serviceWorkerTargets keeps chrome-extension workers only", () => {
   const sws = serviceWorkerTargets(TARGETS);
   assert.equal(sws.length, 1);
   assert.equal(sws[0].id, "bg1");
+});
+
+test("swExtId reads the extension id from the worker url", () => {
+  assert.equal(
+    swExtId({ url: "chrome-extension://maihpiennplbbcopdcklaobaoipbejjb/background/index.js" }),
+    "maihpiennplbbcopdcklaobaoipbejjb",
+  );
+  assert.equal(swExtId({ url: "not a url" }), "");
+  assert.equal(swExtId(null), "");
+});
+
+test("pickServiceWorker narrows by --ext/WA1_EXT_ID, errors on a miss", () => {
+  const sws = [
+    { id: "sw1", type: "service_worker", url: "chrome-extension://maihpiennplbbcopdcklaobaoipbejjb/background/index.js" },
+    { id: "sw2", type: "service_worker", url: "chrome-extension://pcpgjaffdmfebdjjcaeikkjicemokbnd/background/index.js" },
+    { id: "sw3", type: "service_worker", url: "chrome-extension://otherext/background/index.js" },
+  ];
+  // no selector: every candidate goes to name verification
+  assert.deepEqual(pickServiceWorker(sws, null).candidates?.map((s) => s.id), ["sw1", "sw2", "sw3"]);
+  // selector picks exactly the matching copy (main's vs W2's dist)
+  const main = pickServiceWorker(sws, "maihpiennplbbcopdcklaobaoipbejjb");
+  assert.equal(main.candidates?.length, 1);
+  assert.equal(main.candidates?.[0].id, "sw1");
+  const w2 = pickServiceWorker(sws, "pcpgjaffdmfebdjjcaeikkjicemokbnd");
+  assert.equal(w2.candidates?.[0].id, "sw2");
+  // unknown id: an error, never a guess
+  assert.match(String(pickServiceWorker(sws, "nosuchid").error), /nosuchid/);
+  assert.deepEqual(pickServiceWorker(undefined, "x").error !== undefined, true);
 });
