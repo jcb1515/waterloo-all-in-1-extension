@@ -278,12 +278,14 @@ export async function runVerify(opts = {}) {
     ).catch(() => null);
     const fn = mod && typeof mod === "object" && /** @type {any} */ (mod).deriveTodos;
     if (typeof fn === "function") {
-      const out = fn(items, { now, applications });
+      const out = fn({ items, now, applications });
       const list = Array.isArray(out)
         ? out
         : Array.isArray(out && out.todos)
           ? out.todos
-          : [];
+          : out && typeof out === "object"
+            ? Object.values(out)
+            : [];
       /** @type {Record<string, number>} */
       const byAuto = {};
       for (const t of list) {
