@@ -7,11 +7,10 @@
 import { sourceEnabled, sourceFreshness } from "./onboarding.js";
 import { siteUrlFor } from "../../core/sites.js";
 import { sourceLabel } from "../../ui/sourceLabel.js";
+import { CHECK_TIMEOUT_MS } from "../../core/messages.js";
 
 const HOUR = 3600000;
 const SYNC_ON_OPEN_MAX_AGE = 30 * 60000;
-/** A checkRuns entry still "running" after this counts as timed out. */
-export const CHECK_RUN_TIMEOUT_MS = 90 * 1000;
 
 /**
  * The site URL a source's "Open site" affordance should open. Accepts an
@@ -220,8 +219,8 @@ function relAgo(ms) {
 
 /**
  * The CheckNowButton's view model over the `checkRuns` storage key. A
- * "running" entry older than 90 s is reported as a timeout — the run's
- * service worker may have died mid-check.
+ * "running" entry older than CHECK_TIMEOUT_MS is reported as a timeout —
+ * the run's service worker may have died mid-check.
  * @param {any} state  merged panel state ({checkRuns, settings})
  * @param {string} source  SourceId
  * @param {Date|number} now
@@ -238,7 +237,7 @@ export function checkRunView(state, source, now) {
   if (!run || !run.status) return { status: "idle", text: "" };
   const startedMs = Date.parse(run.startedAt || "");
   if (run.status === "running") {
-    if (Number.isFinite(startedMs) && nowMs - startedMs > CHECK_RUN_TIMEOUT_MS) {
+    if (Number.isFinite(startedMs) && nowMs - startedMs > CHECK_TIMEOUT_MS) {
       return { status: "failed", reason: "timeout", text: "Didn't finish — try again" };
     }
     return { status: "running", text: "Checking…" };

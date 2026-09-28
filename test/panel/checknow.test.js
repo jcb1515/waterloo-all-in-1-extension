@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import {
   checkRunView,
   openTargetFor,
-  CHECK_RUN_TIMEOUT_MS,
 } from "../../extension/src/panel/model/sources.js";
 import { siteUrlFor } from "../../extension/src/core/sites.js";
+import { CHECK_TIMEOUT_MS } from "../../extension/src/core/messages.js";
 
 const NOW = new Date("2026-10-15T18:00:00.000Z");
 const iso = (ms) => new Date(ms).toISOString();
@@ -32,13 +32,13 @@ test("running entry -> running + Checking…", () => {
   assert.equal(v.text, "Checking…");
 });
 
-test("a run older than 90 s still marked running counts as timeout", () => {
+test("a run older than CHECK_TIMEOUT_MS still marked running counts as timeout", () => {
   const v = checkRunView(
     st({
       learn: {
         runId: "r",
         status: "running",
-        startedAt: iso(NOW.getTime() - CHECK_RUN_TIMEOUT_MS - 1000),
+        startedAt: iso(NOW.getTime() - CHECK_TIMEOUT_MS - 1000),
       },
     }),
     "learn",

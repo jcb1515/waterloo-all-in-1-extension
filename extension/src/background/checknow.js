@@ -18,7 +18,7 @@
   All chrome.* access is injected (`deps`) so this stays unit-testable.
 */
 
-import { CHECK } from "../core/messages.js";
+import { CHECK, CHECK_TIMEOUT_MS } from "../core/messages.js";
 import { siteUrlFor, sourceForTabUrl } from "../core/sites.js";
 import { adapterForSource } from "../core/registry.js";
 import { CHECK_SOURCES } from "../sources/probes.js";
@@ -35,12 +35,6 @@ export const TAB_SOURCES = new Set([
   "discord",
 ]);
 
-/**
- * Whole-run deadline. The tab route's done-wait gets this long: an Outlook
- * check reads the newest ~100 messages in-page (~20 body fetches/min), so
- * 90 s provably isn't enough — a 5-minute cap still bounds a hung handler.
- */
-export const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 const COMPLETE_WAIT_MS = 30 * 1000;
 const ANSWER_WAIT_MS = 15 * 1000;
 const REINJECT_ANSWER_WAIT_MS = 10 * 1000;

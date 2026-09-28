@@ -1,15 +1,15 @@
 // @ts-check
 // background/checknow.js with fully fake deps — a virtual clock drives
-// deps.now()/deps.sleep() so retry windows and the 90 s deadline run in
-// microseconds.
+// deps.now()/deps.sleep() so retry windows and the CHECK_TIMEOUT_MS
+// deadline run in microseconds.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
   startCheck,
   handleCheckDone,
   sweepCheckRuns,
-  CHECK_TIMEOUT_MS,
 } from "../../extension/src/background/checknow.js";
+import { CHECK_TIMEOUT_MS } from "../../extension/src/core/messages.js";
 
 const T0 = 1_700_000_000_000;
 

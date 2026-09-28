@@ -57,3 +57,12 @@ export const CHECK = Object.freeze({
   /** content script -> background: { type, source, runId, ok, reason?, checked? } */
   DONE: "wa1:check-done",
 });
+
+/**
+ * Whole check-now run deadline — shared by background/checknow.js (the run
+ * itself, and sweepCheckRuns' stale-entry cutoff) and the panel's
+ * checkRunView (when a "running" entry should read as timed out). The tab
+ * route's done-wait gets this long: an Outlook check reads the newest ~100
+ * messages in-page (~20 body fetches/min), so 90 s provably isn't enough.
+ */
+export const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
