@@ -15,6 +15,7 @@ import {
   BOOK_LINK,
   BOOK_RE,
   cleanSubject,
+  CLOCK_RE,
   CONFIRM_RE,
   DEADLINE_TYPES,
   EASTERN_TZ,
@@ -30,6 +31,7 @@ import {
   keywordRe,
   mailType,
   MEET_LINK,
+  MEET_WORD_RE,
   NEGATIVE_RE,
   normCardWhen,
   PLEASANTRY_RE,
@@ -37,6 +39,7 @@ import {
   REPLY_RE,
   senderGate,
   SLOT_RE,
+  WEEKDAY_RE,
   WHEN_LINE,
   WHERE_LINE,
 } from "./rules.js";
@@ -328,16 +331,27 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const appReceivedCounts =
     APP_RECEIVED_RE.test(text) &&
     /interview|event|workshop|session|fair|expo|summit|orientation|meeting/i.test(text);
-  /** @type {{h: any, sentence: string, kw: string}[]} */
+  /** @type {{h: any, sentence: string, kw?: string, auto: boolean}[]} */
   const good = [];
   const days = new Set();
   const hits = td(text, { now: ref, termCode })
-    .filter((h) => h.confidence >= 0.6)
+    .filter((h) => h.confidence >= 0.5)
     .sort((a, b) => b.confidence - a.confidence);
   for (const h of hits) {
     if (good.length >= hitCap) break;
     if (Date.parse(h.endAt || h.startAt) < floor) continue;
     const sentence = sentenceOf(text, h.index, h.text.length);
+    // The 0.5–0.6 band is a bare weekday or relative day ("Friday",
+    // "tomorrow") — it only counts when the hit text is an explicit
+    // calendar date or the sentence carries a clock time beside the
+    // weekday ("the exam is Friday, starts 3pm").
+    if (
+      h.confidence < 0.6 &&
+      !EXPLICIT_DATE_RE.test(h.text) &&
+      !(WEEKDAY_RE.test(h.text) && CLOCK_RE.test(sentence))
+    ) {
+      continue;
+    }
     const nounM = sentence.match(EVENT_ANY_RE);
     const cueM = sentence.match(DEADLINE_CUE_RE);
     const confirm = CONFIRM_RE.test(sentence) || (appReceivedCounts && APP_RECEIVED_RE.test(sentence));
@@ -358,12 +372,25 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
         (nounM && nounM[0]) ||
         (cueM && cueM[0]) ||
         (confirm ? "confirmation" : undefined);
-      if (!kw) continue;
+      if (!kw) {
+        // A human sender's dated sentence still surfaces as a pending
+        // item when it carries a meeting word or a clock time — no
+        // keyword needed.
+        if (!MEET_WORD_RE.test(sentence) && !CLOCK_RE.test(sentence)) continue;
+      }
     }
     const day = torontoDay(h.startAt);
     if (days.has(day)) continue;
     days.add(day);
-    good.push({ h, sentence, kw: /** @type {string} */ (kw) });
+    // Auto only for a gated sender (co-op, course/instructor, allow-listed,
+    // application employer — Learn senders are excluded before this) whose
+    // hit is an explicit calendar date AND shares its sentence with a
+    // keyword or an event noun. Everything else is pending review.
+    const auto =
+      gate.ok === true &&
+      EXPLICIT_DATE_RE.test(h.text) &&
+      Boolean(keywordOf(sentence, kwRe) || nounM);
+    good.push({ h, sentence, kw, auto });
   }
   if (!good.length) return [];
 
@@ -372,7 +399,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const title = cleanSubject(subject);
   /** @type {Item[]} */
   const items = [];
-  for (const { h, sentence, kw } of good) {
+  for (const { h, sentence, kw, auto } of good) {
     const rule = mailType(sentence);
     // A meeting typed by an interview/screen word in the SAME sentence is
     // an interview — a co-op sender or the subject alone doesn't promote.
@@ -415,7 +442,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
       org,
       status: "open",
       confidence: "tentative",
-      review: "pending",
+      review: auto ? "auto" : "pending",
       seenIn: seen(id),
       evidence: { method: "text", snippet: sentence.slice(0, 300), url: msg.url },
       meta: {
@@ -425,7 +452,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
         fromName: msg.from,
         employer: emp,
         ...(gate.jobId ? { jobId: gate.jobId } : {}),
-        keyword: kw,
+        ...(kw ? { keyword: kw } : {}),
         facts: factsOf([["From", msg.from]]),
       },
     };

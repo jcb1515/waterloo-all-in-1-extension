@@ -43,7 +43,7 @@ export function sourceEnabled(settings, source) {
  * @param {any} row
  * @returns {string[]}
  */
-function rowScopes(row) {
+export function rowScopes(row) {
   const stat = row && row.stat;
   /** @type {string[]} */
   const out = [];

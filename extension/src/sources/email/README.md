@@ -1,11 +1,10 @@
-# Email adapter (Outlook web + Gmail) — DOM + automatic backfill
+# Email adapter (Outlook web + Gmail) — DOM + scheduled checks
 
 Finds dated things in already-rendered mail: meeting/interview invites and
 "important" mail (co-op, Learn, instructors, course-coded, keyworded) that
 mention a date. Network access is a small, audited allow-list (see
-**Network**): Gmail's unread Atom feed, the Gmail `#search` iframe +
-`?view=pt` print views, and Outlook's same-origin `/api/v2.0/me/` REST under
-the page's own MSAL token. There are no `urlPatterns`; everything arrives as
+**Network**): Gmail's unread Atom feed, Gmail `?view=pt` print views, and
+Outlook's same-origin `/api/v2.0/me/` REST under the page's own MSAL token. There are no `urlPatterns`; everything arrives as
 a serialised DOM extract from `content.js` (a bundled IIFE; bundled
 separately by `tools/build.mjs`).
 
@@ -15,6 +14,9 @@ separately by `tools/build.mjs`).
   and a MutationObserver debounced to 2s. Sends `MSG.OBSERVED` with
   `{source, kind: "dom", url, body: JSON.stringify(extract), at}` only when
   the extract has messages, deduped by body, capped at 2 MB, `.catch`-ed.
+  It also schedules the periodic provider check below (every 30 min) and
+  answers the shared `wa1:check-now` message; a double-injection guard
+  (`window.__wa1_email`) keeps a re-injected copy inert.
 - `dom.js` — `extractFor(doc, href, {now})` → `{v, provider, folder, view,
   messages}`, one per host. `Msg = {key, url, from, fromEmail, subject,
   preview?, receivedText?, receivedAt?, body?, links, fromMe?}`. Bodies exist
@@ -140,6 +142,9 @@ separately by `tools/build.mjs`).
 - `folders` (default `["inbox"]`) — case-insensitive allow-list on the
   extract's folder; `"sent"` yields nothing unless configured. A null folder
   is allowed.
+- `outlookCount` — how many of the newest inbox messages a scheduled check
+  reads (`50`/`100`/`200`, default `100`; other values clamp to 100). Gmail
+  always reads the first inbox page (up to 50 rows).
 - `senders` / `teams` — case-insensitive substrings matched against the
   sender name/email for the gate; `teams` also supplies `org` fallback.
 - `keywords` — extra word-bounded keywords for the hit filter and typing.
@@ -156,27 +161,6 @@ Calendar`/`Conflict with`/`Based on this email` stop the card — those describe
 OTHER events and must never become items. First line after the when-line that
 isn't UI/button text is the title; the next is the location. The result goes
 to `messages[0].invite` (one card per thread).
-
-## Guided mail scan ("scan my mail")
-
-`startMailScan(state, {provider, now, days = 60, account = 0})` →
-`{state, url, query}`. For Gmail `url` is a `#search/<query>` deeplink the UI
-opens in the user's tab; Outlook web has no working search deeplink so `url`
-is `null` and the UI shows `query` to paste. `stopMailScan(state)` clears
-`scan`/`scanQueue` and keeps `scanned`.
-
-While `state.scan` is for this provider and <24 h old:
-
-- a `search` **list** view queues rows whose keys aren't in `state.scanned` or
-  already queued → `{provider, key, subject ≤ 80 chars, url}` (cap 200; Gmail
-  urls are `#all/<key>` deeplinks, Outlook `/mail/[0/]id/<key>`),
-- **any** message view is allowed regardless of folder (the user opens queued
-  threads from wherever they live).
-
-Any message view, scan or not, drops its keys from the queue and records
-`state.scanned[key] = at` (newest 1000 kept). Folder `"search"` is always
-allowed. State grows only by `{scan, scanQueue, scanned}` — no content beyond
-the 80-char queue subjects.
 
 ## Scope semantics
 
@@ -211,8 +195,6 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
   `CARD_CUE_RE`, `CARD_ORG_RE`, `CARD_UI_RE`, `CARD_STOP_RE`, the `M/D/YYYY`
   US-order assumption, one card per thread on the first Msg, and
   `<button>` counting as a line boundary.
-- Scan: `GMAIL_SCAN_QUERY`/`OUTLOOK_SCAN_QUERY` strings, the 24 h scan TTL,
-  `#all/<key>` and `/mail/[0/]id/<key>` queue deeplinks, 200/1000 caps.
 - Outlook rows `[data-convid]` (prefer `[role=option]`), sender
   `span[title*="@"]`, time `time[datetime]` or a time-ish text line, subject
   = first non-sender/non-time line; message view `[role="main"]` with
@@ -246,41 +228,39 @@ guesses from common Gmail/OWA markup. Every reader fails soft.
 
 `backfill.js` is the shared scheduler; `gmail-backfill.js` and
 `outlook-backfill.js` are the per-provider acquisition impls; `content.js`
-wires them to the page. Cadence: a **full** pass over the last
-`lookbackDays` (default 30, clamped 7–90) on first run and whenever the
-setting changes; **incremental** reads of mail newer than the last cursor
-(`state.backfill[provider].newestAt`) every 30 min while a tab is open and
-not frozen; **at most one full per 6 h** per provider across tabs/reloads —
-decided from the adapter-recorded state (`sourceState.outlook.state.
-backfill`, read-only `chrome.storage.local.get`) plus a 5 min
-`localStorage["wa1:mail:backfill:lock:<provider>"]` in-progress lock so two
-tabs never race. Limits: ≤20 requests/minute per provider (list pages +
-bodies), ≤10 list pages per run, 15 s per request; any non-200/redirect/
-sign-in/non-JSON aborts the round and retries in 5 min
+wires them to the page. One rule per provider: an **automatic** run starts
+when the last completed run (`state.check[provider].at`, read-only
+`chrome.storage.local.get` across all mail tabs) is ≥ 30 min old;
+**forced** runs (check-now) bypass the gate and the lock. A per-tab
+in-flight flag prevents overlap — a check-now during a run joins it and
+gets that run's `check-done`. The 3-min `localStorage` lock races only
+automatic runs between tabs. Limits: ≤20 requests/minute per provider
+(list pages + bodies), ≤10 list pages per run, 15 s per request; any
+non-200/redirect/sign-in/non-JSON aborts the round and retries in 5 min
 (`sessionStorage["wa1:mail:backfill:fail:<provider>"]`). A Page Lifecycle
 `freeze` bumps a generation so stale work is dropped.
 
-Each pass replays the same `wa1:observed` `kind:"dom"` payload the passive
+Each run replays the same `wa1:observed` `kind:"dom"` payload the passive
 reader sends, with `view:"backfill"`, `folder:"inbox"|"sent"`, ≤50 messages
-per payload, and `backfill:{runId,full,lookbackDays,since,batch,final,
-checked}`; `threadMap` carries `lastMessageId → threadId` pairs so the
-adapter can map Atom ids. `state.backfill[provider] = {lastRunAt,
-lastFullAt, lookbackDays, checked, newestAt}` is written on the `final`
-batch. Message bodies are fetched only for **gated candidates**
-(`needsBody(msg, settings)` in rules.js: not blocked; and allow-listed,
-co-op/Learn/uwaterloo.ca, ATS/employer-ish, a course-code subject, or a
-keyword/booking/form/offer/fee cue in subject+preview — bulk senders
-without a gated reason never get bodies).
+per payload, and `check:{runId,since,batch,final,checked,ok?,reason?,
+replay?}`; `threadMap` carries `lastMessageId → threadId` pairs so the
+adapter can map Atom ids. The adapter records `state.check[provider]`
+from the final batch (`{at, checked, ok, reason?}`); intermediate batches
+set `check[provider].running = {since, checked}` so the setup screen can
+show "Checking… N so far" throughout a run. Message bodies are fetched
+only for **gated candidates** (`needsBody(msg, settings)` in rules.js: not
+blocked; and allow-listed, co-op/Learn/uwaterloo.ca, ATS/employer-ish, a
+course-code subject, or a keyword/booking/form/offer/fee cue in
+subject+preview — bulk senders without a gated reason never get bodies).
 
 ### Gmail
 
-A hidden same-origin iframe loads `/mail/u/<n>/#search/<encoded query>` —
-`in:inbox newer_than:<N>d` (full) / `in:inbox after:<epoch s>` (incremental);
-sent adds a second `in:sent …` pass (sent rows only close reply tasks — they
-never create items). The script waits for `tr.zA` rows to settle (~1.5 s
-stable, `#search/` hash matches), parses them with the same
-`extractFor(doc, href)` path the passive reader uses, then pages
-`…/p2`, `…/p3` while a page returns 50 rows. `tr.zA.zE` = unread.
+Reads the tab's own inbox list DOM — `extractFor(document, location.href)`
+on `tr.zA` rows (cap 50) — whenever the hash shows the inbox (`""`,
+`#inbox`, `#inbox?…`; not `#inbox/p2`, not a `#inbox/<id>` thread), on
+load, on `hashchange`, every 30 min, and on check-now. There is no
+iframe and no search navigation; a check-now off the inbox answers
+`{accepted:false, reason:"not-on-page"}`. `tr.zA.zE` = unread.
 Bodies: `GET /mail/u/<n>/?view=pt&search=all&th=<legacyThreadHex>` → the
 rendered print view, one `table.message` per message → per-part Msgs
 (from/fromEmail/receivedAt/body/links, `me`-name or account-address →
@@ -293,23 +273,27 @@ The page's MSAL cache in `localStorage`: an unexpired (`expiresOn > now+60s`)
 AccessToken whose `target` contains `https://outlook.office.com/Mail.Read`
 (or Mail.ReadWrite). The token lives in one local variable for the round and
 reaches only the `Authorization: Bearer` header of same-origin GETs —
-never stored, logged, serialised, or sent off-origin. Lists:
-`GET /api/v2.0/me/mailfolders/{inbox|sentitems}/messages?$top=50&$select=…&
-$filter=ReceivedDateTime ge <iso>` (`SentDateTime` for sent; `gt <cursor>`
-incremental) `&$orderby=… desc&$count=true`, paged via `@odata.nextLink`
-stripped back to the `/api/...` path. `key = ConversationId` (== the
-passive reader's `data-convid`), `url = WebLink`, `unread = !IsRead`.
-Bodies: `GET /api/v2.0/me/messages/<id>?$select=Body,IsRead` with
-`Prefer: outlook.body-content-type="text"`. No token → the round is skipped
-silently. `graph.microsoft.com` and OWA `service.svc`/`FindItem` are never
-called (403 / 401 live).
+never stored, logged, serialised, or sent off-origin. Lists: the newest N
+inbox messages (`settings.outlookCount` ∈ {50,100,200}, default 100) —
+`GET /api/v2.0/me/mailfolders/inbox/messages?$top=50&$select=…&
+$orderby=ReceivedDateTime desc&$count=true`, no date filter, paged via
+same-origin `@odata.nextLink` paths only until N are read; sent (if in
+`folders`) reads the newest 50 `sentitems` ordered by `SentDateTime`.
+`key = ConversationId` (== the passive reader's `data-convid`),
+`url = WebLink`, `unread = !IsRead`. Bodies: `GET
+/api/v2.0/me/messages/<id>?$select=Body,IsRead` with `Prefer:
+outlook.body-content-type="text"`. No token → the run is skipped
+(check-now reports `"signed-out"`). `graph.microsoft.com` and OWA
+`service.svc`/`FindItem` are never called (403 / 401 live).
 
-`chrome.runtime.onMessage "wa1:mail-check-now"` forces an incremental read
-(full only if the last full is >6 h or the lookback changed). A
-`wa1Settings` change that only touches filters replays the tab's in-memory
-copy of the last run (never persisted) as a `replay:true` payload — no
-network; a `lookbackDays` change triggers a full; a provider off-flag stops
-reads at the next tick.
+`chrome.runtime.onMessage "wa1:check-now"` `{source, runId}` — `source` is
+`"gmail"`, `"outlook"`, or `"email"`; each tab answers for its own provider,
+replies `{accepted:true}` synchronously, runs a forced check, and ends with
+`chrome.runtime.sendMessage {type:"wa1:check-done", source, runId, ok,
+reason?, checked?}`. A `wa1Settings` change that only touches filters
+replays the tab's in-memory copy of the last run (never persisted) as a
+`replay:true` payload — no network; a provider off-flag stops reads at the
+next tick.
 
 ## Network
 

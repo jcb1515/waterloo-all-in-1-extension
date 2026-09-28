@@ -5,33 +5,43 @@
 */
 
 import { sourceEnabled, sourceFreshness } from "./onboarding.js";
-import { checklistFor } from "../../sources/probes.js";
+import { siteUrlFor } from "../../core/sites.js";
+import { sourceLabel } from "../../ui/sourceLabel.js";
 
 const HOUR = 3600000;
 const SYNC_ON_OPEN_MAX_AGE = 30 * 60000;
+/** A checkRuns entry still "running" after this counts as timed out. */
+export const CHECK_RUN_TIMEOUT_MS = 90 * 1000;
 
 /**
- * The site URL a source's "Open site" affordance should open: the first
- * checklist row with an https url when the source has a checklist (Outlook
- * lands on /mail/inbox rather than the bare origin), else the adapter's
- * first origin.
- * @param {import("../../core/contract.js").Adapter} adapter
+ * The site URL a source's "Open site" affordance should open. Accepts an
+ * Adapter or a SourceId ("gmail" resolves to the gmail checklist row even
+ * though the email adapter is "outlook"): the first https checklist-row
+ * url wins, else the adapter's first origin.
+ * @param {import("../../core/contract.js").Adapter | string} adapterOrSource
  * @returns {string|null}
  */
-export function sourceSiteUrl(adapter) {
-  try {
-    const rows = checklistFor((adapter && adapter.id) || "") || [];
-    const hit = rows.find((r) => {
-      const url = r && r.row && r.row.url;
-      return typeof url === "string" && url.startsWith("https://");
-    });
-    const url = hit && hit.row && hit.row.url;
-    if (typeof url === "string") return url;
-  } catch {
-    /* fall through to origins */
-  }
+export function sourceSiteUrl(adapterOrSource) {
+  const adapter = typeof adapterOrSource === "string" ? null : adapterOrSource;
+  const sourceId = adapter ? adapter.id : String(adapterOrSource || "");
+  const url = siteUrlFor(sourceId);
+  if (url) return url;
   const origins = (adapter && adapter.origins) || [];
   return origins[0] ? `${origins[0]}/` : null;
+}
+
+/**
+ * The URL a Sources.jsx "Open"/"Open site" affordance targets: the row's
+ * own https checklist url when it names a specific page (the WW interviews
+ * row must open the interviews page, not the first row's), else
+ * siteUrlFor(source).
+ * @param {string} sourceId @param {any} [row] CheckRow
+ * @returns {string|null}
+ */
+export function openTargetFor(sourceId, row) {
+  const url = row && row.url;
+  if (typeof url === "string" && url.startsWith("https://")) return url;
+  return siteUrlFor(sourceId);
 }
 
 /**
@@ -204,4 +214,75 @@ function relAgo(ms) {
   const h = Math.floor(m / 60);
   if (h < 48) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+/* ------------------------- check-now view ------------------------- */
+
+/**
+ * The CheckNowButton's view model over the `checkRuns` storage key. A
+ * "running" entry older than 90 s is reported as a timeout — the run's
+ * service worker may have died mid-check.
+ * @param {any} state  merged panel state ({checkRuns, settings})
+ * @param {string} source  SourceId
+ * @param {Date|number} now
+ * @returns {{status: "idle"|"running"|"ok"|"failed"|"disabled"|"unsupported",
+ *   reason?: string, text: string, openUrl?: string|null}}
+ */
+export function checkRunView(state, source, now) {
+  if (!sourceEnabled(state && state.settings, source)) {
+    return { status: "disabled", text: "Turned off" };
+  }
+  const run = (((state && state.checkRuns) || {})[source]) || null;
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  const label = sourceLabel(source, null);
+  if (!run || !run.status) return { status: "idle", text: "" };
+  const startedMs = Date.parse(run.startedAt || "");
+  if (run.status === "running") {
+    if (Number.isFinite(startedMs) && nowMs - startedMs > CHECK_RUN_TIMEOUT_MS) {
+      return { status: "failed", reason: "timeout", text: "Didn't finish — try again" };
+    }
+    return { status: "running", text: "Checking…" };
+  }
+  if (run.status === "ok") {
+    const parts = [`Checked${run.checked != null ? ` ${run.checked}` : ""}`];
+    parts.push(
+      run.newItems == null || run.newItems === 0 ? "no new items" : `${run.newItems} new`,
+    );
+    const ago = relAgo(nowMs - Date.parse(run.endedAt || run.startedAt || ""));
+    if (ago) parts.push(ago);
+    return { status: "ok", text: parts.join(" · ") };
+  }
+  const reason = run.reason || "error";
+  if (reason === "signed-out") {
+    return {
+      status: "failed",
+      reason,
+      text: `Signed out of ${label} — `,
+      openUrl: siteUrlFor(source),
+    };
+  }
+  if (reason === "not-on-page") {
+    if (source === "discord") {
+      return {
+        status: "failed",
+        reason,
+        text: "Open a watched Discord channel, then check again",
+        openUrl: null,
+      };
+    }
+    return {
+      status: "failed",
+      reason,
+      text: `Open ${label} to check`,
+      openUrl: siteUrlFor(source),
+    };
+  }
+  if (reason === "timeout") {
+    return { status: "failed", reason, text: "Didn't finish — try again" };
+  }
+  if (reason === "disabled") return { status: "disabled", text: "Turned off" };
+  if (reason === "unsupported") {
+    return { status: "unsupported", reason, text: "No check for this source" };
+  }
+  return { status: "failed", reason, text: "Couldn't check — try again" };
 }

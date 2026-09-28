@@ -2,24 +2,27 @@
 /*
   Mail backfill core — the shared scheduling/rate/batch machinery behind the
   automatic mail read. Provider-specific acquisition lives in
-  gmail-backfill.js (a hidden #search iframe + ?view=pt print views) and
+  gmail-backfill.js (the tab's own inbox DOM + ?view=pt print views) and
   outlook-backfill.js (the page's MSAL token against the same-origin
   /api/v2.0 REST); this file never builds a URL itself.
 
   Rules enforced here (README "Network" repeats them):
-    - one full backfill per 6 h per provider across tabs/reloads, unless
-      lookbackDays changed (adapter-recorded state + a 5 min localStorage
-      lock so two tabs never race);
-    - incremental reads every 30 min while a tab is open and not frozen;
+    - automatic runs when the adapter-recorded check[provider].at is >=30 min
+      old — there is no full/incremental split, no lookback cursor;
+    - forced runs (check-now) bypass the 30-min gate and the cross-tab lock,
+      never the rate cap or the provider-off kill switch;
+    - a per-tab in-flight join: a check-now during a running run shares it;
+      the cross-tab localStorage lock (3 min TTL) applies to automatic runs
+      only;
     - <= 20 requests/minute per provider (list pages + bodies);
     - <= 10 list pages per run; <= 50 messages per payload batch;
     - 15 s per request; any non-200/redirect/login page/non-JSON aborts the
-      round and retries in 5 min;
+      run and retries in 5 min;
     - a Page Lifecycle freeze drops in-flight work (generation), like atom.js.
 
   Payloads are the same wa1:observed kind:"dom" shape the passive reader
-  sends, with view "backfill" and a backfill{runId,full,lookbackDays,since,
-  batch,final,checked} marker the adapter turns into state.backfill.
+  sends, with view "backfill" and a check{runId,batch,final,checked,since,
+  ok?,reason?} marker the adapter turns into state.check[provider].
 */
 
 import { MSG } from "../../core/contract.js";
@@ -27,19 +30,19 @@ import { needsBody } from "./rules.js";
 import { SENT_FOLDERS } from "./extract.js";
 
 export const BF_TICK_MS = 30 * 60 * 1000;
-export const BF_FULL_GAP_MS = 6 * 60 * 60 * 1000;
 export const BF_RETRY_MS = 5 * 60 * 1000;
-export const BF_LOCK_MS = 5 * 60 * 1000;
+export const BF_LOCK_MS = 3 * 60 * 1000;
 export const BF_TIMEOUT_MS = 15000;
 export const BF_RATE_PER_MIN = 20;
 export const BF_MAX_PAGES = 10;
 export const BF_BATCH = 50;
-export const BF_LOOKBACK_DAYS = 30;
 export const BF_LOCK_PREFIX = "wa1:mail:backfill:lock:";
 export const BF_FAIL_PREFIX = "wa1:mail:backfill:fail:";
-export const MAIL_CHECK_NOW = "wa1:mail-check-now";
+export const OUTLOOK_COUNTS = [50, 100, 200];
+export const CHECK_NOW = "wa1:check-now";
+export const CHECK_DONE = "wa1:check-done";
 
-// Bumped on the Page Lifecycle `freeze` event — a round (or part of one)
+// Bumped on the Page Lifecycle `freeze` event — a run (or part of one)
 // that started under an older generation drops whatever lands late.
 let generation = 0;
 export function backfillFreeze() {
@@ -50,11 +53,105 @@ export function __resetBackfill() {
   generation = 0;
 }
 
-/** settings.lookbackDays: default 30, clamped 7..90. @param {any} v */
-export function clampLookback(v) {
+/**
+ * Content-script double-injection guard: W1 re-injects scripts into open
+ * tabs after install/update/startup; the second copy must leave its
+ * listeners unregistered. `key` is the source name (__wa1_email etc.).
+ * @param {string} key
+ */
+export function injectOnce(key) {
+  const g = /** @type {any} */ (globalThis);
+  const k = `__wa1_${key}`;
+  if (g[k]) return false;
+  g[k] = true;
+  return true;
+}
+
+/**
+ * True while a Gmail tab shows the first inbox page — "" / "#inbox" /
+ * "#inbox?…". A second page ("#inbox/p2") or an open thread
+ * ("#inbox/<id>") does not count.
+ * @param {string} hash
+ */
+export function gmailOnInbox(hash) {
+  const h = String(hash || "");
+  return h === "" || h === "#inbox" || h.startsWith("#inbox?");
+}
+
+/**
+ * The check-now decision for one tab: null = the message isn't for this
+ * tab (wrong type, or another provider's tab), otherwise the reply to
+ * sendResponse. `source` accepts the provider, or "email" (any mail tab).
+ * @param {any} msg
+ * @param {string} provider  "gmail"|"outlook"
+ * @param {{onPage?: () => boolean, hasToken?: () => boolean,
+ *   disabled?: () => boolean}} [opts]
+ */
+export function checkNowDecision(msg, provider, opts = {}) {
+  if (!msg || msg.type !== CHECK_NOW) return null;
+  const src = String(msg.source || "");
+  if (src !== "email" && src !== provider) return null;
+  if (opts.disabled && opts.disabled()) return { accepted: false, reason: "disabled" };
+  if (opts.onPage && !opts.onPage()) return { accepted: false, reason: "not-on-page" };
+  if (opts.hasToken && !opts.hasToken()) return { accepted: false, reason: "signed-out" };
+  return { accepted: true };
+}
+
+/**
+ * Map a finished run's stats to the check-done fields {ok, reason?,
+ * checked} — shared so the listener and tests agree.
+ * @param {any} r  backfillRound's return
+ */
+export function doneFromResult(r) {
+  const res = r && typeof r === "object" ? r : {};
+  const checked = Number(res.listed) || 0;
+  if (res.stale) return { ok: false, reason: "timeout", checked };
+  if (res.error) return { ok: false, reason: "error", checked };
+  const skip = String(res.skipped || "");
+  if (skip === "no-token") return { ok: false, reason: "signed-out", checked };
+  if (skip === "off") return { ok: false, reason: "disabled", checked };
+  if (skip === "not-on-page") return { ok: false, reason: "not-on-page", checked };
+  if (skip) return { ok: false, reason: "error", checked };
+  return { ok: true, checked };
+}
+
+/**
+ * Per-tab run registry: one in-flight run at a time; a joiner (check-now
+ * during a run) shares the same promise — each caller still gets its own
+ * check-done via its own .then on the returned promise.
+ * @param {(force: boolean) => Promise<any>} start
+ */
+export function makeRunBox(start) {
+  /** @type {Promise<any>|null} */
+  let pending = null;
+  return {
+    get running() {
+      return !!pending;
+    },
+    /** @param {boolean} force */
+    run(force) {
+      if (!pending) {
+        try {
+          // start() runs synchronously so callers observe `running` and a
+          // same-tick second call joins rather than double-starts.
+          pending = Promise.resolve(start(force)).catch(() => ({ error: "run" }));
+        } catch {
+          pending = Promise.resolve({ error: "run" });
+        }
+      }
+      return pending.finally(() => {
+        // Only clear when this promise is still the current one — a run
+        // that started after ours finished must not be nulled by us.
+        pending = null;
+      });
+    },
+  };
+}
+
+/** settings.outlookCount: one of 50/100/200, default 100. @param {any} v */
+export function clampOutlookCount(v) {
   const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return BF_LOOKBACK_DAYS;
-  return Math.max(7, Math.min(90, Math.round(n)));
+  return OUTLOOK_COUNTS.includes(n) ? n : 100;
 }
 
 /**
@@ -81,59 +178,20 @@ export function makeRate() {
 }
 
 /**
- * What this tick should do, from the adapter-recorded state.
- *   full        — the first run ever, or a lookbackDays INCREASE once the
- *                 hard 6 h gap since the last full has passed (an increase
- *                 inside 6 h is deferred to the mark; there is NO periodic
- *                 re-full — a decrease only filters, never refetches);
- *   incremental — the 30-min tick / "check again now" cursor read.
- * @param {any} prev    state.backfill[provider] ({lastRunAt,lastFullAt,lookbackDays,newestAt})
- * @param {any} settings  the sources.outlook slice
- * @param {number} nowMs
- * @param {{force?: boolean}} [opts]  force = "check again now" (incremental due immediately)
- * @returns {{kind: "full"|"incremental"|"skip", reason?: string,
- *   lookbackDays: number, since?: string|null}}
- */
-export function decideRun(prev, settings, nowMs, { force = false } = {}) {
-  const lookbackDays = clampLookback(settings && settings.lookbackDays);
-  const p = prev && typeof prev === "object" ? prev : {};
-  const lastFullAt = Date.parse(p.lastFullAt || "") || 0;
-  const lastRunAt = Date.parse(p.lastRunAt || "") || 0;
-  if (!lastFullAt) return { kind: "full", lookbackDays, since: null };
-  const prevDays = Number(p.lookbackDays) || 0;
-  // An entry stamped by the old ruleset (no v:2) counts as never-ran: one
-  // full under the new rules — still at least 6 h after its lastFullAt.
-  const increased = p.v !== 2 || (prevDays > 0 && lookbackDays > prevDays);
-  if (increased && nowMs - lastFullAt >= BF_FULL_GAP_MS) {
-    // Two fulls are NEVER closer than 6 h — an increase inside the gap just
-    // waits for the mark; normal incremental ticking continues meanwhile.
-    return { kind: "full", lookbackDays, since: null };
-  }
-  if (force || !lastRunAt || nowMs - lastRunAt >= BF_TICK_MS) {
-    return { kind: "incremental", lookbackDays, since: p.newestAt || null };
-  }
-  return { kind: "skip", reason: "throttled", lookbackDays };
-}
-
-/** @param {string} s */
-const cleanIso = (s) => {
-  const t = Date.parse(String(s || ""));
-  return Number.isFinite(t) ? new Date(t).toISOString() : null;
-};
-
-/**
- * One backfill tick for a provider. `impl` is the provider acquisition object:
+ * One mail read for a provider. `impl` is the provider acquisition object:
  *   impl.provider: "gmail"|"outlook"
+ *   impl.skipReason: "no-token"|"not-on-page"   (what an open()->null means)
  *   impl.folders(settings): string[]           ("inbox", +"sent" when opted in)
- *   impl.open(env, plan)  -> ctx | null        null = skip quietly (no token…)
+ *   impl.open(env, plan)  -> ctx | null        null = skip with skipReason
  *   impl.listPage(env, a) -> {messages, threadMap?, nextCursor?} | null
  *   impl.fetchBody(env, a) -> {body?, links?, parts?, subject?, from?} | "abort" | null
- *   impl.close(env, ctx)                       cleanup (iframe removal)
+ *   impl.close(env, ctx)                       cleanup
  * where `a` is {ctx, folder, cursor, plan, slot(), request()}.
  *
- * env: {now?, force?, isFrozen?, sleep, sendMessage, getSettings?, getPrev?,
- *   getLock?, setLock?, clearLock?, getFail?, setFail?, fetchImpl, pageUrl?,
- *   setCache?, …provider impl needs (makeFrame, lsValues, account, parseHtml)}.
+ * env: {now?, force?, isFrozen?, sleep, sendMessage, getSettings?,
+ *   getPrev? (state.check[provider]), getLock?/setLock?/clearLock?,
+ *   getFail?/setFail?, fetchImpl, pageUrl?, setCache?, …provider impl needs
+ *   (doc/onInbox, lsValues, account, parseHtml)}.
  * @param {any} env
  * @param {any} impl
  */
@@ -155,26 +213,29 @@ export async function backfillRound(env, impl) {
   settings = settings || {};
   if (settings[impl.provider] === false) return done({ skipped: "off" });
 
-  /** @type {any} */
-  let prev = null;
-  try {
-    prev = env.getPrev ? await env.getPrev() : null;
-  } catch {
-    prev = null;
-  }
-  const failAt = Number(env.getFail ? await env.getFail() : 0) || 0;
-  if (failAt && nowMs - failAt < BF_RETRY_MS) return done({ skipped: "retry" });
-
-  const plan = decideRun(prev, settings, nowMs, { force: !!env.force });
-  if (plan.kind === "skip") return done({ skipped: plan.reason });
-
-  const lockAt = Number(env.getLock ? await env.getLock() : 0) || 0;
-  if (lockAt && nowMs - lockAt < BF_LOCK_MS) return done({ skipped: "locked" });
-  if (env.setLock) {
+  const force = !!env.force;
+  if (!force) {
+    // Automatic runs only: the 30-min gate (adapter-recorded check.at),
+    // the 5-min failure retry window and the cross-tab localStorage lock.
+    /** @type {any} */
+    let prev = null;
     try {
-      await env.setLock(nowMs);
+      prev = env.getPrev ? await env.getPrev() : null;
     } catch {
-      /* lock best-effort */
+      prev = null;
+    }
+    const failAt = Number(env.getFail ? await env.getFail() : 0) || 0;
+    if (failAt && nowMs - failAt < BF_RETRY_MS) return done({ skipped: "retry" });
+    const lastAt = Date.parse((prev && prev.at) || "") || 0;
+    if (lastAt && nowMs - lastAt < BF_TICK_MS) return done({ skipped: "throttled" });
+    const lockAt = Number(env.getLock ? await env.getLock() : 0) || 0;
+    if (lockAt && nowMs - lockAt < BF_LOCK_MS) return done({ skipped: "locked" });
+    if (env.setLock) {
+      try {
+        await env.setLock(nowMs);
+      } catch {
+        /* lock best-effort */
+      }
     }
   }
 
@@ -212,13 +273,11 @@ export async function backfillRound(env, impl) {
   };
 
   const runId = `${impl.provider}-${nowMs.toString(36)}`;
+  const since = new Date(t0).toISOString();
   const checked = new Set();
   let sent = 0;
   let batch = 0;
   let failed = false;
-  /** The newest receivedAt across every row the run listed — the cursor the
-   * next incremental continues from. */
-  let newestMs = 0;
   /** @type {Record<string, any>} */
   let threadMap = {};
   /** @type {{folder: string, messages: any[]}[]} */
@@ -238,11 +297,9 @@ export async function backfillRound(env, impl) {
           view: "backfill",
           messages,
           ...(Object.keys(threadMap).length ? { threadMap } : {}),
-          backfill: {
+          check: {
             runId,
-            full: plan.kind === "full",
-            lookbackDays: plan.lookbackDays,
-            since: plan.kind === "full" ? null : plan.since || null,
+            since,
             batch: batch++,
             final,
             checked: checked.size,
@@ -255,11 +312,12 @@ export async function backfillRound(env, impl) {
     sent++;
   };
 
+  const plan = { count: clampOutlookCount(settings.outlookCount) };
+  /** @type {any} */
   let ctx = null;
   try {
-    ctx = impl.open ? await impl.open(env, { plan }) : {};
-    if (ctx == null) return done({ skipped: impl.provider === "outlook" ? "no-token" : "unavailable" });
-    const gateCtx = { settings };
+    ctx = impl.open ? await impl.open(env, plan) : {};
+    if (ctx == null) return done({ skipped: impl.skipReason || "unavailable" });
 
     for (const folder of impl.folders(settings)) {
       /** @type {any} */
@@ -280,12 +338,10 @@ export async function backfillRound(env, impl) {
         const sentPass = SENT_FOLDERS.has(String(folder).toLowerCase());
         for (const m of msgs) {
           checked.add(String(m.key));
-          const rt = Date.parse(String(m.receivedAt || "")) || 0;
-          if (rt > newestMs) newestMs = rt;
           // Bodies only for gated candidates — bulk senders without a gated
           // reason never cost a request, and the sent pass reads nothing
           // (its rows only close reply tasks).
-          if (!sentPass && needsBody(m, gateCtx)) {
+          if (!sentPass && needsBody(m, { settings })) {
             // eslint-disable-next-line no-await-in-loop
             const body = await impl.fetchBody(env, { ctx, msg: m, folder, slot, request });
             if (body === "abort") {
@@ -308,7 +364,7 @@ export async function backfillRound(env, impl) {
         cursor = page.nextCursor || null;
         if (!cursor) break;
       }
-      if (msgs4Cache(folderMsgs)) cache.push({ folder, messages: folderMsgs });
+      if (folderMsgs.length) cache.push({ folder, messages: folderMsgs });
       if (failed) break;
     }
   } catch (e) {
@@ -322,7 +378,7 @@ export async function backfillRound(env, impl) {
     } catch {
       /* cleanup best-effort */
     }
-    if (env.clearLock) {
+    if (!force && env.clearLock) {
       try {
         await env.clearLock();
       } catch {
@@ -339,6 +395,12 @@ export async function backfillRound(env, impl) {
         /* best-effort */
       }
     }
+    // A failure still lands a final marker — state.check records
+    // {ok:false, reason:"error"} so Setup isn't left on "Checking…".
+    sendPayload(cache.length ? cache[0].folder : "inbox", [], true, {
+      ok: false,
+      reason: "error",
+    });
     return done({ error: "http", sent });
   }
 
@@ -349,24 +411,17 @@ export async function backfillRound(env, impl) {
       /* memory only */
     }
   }
-  // The final payload lands even when the run found nothing — it is what lets
-  // the adapter advance lastRunAt/lastFullAt. newestAt carries the cursor the
-  // next incremental resumes from; runStartedAt seeds a first empty run.
-  sendPayload(cache.length ? cache[0].folder : "inbox", [], true, {
-    newestAt: newestMs ? new Date(newestMs).toISOString() : null,
-    runStartedAt: new Date(t0).toISOString(),
-  });
+  // The final payload lands even when the run found nothing — it is what
+  // advances state.check[provider].at (an empty inbox is still "read").
+  sendPayload(cache.length ? cache[0].folder : "inbox", [], true, { ok: true });
   return done({ sent });
-}
-
-function msgs4Cache(/** @type {any[]} */ msgs) {
-  return Array.isArray(msgs) && msgs.length;
 }
 
 /**
  * Replay the in-memory cache of the last run as backfill payloads — no
  * network. Used when a settings (filter) change should re-extract what the
- * tab already read. Cache entries: [{folder, messages}].
+ * tab already read. Cache entries: [{folder, messages}]. Replay payloads
+ * carry check.replay — the adapter never lets them touch state.check.
  * @param {any} env @param {any} impl
  */
 export function replayCache(env, impl) {
@@ -388,11 +443,9 @@ export function replayCache(env, impl) {
             folder: entry.folder || "inbox",
             view: "backfill",
             messages: msgs.slice(i, i + BF_BATCH),
-            backfill: {
+            check: {
               runId: `${impl.provider}-replay`,
-              full: false,
-              lookbackDays: BF_LOOKBACK_DAYS,
-              since: null,
+              since: new Date().toISOString(),
               batch: Math.floor(i / BF_BATCH),
               final: i + BF_BATCH >= msgs.length,
               checked: msgs.length,

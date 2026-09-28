@@ -96,9 +96,11 @@ parsing — nothing else leaves the ICS.
   all-day range end is the exclusive midnight after the last day; a timed end
   earlier than the start rolls to the next day. A `Calendar: <name>` middle
   segment names the chip's calendar: it marks the event `subscribed` unless
-  the decoded event id already says `own`.
+  the decoded event id already says `own` — and `Calendar: Waterloo
+  All-in-1` (or a `<CODE> · <Label>` feed title) marks it `wa1`, our own
+  feed, which never suppresses the items it came from.
 - **Dedupe** is lowercase title + startAt; on a tie the better calendarKind
-  wins (own > subscribed > unknown), so an open popup merges with its chip
+  wins (own > wa1 > subscribed > unknown), so an open popup merges with its chip
   and a multi-day event's one-chip-per-day cells collapse to one event.
 
 ## calendarKind (data-eventid)
@@ -110,7 +112,7 @@ parsing — nothing else leaves the ICS.
 |---|---|
 | the signed-in address (incl. the `@m` → `@gmail.com` shorthand) | `own` |
 | `@group.calendar.google.com` (but not `group.v.`) | `own` |
-| `@import.calendar.google.com` (this is what our own feed subscription looks like) | `subscribed` |
+| `@import.calendar.google.com` (this is what our own feed subscription looks like) | `subscribed` — `wa1` when the label/title identifies it as Waterloo All-in-1 |
 | `group.v.calendar.google.com` (holidays etc.) | `subscribed` |
 | any other address | `subscribed` |
 | undecodable / missing | `unknown` |
@@ -146,7 +148,7 @@ changes.
 screen — counts only, no text or ids. Pages: `gcal-day`, `gcal-week`,
 `gcal-month`, `gcal-schedule`, `gcal-other`, `unknown`. Counts: `eventChips`,
 `labeled` (chips `parseChipLabel` accepts), `decodedIds`, `own`/`subscribed`/
-`unknown` (the extract's kind split), `detailPopup` (0/1), `account` (0/1).
+`wa1`/`unknown` (the extract's kind split), `detailPopup` (0/1), `account` (0/1).
 `ok` = a view page with `labeled > 0`. `CHECKLIST` is the open-these-pages
 list (`{id, label, how, page}`).
 
@@ -154,9 +156,12 @@ list (`{id, label, how, page}`).
 
 - The extract shape above is what `payload.body` contains (JSON-stringified);
   `state.events` is the merged shape described under "observe.parse / state".
-- `suppressAgainstCalendar` should compare **only `calendarKind === "own"`**
-  events — never `subscribed` or `unknown`, so the user's subscription to our
-  own feed can't suppress the items it came from.
+- `suppressAgainstCalendar` compares **`own` + `subscribed`** events — never
+  `wa1` or `unknown`. `wa1` is our own feed (the "Calendar: Waterloo
+  All-in-1" chip label, an ICS `X-WR-CALNAME`/`PRODID` saying so, a feed-url
+  host, or defensively any `<CODE> · <Label>` title); it must never suppress
+  the items it republishes. Stored `subscribed` events carrying the feed
+  title migrate to `wa1` on the next read.
 - Wiring still needed: manifest optional host `https://calendar.google.com/*`,
   registry entry, the contract Source id, and the Settings toggle.
 

@@ -17,6 +17,13 @@
 import { PAGE_EVENT } from "../core/contract.js";
 
 (() => {
+  // The MAIN world survives extension reloads — a re-injected copy would
+  // double-wrap fetch/XHR and double-emit. The flag lives on `window`, not
+  // the module, so a fresh injection still sees it.
+  const w = /** @type {any} */ (window);
+  if (w.__wa1ObserverInstalled) return;
+  w.__wa1ObserverInstalled = true;
+
   const MAX_BODY = 2000000;
   const BUFFER_MAX = 200;
   const READY_EVENT = "wa1:recorder-ready";

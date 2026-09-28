@@ -44,10 +44,19 @@ test("matching against '<org> <title>' also suppresses", () => {
   assert.equal(marked(out).length, 1);
 });
 
-test("a subscribed event never suppresses — including our own feed's import", () => {
+test("a subscribed event suppresses — but never our own feed", () => {
   const items = { a: item("a") };
-  const feed = ev({ title: "WATonomous Design review", calendarKind: "subscribed" });
+  // Another subscribed calendar (UW Flow export etc.) is real evidence the
+  // thing is already on the calendar.
+  const sub = ev({ title: "WATonomous Design review", calendarKind: "subscribed" });
+  assert.equal(marked(suppressAgainstCalendar(items, [sub], NOW)).length, 1);
+  // …but a wa1 event — our own feed's republish — never suppresses, no
+  // matter how it was classified when stored.
+  const feed = ev({ title: "WATonomous Design review", calendarKind: "wa1" });
   assert.equal(marked(suppressAgainstCalendar(items, [feed], NOW)).length, 0);
+  const feedByTitle = ev({ title: "ECE 105 · Lecture", calendarKind: "subscribed" });
+  const itemEv = { a: item("a", { title: "Lecture", org: "ECE 105", type: "class" }) };
+  assert.equal(marked(suppressAgainstCalendar(itemEv, [feedByTitle], NOW)).length, 0);
 });
 
 test("an unknown-kind event never suppresses", () => {
@@ -58,21 +67,22 @@ test("an unknown-kind event never suppresses", () => {
   );
 });
 
-test("gcalOwnEvents filters to own only", () => {
+test("gcalOwnEvents keeps suppressible events (own + subscribed, never wa1)", () => {
   const sourceState = {
     gcal: {
       state: {
         events: [
           ev({ title: "mine" }),
           ev({ title: "sub", calendarKind: "subscribed" }),
+          ev({ title: "ECE 105 · Lecture", calendarKind: "subscribed" }), // wa1 title
+          ev({ title: "feed", calendarKind: "wa1" }),
           ev({ title: "unk", calendarKind: "unknown" }),
         ],
       },
     },
   };
-  const own = gcalOwnEvents(sourceState);
-  assert.equal(own.length, 1);
-  assert.equal(own[0].title, "mine");
+  const kept = gcalOwnEvents(sourceState);
+  assert.deepEqual(kept.map((e) => e.title), ["mine", "sub"]);
   assert.deepEqual(gcalOwnEvents({}), []);
   assert.deepEqual(gcalOwnEvents({ gcal: { state: {} } }), []);
 });
@@ -139,4 +149,172 @@ test("an item already marked onCalendar keeps its mark", () => {
   const items = { a: item("a", { meta: { onCalendar: "google" } }) };
   const out = suppressAgainstCalendar(items, [ev()], NOW);
   assert.equal(out, items);
+});
+
+/* ---------------- course-code + component matching -------------------- */
+
+const classItem = (id, over = {}) =>
+  item(id, {
+    source: "outline",
+    type: "class",
+    title: "Lecture",
+    org: "ECE 105",
+    startAt: "2026-10-06T14:30:00.000Z",
+    endAt: "2026-10-06T15:50:00.000Z",
+    ...over,
+  });
+
+test("live shape: 'ECE 105 LEC - Classical Mechanics' suppresses a class item", () => {
+  const items = { a: classItem("a") };
+  const out = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 LEC - Classical Mechanics", startAt: "2026-10-06T14:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(out).length, 1);
+});
+
+test("UW Flow shape: 'ECE105 - LEC 001' suppresses; subscribed counts", () => {
+  const items = { a: classItem("a") };
+  const out = suppressAgainstCalendar(
+    items,
+    [
+      ev({
+        title: "ECE105 - LEC 001",
+        startAt: "2026-10-06T14:30:00.000Z",
+        calendarKind: "subscribed",
+      }),
+    ],
+    NOW,
+  );
+  assert.equal(marked(out).length, 1);
+});
+
+test("Quest-exporter shape: 'ECE 105 - LEC 001 - Classroom' suppresses", () => {
+  const items = { a: classItem("a") };
+  const out = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 - LEC 001 - Classroom", startAt: "2026-10-06T14:33:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(out).length, 1);
+});
+
+test("same time, different course: no suppression", () => {
+  const items = { a: classItem("a") };
+  const out = suppressAgainstCalendar(
+    items,
+    [ev({ title: "MATH 117 LEC - Calculus", startAt: "2026-10-06T14:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(out).length, 0);
+});
+
+test("same course, LEC event vs TUT item: no suppression", () => {
+  const items = {
+    a: classItem("a", { type: "tutorial", title: "Tutorial" }),
+  };
+  const out = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 LEC - Classical Mechanics", startAt: "2026-10-06T14:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(out).length, 0);
+  // …but the same item does match a TUT event.
+  const tut = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 TUT - Classical Mechanics", startAt: "2026-10-06T14:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(tut).length, 1);
+});
+
+test("a class item with no component word on the event still matches", () => {
+  const items = { a: classItem("a") };
+  const out = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 - Classical Mechanics", startAt: "2026-10-06T14:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(out).length, 1);
+});
+
+test("an exam item needs an exam word or TST on the event", () => {
+  const items = {
+    a: classItem("a", {
+      type: "exam",
+      title: "Final",
+      org: "ECE 105",
+      startAt: "2026-12-10T19:30:00.000Z",
+      endAt: "2026-12-10T22:00:00.000Z",
+    }),
+  };
+  const finals = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE105 - FINAL", startAt: "2026-12-10T19:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(finals).length, 1);
+  const lec = suppressAgainstCalendar(
+    items,
+    [ev({ title: "ECE 105 LEC - Classical Mechanics", startAt: "2026-12-10T19:30:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(lec).length, 0);
+});
+
+test("deadline vs 'ECE 150 | Assignment 3 due' — timed and all-day", () => {
+  const dl = (over = {}) =>
+    item("a", {
+      source: "outline",
+      type: "deadline",
+      title: "Assignment 3",
+      org: "ECE 150",
+      dueAt: "2026-10-16T03:59:00.000Z",
+      startAt: undefined,
+      ...over,
+    });
+  // Timed: Oct 15 11:59 PM Toronto vs the item's 23:59 due.
+  const timed = suppressAgainstCalendar(
+    { a: dl() },
+    [ev({ title: "ECE 150 | Assignment 3 due", startAt: "2026-10-16T03:58:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(timed).length, 1);
+  // All-day event on the same Toronto day also matches.
+  const allDay = suppressAgainstCalendar(
+    { a: dl() },
+    [
+      ev({
+        title: "ECE 150 | Assignment 3 due",
+        startAt: "2026-10-15T04:00:00.000Z",
+        allDay: true,
+      }),
+    ],
+    NOW,
+  );
+  assert.equal(marked(allDay).length, 1);
+  // A different assessment number does not.
+  const wrongNum = suppressAgainstCalendar(
+    { a: dl() },
+    [ev({ title: "ECE 150 | Assignment 4 due", startAt: "2026-10-16T03:58:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(wrongNum).length, 0);
+  // Nor a different kind at the same instant.
+  const wrongKind = suppressAgainstCalendar(
+    { a: dl() },
+    [ev({ title: "ECE 150 | Quiz 3", startAt: "2026-10-16T03:58:00.000Z" })],
+    NOW,
+  );
+  assert.equal(marked(wrongKind).length, 0);
+});
+
+test("a wa1 feed event never suppresses the class it republishes", () => {
+  const items = { a: classItem("a") };
+  const feed = ev({ title: "ECE 105 · Lecture", calendarKind: "wa1", startAt: "2026-10-06T14:30:00.000Z" });
+  assert.equal(marked(suppressAgainstCalendar(items, [feed], NOW)).length, 0);
+  // …even when stored under the old "subscribed" kind.
+  const legacy = ev({ title: "ECE 105 · Lecture", calendarKind: "subscribed", startAt: "2026-10-06T14:30:00.000Z" });
+  assert.equal(marked(suppressAgainstCalendar(items, [legacy], NOW)).length, 0);
 });

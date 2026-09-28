@@ -33,11 +33,18 @@ import {
  * @property {string} startAt     ISO instant (Toronto wall times)
  * @property {string} [endAt]     ISO; for all-day ranges, exclusive midnight after the last day
  * @property {boolean} allDay
- * @property {"own"|"subscribed"|"unknown"} calendarKind
+ * @property {"own"|"wa1"|"subscribed"|"unknown"} calendarKind
  */
 
 /** @type {Record<string, number>} */
-export const KIND_RANK = { own: 0, subscribed: 1, unknown: 2 };
+export const KIND_RANK = { own: 0, wa1: 1, subscribed: 2, unknown: 3 };
+
+/** This extension's own feed: the "Calendar: Waterloo All-in-1" chip
+ * label. Any event on it must never suppress the items it came from. */
+const WA1_LABEL_RE = /waterloo all-in-1/i;
+
+/** Defensive: our feed's event titles are "<CODE> · <Label>" (U+00B7). */
+export const WA1_TITLE_RE = /^[A-Za-z]{2,6}\s?\d{3}[A-Za-z]?\s+·\s+\S/;
 
 const textOf = (el) => String((el && el.textContent) || "").replace(/\s+/g, " ").trim();
 const DAY3 = /** @type {Record<string, number>} */ ({ sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 });
@@ -545,8 +552,17 @@ export function gcalExtract(doc, href, { now } = {}) {
       events.push({
         ...rest,
         // A "Calendar: <name>" segment marks a named calendar; subscribed
-        // unless the event id already proved it one of the user's own.
-        calendarKind: kind === "own" || !calendar ? kind : "subscribed",
+        // unless the event id already proved it one of the user's own —
+        // and "Waterloo All-in-1" (or a "<CODE> · <Label>" feed title) is
+        // our own subscription, which must never suppress its source items.
+        calendarKind:
+          kind === "own"
+            ? kind
+            : WA1_LABEL_RE.test(String(calendar || "")) || WA1_TITLE_RE.test(rest.title)
+              ? "wa1"
+              : calendar
+                ? "subscribed"
+                : kind,
       });
     }
     for (const dlg of doc.querySelectorAll(GCAL.dialog) || []) {

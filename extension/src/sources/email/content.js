@@ -1,18 +1,18 @@
 // @ts-check
 // Email (Outlook web + Gmail) content script — passive DOM reader plus the
-// automatic mail backfill (backfill.js + gmail-backfill.js /
-// outlook-backfill.js — README "Network"). Bundled as an IIFE by
-// tools/build.mjs so imports are fine.
+// automatic mail read (backfill.js + gmail-backfill.js / outlook-backfill.js
+// — README "Network"). Bundled as an IIFE by tools/build.mjs so imports are
+// fine.
 //
 // Hard rules (README repeats them):
-//   - every request is a same-origin GET: Gmail's Atom feed, the hidden
-//     #search iframe pages and ?view=pt print views; Outlook's
-//     /api/v2.0/me/... REST reads under the page's own MSAL token;
+//   - every request is a same-origin GET: Gmail's Atom feed and ?view=pt
+//     print views; Outlook's /api/v2.0/me/... REST reads under the page's
+//     own MSAL token;
 //   - never navigate or click a user tab, never POST/PATCH/PUT/DELETE,
-//     never touch write APIs or token endpoints;
+//     never touch write APIs or token endpoints, never create an iframe;
 //   - the Outlook token lives in one local variable per round and reaches
 //     only the Authorization header — never storage, messages, or logs;
-//   - chrome.storage is read-only (settings + the adapter's backfill state);
+//   - chrome.storage is read-only (settings + the adapter's check state);
 //   - mail text travels only as a transient DOM extract to OUR OWN
 //     background; the adapter persists at most a per-message date snippet.
 
@@ -29,15 +29,25 @@ import {
   backfillRound,
   backfillFreeze,
   replayCache,
+  makeRunBox,
+  checkNowDecision,
+  doneFromResult,
+  gmailOnInbox,
+  injectOnce,
   BF_TICK_MS,
   BF_LOCK_PREFIX,
   BF_FAIL_PREFIX,
-  MAIL_CHECK_NOW,
+  CHECK_NOW,
+  CHECK_DONE,
 } from "./backfill.js";
 import { gmailBackfill } from "./gmail-backfill.js";
-import { outlookBackfill } from "./outlook-backfill.js";
+import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
 
 (() => {
+  // W1 re-injects content scripts into open tabs on install/update/startup —
+  // the second copy returns before registering anything.
+  if (!injectOnce("email")) return;
+
   const DEBOUNCE_MS = 2000;
   const BODY_CAP = 2 * 1024 * 1024;
   /** @type {string|null} */
@@ -138,7 +148,7 @@ import { outlookBackfill } from "./outlook-backfill.js";
     setInterval(atomTick, ATOM_GAP_MS); // while the tab stays open
   }
 
-  /* ------------------------ automatic backfill ----------------------- */
+  /* ------------------------- automatic read -------------------------- */
 
   if (window.top === window) {
     const lsGet = (/** @type {string} */ k) => {
@@ -164,8 +174,31 @@ import { outlookBackfill } from "./outlook-backfill.js";
         return {};
       }
     };
-    /** In-memory cache of the last run's rows (never persisted). */
-    /** @type {{folder: string, messages: any[]}[]|null} */
+    /** Latest settings snapshot — lets check-now answer "disabled" without
+     * an async storage read. Refreshed on load + every change. */
+    /** @type {any} */
+    let curSettings = null;
+    settingsSlice().then((s) => {
+      curSettings = s;
+    });
+    const lsTokenValues = () => {
+      /** @type {string[]} */
+      const out = [];
+      try {
+        for (const k of Object.keys(localStorage)) {
+          if (!/accesstoken/i.test(k)) continue;
+          const v = localStorage.getItem(k);
+          if (v != null) out.push(v);
+        }
+      } catch {
+        /* storage blocked */
+      }
+      return out;
+    };
+    const onInbox = () =>
+      provider !== "gmail" || gmailOnInbox(location.hash);
+    /** @type {{folder: string, messages: any[]}[]|null} in-memory cache of
+     * the last run's rows (never persisted). */
     let cache = null;
     const env = {
       fetchImpl: (/** @type {any} */ url, /** @type {any} */ init) => fetch(url, init),
@@ -179,7 +212,7 @@ import { outlookBackfill } from "./outlook-backfill.js";
         try {
           const all = /** @type {any} */ (await chrome.storage.local.get("sourceState"));
           const st = (((all || {}).sourceState || {}).outlook || {}).state || {};
-          return ((st.backfill || {})[provider]) || null;
+          return ((st.check || {})[provider]) || null;
         } catch {
           return null;
         }
@@ -212,91 +245,80 @@ import { outlookBackfill } from "./outlook-backfill.js";
       },
       getCache: () => cache,
       pageUrl: location.href,
+      doc: () => document,
+      onInbox,
       ...(provider === "gmail"
-        ? {
-            account: gmailAccountIndex(location.pathname),
-            makeFrame: (/** @type {string} */ url) => {
-              const el = document.createElement("iframe");
-              el.setAttribute(
-                "style",
-                "position:fixed;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;",
-              );
-              el.setAttribute("aria-hidden", "true");
-              document.documentElement.appendChild(el);
-              el.src = url;
-              return {
-                navigate: (/** @type {string} */ u) => {
-                  try {
-                    el.src = u;
-                  } catch {
-                    /* navigated away */
-                  }
-                },
-                doc: () => el.contentDocument,
-                href: () => {
-                  try {
-                    return el.contentWindow ? el.contentWindow.location.href : "";
-                  } catch {
-                    return "";
-                  }
-                },
-                remove: () => el.remove(),
-              };
-            },
-          }
-        : {
-            lsValues: () => {
-              /** @type {string[]} */
-              const out = [];
-              try {
-                for (const k of Object.keys(localStorage)) {
-                  if (!/accesstoken/i.test(k)) continue;
-                  const v = localStorage.getItem(k);
-                  if (v != null) out.push(v);
-                }
-              } catch {
-                /* storage blocked */
-              }
-              return out;
-            },
-          }),
+        ? { account: gmailAccountIndex(location.pathname) }
+        : { lsValues: lsTokenValues }),
     };
     const impl = provider === "gmail" ? gmailBackfill : outlookBackfill;
-    const tick = (/** @type {boolean} */ force) => {
-      backfillRound({ ...env, now: new Date(), force }, impl).catch(() => {});
-    };
-    tick(false);
-    setInterval(() => tick(false), BF_TICK_MS);
+    const box = makeRunBox((/** @type {boolean} */ force) =>
+      backfillRound({ ...env, now: new Date(), force }, impl),
+    );
 
-    // "Check again now" from Setup: an immediate incremental read (a full
-    // only when the last one is >6 h old or the lookback changed).
+    // Automatic cadence: on load, every 30 min, and on hashchange to the
+    // inbox (Gmail). backfillRound itself enforces the 30-min gate, the
+    // retry window and the cross-tab lock for these non-forced runs.
+    const tick = () => {
+      if (!onInbox()) return;
+      box.run(false).catch(() => {});
+    };
+    tick();
+    setInterval(tick, BF_TICK_MS);
+    addEventListener("hashchange", tick);
+
+    // Check-now (panel → background → tab): reply accepted/failed at once,
+    // run a forced read (bypasses the 30-min gate, the lock and the passive
+    // unchanged-snapshot dedupe — never the rate cap or the kill switch),
+    // then report check-done. A run already in flight is joined.
     try {
-      chrome.runtime.onMessage.addListener((msg) => {
-        if (msg && msg.type === MAIL_CHECK_NOW) tick(true);
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        const decision = checkNowDecision(msg, provider, {
+          onPage: onInbox,
+          disabled: () => curSettings != null && curSettings[provider] === false,
+          hasToken:
+            provider === "outlook"
+              ? () => outlookToken(lsTokenValues(), Date.now()) != null
+              : undefined,
+        });
+        if (decision == null) return false;
+        sendResponse(decision);
+        if (decision.accepted) {
+          const source = String(msg.source || "");
+          const runId = String(msg.runId || "");
+          lastBody = null;
+          send(); // re-extract the visible list — dedupe bypassed
+          box
+            .run(true)
+            .then((res) => {
+              sendMessage({
+                type: CHECK_DONE,
+                source,
+                provider,
+                runId,
+                ...doneFromResult(res),
+              });
+            })
+            .catch(() => {});
+        }
+        return false;
       });
     } catch {
       /* older runtimes */
     }
 
-    // Settings changes: a lookback change shows up as lookbackChanged in
-    // decideRun (full, allowed inside 6h); a provider off flag stops reads;
-    // any other filter change replays this tab's in-memory cache.
+    // Settings changes: a provider off flag stops reads at the next tick;
+    // any other filter change replays this tab's in-memory cache so the new
+    // rules re-extract what was already read — no network.
     try {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "local") return;
         const s = /** @type {any} */ (changes && changes.wa1Settings);
         if (!s) return;
-        const before =
-          (((s.oldValue || {}).sources || {}).outlook || {});
+        const before = (((s.oldValue || {}).sources || {}).outlook || {});
         const after = (((s.newValue || {}).sources || {}).outlook || {});
+        curSettings = after;
         if (after[provider] === false) return; // reads stop at the next tick
-        if (
-          Number(before.lookbackDays) !== Number(after.lookbackDays) &&
-          after.lookbackDays != null
-        ) {
-          tick(true); // decideRun upgrades it to a full
-          return;
-        }
         if (JSON.stringify(before) !== JSON.stringify(after) && cache) {
           replayCache({ ...env, now: new Date() }, impl);
         }
@@ -306,8 +328,9 @@ import { outlookBackfill } from "./outlook-backfill.js";
     }
   }
 
-  // Page Lifecycle: freeze drops in-flight fetches/rounds (generation);
-  // resume/visible continues where the tab left off.
+  // Page Lifecycle: freeze drops in-flight fetches/runs (generation);
+  // resume/visible continues where the tab left off. A check-now that
+  // joined a frozen run resolves stale — check-done reports "timeout".
   try {
     document.addEventListener("freeze", () => {
       frozenNow = true;

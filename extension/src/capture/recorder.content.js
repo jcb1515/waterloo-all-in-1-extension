@@ -19,10 +19,16 @@ import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from ".
 import { readBodyInto } from "./fetch.js";
 import { UI } from "../core/messages.js";
 import { probeFor, shouldSendProbe } from "../sources/probes.js";
+import { guardInstance } from "./guard.js";
 
 (() => {
   const site = /** @type {Record<string, string>} */ (SITE_BY_HOST)[location.hostname];
   if (!site) return;
+
+  // A re-injected copy after an extension reload lands in this same
+  // isolated world: a live copy answers the ping and we skip; an orphan
+  // gets superseded and tears down. See capture/guard.js.
+  if (!guardInstance("wa1:recorder", teardown)) return;
 
   const READY_EVENT = "wa1:recorder-ready";
   const SNAP_THROTTLE_MS = 3000;
@@ -102,34 +108,35 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   // site-relative GET/POST paths — no scheme, no "..", no redirects off host.
   // On Learn the site content script answers RELAY_FETCH itself (restricted
   // to GET /d2l/api/); registering here too would race the fetch twice.
-  if (site !== "learn")
-    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-      if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
-      const path = String(msg.path || "");
-      const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
-      if (!path.startsWith("/") || path.includes("..") || (method !== "GET" && method !== "POST")) {
-        sendResponse({ status: 0, error: "not-allowed" });
-        return false;
+  /** @param {any} msg */
+  function onRelayFetch(msg, _sender, sendResponse) {
+    if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
+    const path = String(msg.path || "");
+    const method = String((msg.init && msg.init.method) || "GET").toUpperCase();
+    if (!path.startsWith("/") || path.includes("..") || (method !== "GET" && method !== "POST")) {
+      sendResponse({ status: 0, error: "not-allowed" });
+      return false;
+    }
+    (async () => {
+      try {
+        /** @type {RequestInit} */
+        const init = { method, credentials: "same-origin", signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) };
+        if (msg.init && msg.init.headers) init.headers = msg.init.headers;
+        if (method === "POST" && msg.init && typeof msg.init.body === "string") init.body = msg.init.body;
+        const res = await fetch(location.origin + path, init);
+        /** @type {Record<string, any>} */
+        const out = { status: res.status, url: res.url, contentType: res.headers.get("content-type") || "" };
+        if (res.status === 401 || LOGIN_URL_RE.test(res.url || "")) out.loginRedirect = true;
+        if (res.ok) await readBodyInto(res, out, !!(msg.init && msg.init.binary === true));
+        sendResponse(out);
+      } catch (e) {
+        const err = /** @type {any} */ (e);
+        sendResponse({ status: 0, error: err && err.name === "TimeoutError" ? "timeout" : String((err && err.message) || err) });
       }
-      (async () => {
-        try {
-          /** @type {RequestInit} */
-          const init = { method, credentials: "same-origin", signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) };
-          if (msg.init && msg.init.headers) init.headers = msg.init.headers;
-          if (method === "POST" && msg.init && typeof msg.init.body === "string") init.body = msg.init.body;
-          const res = await fetch(location.origin + path, init);
-          /** @type {Record<string, any>} */
-          const out = { status: res.status, url: res.url, contentType: res.headers.get("content-type") || "" };
-          if (res.status === 401 || LOGIN_URL_RE.test(res.url || "")) out.loginRedirect = true;
-          if (res.ok) await readBodyInto(res, out, !!(msg.init && msg.init.binary === true));
-          sendResponse(out);
-        } catch (e) {
-          const err = /** @type {any} */ (e);
-          sendResponse({ status: 0, error: err && err.name === "TimeoutError" ? "timeout" : String((err && err.message) || err) });
-        }
-      })();
-      return true;
-    });
+    })();
+    return true;
+  }
+  if (site !== "learn") chrome.runtime.onMessage.addListener(onRelayFetch);
 
   function applySettings(s) {
     enabled = !s || s.enabled !== false;
@@ -216,6 +223,8 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   let lastSentAt = 0;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let debounceTimer = null;
+  /** @type {MutationObserver | null} */
+  let snapObserver = null;
 
   function snapshot() {
     if (!enabled) return;
@@ -254,14 +263,15 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
     try {
       // Throttle, not debounce: on sites that mutate constantly (Discord,
       // Gmail) a debounce that resets every mutation would starve snapshots.
-      new MutationObserver(() => {
+      snapObserver = new MutationObserver(() => {
         if (!debounceTimer) {
           debounceTimer = setTimeout(() => {
             debounceTimer = null;
             snapshot();
           }, SNAP_THROTTLE_MS);
         }
-      }).observe(document.documentElement, { childList: true, subtree: true });
+      });
+      snapObserver.observe(document.documentElement, { childList: true, subtree: true });
     } catch {
       /* ignore */
     }
@@ -278,6 +288,11 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   let probeLast = { at: 0, json: "" };
   /** @type {ReturnType<typeof setTimeout> | null} */
   let probeTimer = null;
+  /** @type {MutationObserver | null} */
+  let probeObserver = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let settleTimer = null;
+  let probeLoadedAt = 0;
 
   /** @param {number} minInterval */
   function runProbe(minInterval) {
@@ -320,33 +335,31 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
     // (WaterlooWorks) finish rendering after the load event, so the
     // load-time probe can read an empty shell. Mirrors the WW adapter's
     // resendAfterSettled; fires exactly once.
-    const probeLoadedAt = Date.now();
-    /** @type {ReturnType<typeof setTimeout> | null} */
-    let settleTimer = null;
-    const scheduleSettledProbe = () => {
-      if (settleTimer !== null) return;
-      settleTimer = setTimeout(() => {
-        settleTimer = null;
-        // Bypass the min-interval: the load probe's send would otherwise
-        // swallow a changed result here (dedupe on unchanged json still
-        // applies via shouldSendProbe).
-        runProbe(0);
-      }, Math.max(0, probeLoadedAt + 3000 - Date.now()) + 100);
-    };
+    probeLoadedAt = Date.now();
     window.addEventListener("load", scheduleSettledProbe, { once: true });
     if (document.readyState === "complete") scheduleSettledProbe();
     try {
-      new MutationObserver(() => {
+      probeObserver = new MutationObserver(() => {
         if (!probeTimer) {
           probeTimer = setTimeout(() => {
             probeTimer = null;
             runProbe(PROBE_MIN_INTERVAL_MS);
           }, PROBE_THROTTLE_MS);
         }
-      }).observe(document.documentElement, { childList: true, subtree: true });
+      });
+      probeObserver.observe(document.documentElement, { childList: true, subtree: true });
     } catch {
       /* ignore */
     }
+  }
+
+  /** The 3-s settled re-probe, bypassing the min interval (dedupe applies). */
+  function scheduleSettledProbe() {
+    if (settleTimer !== null) return;
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      runProbe(0);
+    }, Math.max(0, probeLoadedAt + 3000 - Date.now()) + 100);
   }
 
   /* ---------------------- "Something missed?" snapshot ---------------------- */
@@ -354,7 +367,8 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
   // The panel asks the recorder on this tab to save a structural page
   // outline plus the user's note into the discovery store. Uses the site's
   // privacy policy — Discord/email stay structural, so no text leaves here.
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  /** @param {any} msg */
+  function onSnapshotMsg(msg, _sender, sendResponse) {
     if (!msg || msg.type !== UI.PROBE_SNAPSHOT) return false;
     try {
       const path = normalizePath(location.href, redactWords);
@@ -378,9 +392,51 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
       sendResponse({ ok: false });
     }
     return false;
-  });
+  }
+  chrome.runtime.onMessage.addListener(onSnapshotMsg);
 
   /* ------------------------- settings ------------------------- */
+
+  /** @param {any} changes @param {string} area */
+  function onStorageChange(changes, area) {
+    if (area !== "local" || !changes.discoverySettings) return;
+    applySettings(changes.discoverySettings.newValue);
+    if (enabled) startSnapshots();
+  }
+
+  /**
+   * Everything this instance wired — run by guardInstance's supersede when
+   * a re-injected copy takes over (our chrome.runtime is dead by then).
+   */
+  function teardown() {
+    document.removeEventListener(PAGE_EVENT, onPageEvent);
+    document.removeEventListener("DOMContentLoaded", snapshot);
+    document.removeEventListener("DOMContentLoaded", probeNow);
+    window.removeEventListener("load", snapshot);
+    window.removeEventListener("load", probeNow);
+    window.removeEventListener("load", scheduleSettledProbe);
+    try {
+      chrome.runtime.onMessage.removeListener(onRelayFetch);
+    } catch {
+      /* dead context */
+    }
+    try {
+      chrome.runtime.onMessage.removeListener(onSnapshotMsg);
+    } catch {
+      /* dead context */
+    }
+    try {
+      chrome.storage.onChanged.removeListener(onStorageChange);
+    } catch {
+      /* dead context */
+    }
+    if (snapObserver) snapObserver.disconnect();
+    if (probeObserver) probeObserver.disconnect();
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (probeTimer) clearTimeout(probeTimer);
+    if (settleTimer) clearTimeout(settleTimer);
+    debounceTimer = probeTimer = settleTimer = null;
+  }
 
   wire(); // net events feed OBSERVED forwarding whether or not discovery is on
   startProbe();
@@ -392,11 +448,7 @@ import { probeFor, shouldSendProbe } from "../sources/probes.js";
         if (enabled) startSnapshots();
       })
       .catch(() => startSnapshots());
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !changes.discoverySettings) return;
-      applySettings(changes.discoverySettings.newValue);
-      if (enabled) startSnapshots();
-    });
+    chrome.storage.onChanged.addListener(onStorageChange);
   } catch {
     startSnapshots();
   }
