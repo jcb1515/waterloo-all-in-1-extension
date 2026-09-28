@@ -53,6 +53,138 @@ const torontoDay = (iso) => {
   return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
 };
 
+/* ---- mail-item titles -------------------------------------------------- */
+
+const GENERIC_TITLE_RE =
+  /^\s*(?:re:|fwd?:|fw:|reminder|hi|hello|hey|update|notification|ping)\s*[.!:-]*$/i;
+
+/** A subject too thin to name an item: empty, a stub, or <3 words w/o a noun. */
+const genericTitle = (title) => {
+  const s = String(title || "").trim();
+  if (!s || GENERIC_TITLE_RE.test(s)) return true;
+  if (s.split(/\s+/).filter(Boolean).length < 3 && !EVENT_ANY_RE.test(s)) return true;
+  return false;
+};
+
+/** The dated sentence as a title — lead-ins dropped, capped like a subject. */
+const titleFromSentence = (sentence) => {
+  const t = String(sentence || "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:please|re:|fwd?:|fw:|hi|hello|hey)[\s,:-]*/i, "")
+    .replace(/[.\s]+$/, "")
+    .trim();
+  if (!t) return "Email";
+  return (t.charAt(0).toUpperCase() + t.slice(1)).slice(0, 100);
+};
+
+/* ---- same-output dedupe -------------------------------------------------- */
+
+const MERGE_WINDOW_MS = 15 * 60 * 1000;
+
+const TITLE_STOP = new Set([
+  "the", "and", "for", "with", "your", "you", "this", "that", "from", "have",
+  "has", "are", "was", "will", "our", "please", "join", "update", "reminder",
+  "hello", "team", "all", "any", "see", "re", "fw", "fwd", "dont", "can",
+]);
+const MONTH_WD = new Set([
+  "january", "february", "march", "april", "may", "june", "july", "august",
+  "september", "october", "november", "december", "monday", "tuesday",
+  "wednesday", "thursday", "friday", "saturday", "sunday", "jan", "feb",
+  "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+  "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+]);
+
+/** Capitalised 4+ letter words that can actually name something. */
+const distinctiveTokens = (t) => {
+  const out = new Set();
+  for (const w of String(t || "").match(/[A-Za-z]{4,}/g) || []) {
+    const l = w.toLowerCase();
+    if (/^[A-Z]/.test(w) && !TITLE_STOP.has(l) && !MONTH_WD.has(l)) out.add(l);
+  }
+  return out;
+};
+
+const titleWords = (t) =>
+  new Set(
+    (String(t || "").toLowerCase().match(/[a-z0-9]+/g) || []).filter((w) => !TITLE_STOP.has(w)),
+  );
+
+/** Shared distinctive token, or Jaccard word similarity ≥ 0.6. */
+const titlesMatch = (a, b) => {
+  const da = distinctiveTokens(a);
+  const db = distinctiveTokens(b);
+  for (const w of da) if (db.has(w)) return true;
+  const wa = titleWords(a);
+  const wb = titleWords(b);
+  if (!wa.size || !wb.size) return false;
+  let inter = 0;
+  for (const w of wa) if (wb.has(w)) inter++;
+  return inter / (wa.size + wb.size - inter) >= 0.6;
+};
+
+const itemInstant = (i) => i.startAt || i.dueAt || "";
+const isMailItem = (i) => /:mail:/.test(String(i.id));
+const isInviteItem = (i) => /:invite:/.test(String(i.id));
+
+/** Less-generic wins, then the longer (more complete) title. */
+const titleScore = (t) => (genericTitle(t) ? 0 : 1) * 10000 + String(t || "").length;
+
+/**
+ * Within one adapter output, collapse near-duplicate mail items:
+ * - a tentative `:mail:` item within ±15 min of an exact `:invite:` item is
+ *   the same meeting seen twice — the invite wins;
+ * - tentative `:mail:` items of the same type whose starts/dues sit within
+ *   ±15 min and whose titles share a distinctive token or are ≥0.6 similar
+ *   are the same thing from two threads — the better title survives and both
+ *   threads' urls are kept in meta.threads.
+ * @param {Item[]} items
+ * @returns {Item[]}
+ */
+export function dedupeMailItems(items) {
+  const invites = items.filter((i) => isInviteItem(i) && i.confidence === "exact");
+  /** @type {Item[]} */
+  const kept = [];
+  for (const it of items) {
+    if (!isMailItem(it)) {
+      kept.push(it);
+      continue;
+    }
+    const when = itemInstant(it);
+    if (
+      when &&
+      invites.some(
+        (iv) =>
+          iv.startAt && Math.abs(Date.parse(iv.startAt) - Date.parse(when)) <= MERGE_WINDOW_MS,
+      )
+    ) {
+      continue; // exact invite already covers this mail item
+    }
+    const dup = kept.find(
+      (k) =>
+        isMailItem(k) &&
+        k.type === it.type &&
+        itemInstant(k) &&
+        when &&
+        Math.abs(Date.parse(itemInstant(k)) - Date.parse(when)) <= MERGE_WINDOW_MS &&
+        titlesMatch(String(k.title), String(it.title)),
+    );
+    if (!dup) {
+      kept.push(it);
+      continue;
+    }
+    const threads = new Set([
+      .../** @type {any[]} */ ((dup.meta && dup.meta.threads) || []),
+      .../** @type {any[]} */ ((it.meta && it.meta.threads) || []),
+      dup.evidence && dup.evidence.url,
+      it.evidence && it.evidence.url,
+    ].filter(Boolean));
+    const winner = titleScore(it.title) > titleScore(dup.title) ? it : dup;
+    winner.meta = { ...(winner.meta || {}), threads: [...threads] };
+    if (winner === it) kept[kept.indexOf(dup)] = it;
+  }
+  return kept;
+}
+
 /**
  * @param {Msg} msg
  * @param {{provider?: "gmail"|"outlook", now?: Date, termCode?: number,
@@ -105,7 +237,9 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     const hit =
       invite.hit ||
       td(invite.whenText, { now: ref, termCode }).find((h) => !h.allDay);
-    if (hit) {
+    // An invite for a meeting that already ended is dropped like any other
+    // stale date — the floor is the observation time, not receivedAt.
+    if (hit && !(Date.parse(hit.endAt || hit.startAt) < (now || new Date()).getTime())) {
       const eastern = !invite.tz || EASTERN_TZ.test(invite.tz);
       const cancelled = /^(canceled|cancelled)\b/i.test(subject);
       const coopSender = isCoopSender(msg);
@@ -161,8 +295,12 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   // in the same sentence as an explicit calendar date, at most 2 items).
   const ungatedBulk = !gate.ok && isBulk(msg);
 
-  const text = `${subject}\n${body || msg.preview || ""}`;
-  const floor = ref.getTime() - DAY_MS;
+  // Quoted history ("On … wrote:", "From: … Sent:") is never date-worthy —
+  // previews carry it inline, bodies carry it as header lines.
+  const text = `${subject}\n${unquoted(body || msg.preview || "")}`;
+  // Anything that already ended is dropped against the observation time —
+  // an old message's own receivedAt must not rescue a stale date.
+  const floor = (now || ref).getTime();
   const hitCap = ungatedBulk ? 2 : MAX_HITS;
   // "Application received" only counts as a confirmation when the message
   // actually names a dated event or interview.
@@ -231,7 +369,9 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
     // details. Other types keep the cleaned subject as the title.
     /** @type {string|undefined} */
     let details;
-    let itemTitle = title;
+    // Mail items title by the cleaned subject; a generic one ("Reminder",
+    // "Hi", near-empty) falls back to the dated sentence itself.
+    let itemTitle = genericTitle(title) ? titleFromSentence(sentence) : title;
     if (type === "exam") {
       const c = classify({ title: sentence });
       const cat = c.type === "exam" ? c.category : classify({ title: subject }).category;

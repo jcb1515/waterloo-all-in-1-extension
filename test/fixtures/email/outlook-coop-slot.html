@@ -1,0 +1,31 @@
+<!-- Synthetic Outlook co-op "select an interview time slot" message view.
+     Mirrors the live DOM shape (From: aria-label + "Name<addr>" text, no
+     span[title*="@"] in the reading pane) with invented names and text. -->
+<html><body>
+<div role="tree" aria-label="Folder pane">
+  <div role="treeitem" data-folder-name="jane.student@school.example.edu"
+       title="jane.student@school.example.edu" aria-expanded="true" aria-level="1">
+    <span>jane.student@school.example.edu</span>
+  </div>
+  <div role="treeitem" data-folder-name="Inbox" aria-level="2"><span>Inbox</span></div>
+</div>
+<div role="option" data-convid="conv-coop-1" aria-selected="true" data-item-index="0" data-focusable-row>
+  <span title="coop@uwaterloo.ca">Co-op Office</span>
+</div>
+<div role="main">
+  <span role="heading">Congratulations! You've been selected for an interview (Co-op message)</span>
+  <span class="x1 lpc" aria-label="From: Co-op Office"><div style="display: contents;"><span class="x2">Co-op Office&lt;coop@uwaterloo.ca&gt;</span></div></span>
+  <span data-testid="SentReceivedSavedTime">Fri, Sep 25, 2026 12:03 PM</span>
+  <div aria-label="Message body">
+    <div>Hello,</div>
+    <div>Congratulations - you have been selected for a co-op interview!</div>
+    <div>Next step: Select your interview time slot. Please log into your WorkHub
+      dashboard, open the "My Interviews to Schedule" section and select an
+      interview time slot.</div>
+    <div>You must choose a timeslot at least one day before your interview, or
+      the system will choose one for you. For help, visit the
+      <a href="https://workhub.example.edu/redirect?u=home">WorkHub Help</a>
+      section of our site.</div>
+  </div>
+</div>
+</body></html>

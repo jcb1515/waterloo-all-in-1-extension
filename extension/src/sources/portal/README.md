@@ -21,9 +21,25 @@ accumulated state; data arrives two ways:
   payload or extension storage.
 - GET only, and **never the account-refresh endpoint** — a refresh we
   trigger could rotate the token and sign the user out of their Portal tab.
-- Missing token, 401 or 403 → stop the round and send nothing.
-- At most one round per tab per 30 minutes (`sessionStorage`
-  `wa1:portal:lastFetch`); each call has a 15 s timeout.
+- Missing token → nothing is sent and the summary records `no-token`.
+  A 401/403 on the **first** endpoint ends the round (signed out); a 401/403
+  later in the round skips only that endpoint. Every response — any status —
+  replays like the passive path (a replayed 401 marks the session
+  signed-out; other failures land as 0-item readStats).
+- **Rounds resume where they stopped.** Hidden tabs freeze (a fetch issued
+  just before freezing can hang indefinitely), so a round only advances
+  while `document.visibilityState === "visible"`, keeps per-endpoint
+  progress in module memory, and continues on `visibilitychange`→visible /
+  the Page Lifecycle `resume` event — never repeating an endpoint.
+- **Throttle is stamped on completion** (`sessionStorage`
+  `wa1:portal:lastFetch`): 30 min after a clean round, 5 min when any
+  endpoint failed. A `wa1:portal:inProgress` timestamp marker (2 min TTL)
+  keeps a second load from racing a live round. Each request has a 15 s
+  timeout.
+- **Round summary** (`sessionStorage["wa1:portal:lastRound"]`):
+  `{at, error?, results: [{path, status, ms, error?}]}` — path-only URLs,
+  `error` one of `timeout`/`network`/`no-token`/`http-<n>`; the token is
+  never in it.
 
 - `map.js` — pure mappers (rows -> items + course/term patches). No chrome,
   no fetch, no DOM.
