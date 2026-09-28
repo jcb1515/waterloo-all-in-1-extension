@@ -695,12 +695,15 @@ export function messageDateItems(msg, extractDates, nowIso) {
   const msgKey = messageKey(msg.subject, msg.sentAt, now);
   const cutoff = ref.getTime() - MSG_PAST_MS;
   const employer = normEmployer(msg.employer);
-  // Offer mail turns its date hits into respond-to-offer tasks rather than
-  // generic message items (same id, so they replace rather than duplicate).
+  // Offer mail linked to a job/employer turns its date hits into
+  // respond-to-offer tasks rather than generic message items (same id, so
+  // they replace rather than duplicate).
   const offerMessage =
-    /\boffers?\b/i.test(
+    Boolean(employer || msg.jobId) &&
+    (/\boffers?\b/i.test(
       `${msg.subject || ""} ${msg.category || ""} ${msg.subCategory || ""}`
-    ) || /\b(?:job\s+)?offers?\b/i.test(String(msg.text || ""));
+    ) ||
+      /\b(?:job\s+)?offers?\b/i.test(String(msg.text || "")));
   const items = [];
   for (const hit of hits || []) {
     if (hit.confidence < MSG_MIN_CONFIDENCE) continue;
