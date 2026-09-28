@@ -58,7 +58,15 @@ function installPage(readyState = "loading") {
     observe() {}
     disconnect() {}
   };
-  globalThis.chrome = { runtime: { sendMessage: (m) => sent.push(m) } };
+  const listeners = [];
+  globalThis.chrome = {
+    runtime: {
+      id: "wa1-test",
+      sendMessage: (m) => sent.push(m),
+      onMessage: { addListener: (fn) => listeners.push(fn) },
+    },
+    storage: { local: { get: async () => ({}) } },
+  };
   globalThis.setTimeout = /** @type {any} */ ((fn, ms) => {
     timers.push({ fn, ms });
     return timers.length;
@@ -67,6 +75,7 @@ function installPage(readyState = "loading") {
   return {
     sent,
     timers,
+    listeners,
     advance: (ms) => {
       fakeNow += ms;
     },
@@ -85,6 +94,7 @@ function installPage(readyState = "loading") {
       delete globalThis.window;
       delete globalThis.MutationObserver;
       delete globalThis.chrome;
+      delete /** @type {any} */ (globalThis).__wa1WwContent;
     },
   };
 }

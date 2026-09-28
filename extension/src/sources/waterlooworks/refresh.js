@@ -259,22 +259,27 @@ export function allowedClick(el, step) {
  * The kill switch: `settings.sources.waterlooworks.autoRefresh` — absent
  * means on, only `false` turns it off; the source's own `enabled` flag
  * stops it too. Content scripts may read storage but never write it. A
- * storage read error fails closed: no refresh.
- * @returns {Promise<boolean>}
+ * storage read error fails closed. Returns the gate verdict — check-now
+ * needs the reason for its check-done report.
+ * @returns {Promise<"ok"|"disabled"|"error">}
  */
-async function refreshAllowed() {
+export async function refreshGate() {
   try {
     const got = /** @type {any} */ (
       await chrome.storage.local.get(SETTINGS_KEY)
     );
     const src = got?.[SETTINGS_KEY]?.sources?.waterlooworks;
-    return !(
-      src &&
-      (src.enabled === false || src.autoRefresh === false)
-    );
+    return src && (src.enabled === false || src.autoRefresh === false)
+      ? "disabled"
+      : "ok";
   } catch {
-    return false;
+    return "error";
   }
+}
+
+/** @returns {Promise<boolean>} */
+async function refreshAllowed() {
+  return (await refreshGate()) === "ok";
 }
 
 /**
@@ -410,6 +415,56 @@ function sendFrame(frame) {
     },
   });
   return true;
+}
+
+const JOB_ID_CELL_RE = /^\d{4,}$/;
+const EVENT_ID_ONCLICK_RE = /'eventId'\s*:\s*'(\d+)'/;
+
+/**
+ * Collect a document's check-now countables into `sets`: distinct jobIds
+ * from the Job ID column of the applications grid (the table whose headers
+ * include "App Status") and distinct dashboard event rows via the eventId
+ * each View button's onclick carries — the same digits buildSnapshot
+ * preserves as data-wa1-event-id on the snapshot row. Reads only, and
+ * never throws: counting feeds the check-done report, not the payloads.
+ * @param {any} d
+ * @param {{jobIds: Set<string>, eventIds: Set<string>}} sets
+ */
+function countChecked(d, sets) {
+  try {
+    for (const table of qsa(d, "table")) {
+      const labels = qsa(table, "th").map(text);
+      const jobCol = labels.findIndex((l) => /job\s*id/i.test(l));
+      if (jobCol < 0 || !labels.some((l) => /app\s*status/i.test(l))) {
+        continue;
+      }
+      for (const tr of qsa(table, "tbody tr")) {
+        const cell = tr?.cells?.[jobCol] ?? qsa(tr, "td")[jobCol];
+        const v = text(cell);
+        if (JOB_ID_CELL_RE.test(v)) sets.jobIds.add(v);
+      }
+    }
+    for (const el of qsa(d, "[onclick]")) {
+      const m = EVENT_ID_ONCLICK_RE.exec(
+        String(el?.getAttribute?.("onclick") || "")
+      );
+      if (m) sets.eventIds.add(m[1]);
+    }
+  } catch {
+    // best-effort — a malformed doc must not break the round
+  }
+}
+
+/**
+ * The countables in one document — content.js adds the top page's own
+ * count to a forced check's round total.
+ * @param {any} d
+ * @returns {number}
+ */
+export function checkCount(d) {
+  const sets = { jobIds: new Set(), eventIds: new Set() };
+  countChecked(d, sets);
+  return sets.jobIds.size + sets.eventIds.size;
 }
 
 // --- ready predicates -------------------------------------------------------
@@ -639,16 +694,19 @@ const LAST_KEY = "wa1:ww-refresh-last";
  * The iframe is always removed, and a privacy-safe per-step summary
  * (names, durations, failure reasons — never URLs, tokens or page text)
  * is written to sessionStorage["wa1:ww-refresh-last"] on every exit path.
- * @returns {Promise<{sent: number, steps: any[]}>}
+ * @returns {Promise<{sent: number, steps: any[], checked: number}>}
  */
 export async function runRefreshRound() {
   let sent = 0;
   /** @type {{step: string, ok: boolean, ms: number, reason?: string}[]} */
   const steps = [];
   let killed = false;
+  const seen = { jobIds: new Set(), eventIds: new Set() };
   const send = (frame) => {
+    countChecked(docOf(frame), seen);
     if (sendFrame(frame)) sent += 1;
   };
+  const checked = () => seen.jobIds.size + seen.eventIds.size;
   /** Run one named bounded step, record it, and honour the kill switch. */
   const runStep = async (name, fn) => {
     if (killed) return "killed";
@@ -712,10 +770,10 @@ export async function runRefreshRound() {
       return "ok";
     });
     if (apps === "ok") await applicationsPages(frame, send, runStep);
-    return { sent, steps };
+    return { sent, steps, checked: checked() };
   } catch (e) {
     if (e !== SIGNED_OUT) throw e;
-    return { sent, steps };
+    return { sent, steps, checked: checked() };
   } finally {
     try {
       if (typeof frame.remove === "function") frame.remove();
@@ -734,7 +792,14 @@ export async function runRefreshRound() {
   }
 }
 
-let running = false;
+/**
+ * The in-flight round promise — either a throttled maybeRefresh round or
+ * a forced check-now one. Both share it, so a check-now while a scheduled
+ * round runs (and vice versa) joins instead of starting a second iframe
+ * walk. `null` between rounds.
+ * @type {Promise<any>|null}
+ */
+let activeRound = null;
 
 /**
  * Gate + start a refresh round, if due. Called by content.js after the
@@ -743,7 +808,7 @@ let running = false;
  */
 export function maybeRefresh() {
   try {
-    if (running) return undefined;
+    if (activeRound) return undefined;
     if (window.top !== window) return undefined;
     const href = String(location.href || "");
     if (!/^https:\/\/waterlooworks\.uwaterloo\.ca\/myAccount\//.test(href)) {
@@ -751,9 +816,7 @@ export function maybeRefresh() {
     }
     if (/notLoggedIn\.htm/i.test(href)) return undefined;
     if (document.visibilityState !== "visible") return undefined;
-    // Block re-entry across the async settings read too.
-    running = true;
-    return (async () => {
+    const round = (async () => {
       try {
         // The kill switch is read before anything else — a disabled refresh
         // never even stamps the throttle timestamp.
@@ -766,10 +829,90 @@ export function maybeRefresh() {
         ss?.setItem?.(THROTTLE_KEY, String(Date.now()));
         return await runRefreshRound();
       } finally {
-        running = false;
+        activeRound = null;
       }
-    })().catch(() => ({ sent: 0 }));
+    })();
+    // Block re-entry across the async settings read too.
+    activeRound = round;
+    return round.catch(() => ({ sent: 0 }));
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * The check-now round: the caller already cleared the kill switch, so a
+ * forced read skips the visibility gate and the 30-minute throttle — but
+ * nothing else. The round still keeps the allowlist, sequential steps,
+ * per-step timeouts, signed-out stop and per-step kill-switch checks, and
+ * the throttle marker is stamped when it finishes so the scheduled
+ * refresh stays quiet afterwards. A round already in flight (scheduled or
+ * forced) is joined, not duplicated. Resolves an outcome object; never
+ * rejects.
+ * @returns {Promise<{ok: boolean, reason?: string, checked: number, sent: number}>}
+ */
+export function checkNowRound() {
+  /** @param {Promise<any>} p */
+  const toOutcome = (p) =>
+    p.then(
+      (res) => {
+        // A joined maybeRefresh that never ran (disabled or throttled)
+        // resolves {sent:0} with no step records — a real round always has
+        // at least the dashboard step. The join ended; run a forced one.
+        if (!Array.isArray(res?.steps)) return checkNowRound();
+        const steps = res.steps;
+        const base = {
+          checked: res.checked || 0,
+          sent: res.sent || 0,
+        };
+        if (steps.some((s) => s && s.reason === "signed-out")) {
+          return { ...base, ok: false, reason: "signed-out" };
+        }
+        if (steps.some((s) => s && s.reason === "killed")) {
+          return { ...base, ok: false, reason: "disabled" };
+        }
+        return { ...base, ok: true };
+      },
+      () => ({ ok: false, reason: "error", checked: 0, sent: 0 })
+    );
+  try {
+    if (window.top !== window) {
+      return Promise.resolve({
+        ok: false,
+        reason: "not-on-page",
+        checked: 0,
+        sent: 0,
+      });
+    }
+    if (activeRound) return toOutcome(activeRound);
+    const round = runRefreshRound().then(
+      (res) => {
+        try {
+          window.sessionStorage?.setItem?.(THROTTLE_KEY, String(Date.now()));
+        } catch {
+          // the stamp is advisory — storage may be gone
+        }
+        activeRound = null;
+        return res;
+      },
+      (e) => {
+        try {
+          window.sessionStorage?.setItem?.(THROTTLE_KEY, String(Date.now()));
+        } catch {
+          // the stamp is advisory — storage may be gone
+        }
+        activeRound = null;
+        throw e;
+      }
+    );
+    activeRound = round;
+    return toOutcome(round);
+  } catch {
+    return Promise.resolve({
+      ok: false,
+      reason: "error",
+      checked: 0,
+      sent: 0,
+    });
   }
 }
