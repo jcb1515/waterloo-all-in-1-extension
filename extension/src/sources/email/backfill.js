@@ -253,7 +253,16 @@ export async function backfillRound(env, impl) {
   } catch {
     bodyRead = {};
   }
-  const bodyDeadline = force ? t0 + BF_FORCE_BUDGET_MS : Infinity;
+  // The forced budget also arms mid-run: a check-now joining an in-flight
+  // AUTOMATIC run (the run started before it arrived, so env.force is
+  // false) stamps env.budgetCtl.forceUntil — its own deadline must still
+  // land inside the orchestrator's 90 s window. Evaluated per row so the
+  // mid-run stamp takes effect on the next gated message.
+  const bodyDeadline = () =>
+    Math.min(
+      force ? t0 + BF_FORCE_BUDGET_MS : Infinity,
+      Number((env.budgetCtl && env.budgetCtl.forceUntil) || 0) || Infinity,
+    );
   let partial = false;
 
   const gen = generation;
@@ -363,14 +372,20 @@ export async function backfillRound(env, impl) {
           // Forced-run budget: stop STARTING new body fetches past it;
           // the batches gathered so far still ship and check-done is
           // marked partial.
-          if (wallNow() >= bodyDeadline) {
+          if (wallNow() >= bodyDeadline()) {
             partial = true;
             stats.bodySkipped++;
+            m.bodySkipped = true;
             continue;
           }
           // Same thread revision as the last body read → no new fetch.
+          // bodySkipped marks the preview-only re-read so the adapter
+          // keeps it additive (its body-derived items must not drop).
           const sig = m.sig != null ? String(m.sig) : "";
-          if (sig && String(bodyRead[String(m.key)] || "") === sig) continue;
+          if (sig && String(bodyRead[String(m.key)] || "") === sig) {
+            m.bodySkipped = true;
+            continue;
+          }
           // eslint-disable-next-line no-await-in-loop
           const body = await impl.fetchBody(env, { ctx, msg: m, folder, slot, request });
           if (body === "abort") {

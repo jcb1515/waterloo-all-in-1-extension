@@ -40,6 +40,7 @@ import {
 } from "../../extension/src/sources/email/outlook-backfill.js";
 import { needsBody } from "../../extension/src/sources/email/rules.js";
 import adapter from "../../extension/src/sources/email/index.js";
+import { applyResult } from "../../extension/src/core/merge.js";
 import { extractDates } from "../../extension/src/lib/textdates/index.js";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "email");
@@ -247,6 +248,21 @@ test("gmail run: tab inbox DOM, gated bodies, check payloads", async (t) => {
   assert.ok(fin.check.runId);
   // lastMessageId -> threadId map (row 2's ids differ, row 1+3 don't).
   assert.deepEqual(listed.threadMap, { "17fb2c3d4e5f6a99": "17fb2c3d4e5f6a7b" });
+  // The body-read signature is the last-message id, read off the row's
+  // DESCENDANT span (live Gmail puts it there, not on tr.zA). No
+  // thread-id fallback — a thread id never bumps on a new reply.
+  assert.equal(
+    listed.messages.find((m) => m.key === "17fb2c3d4e5f6a7b").sig,
+    "17fb2c3d4e5f6a99",
+  );
+  assert.equal(
+    listed.messages.find((m) => m.key === "18fa1a2b3c4d5e6f").sig,
+    "18fa1a2b3c4d5e6f",
+  );
+  assert.equal(
+    listed.messages.find((m) => m.key === "16ab9c8d7e6f5a4b").sig,
+    "16ab9c8d7e6f5a4b",
+  );
   // The unread row keeps its flag.
   assert.equal(
     listed.messages.find((m) => m.key === "18fa1a2b3c4d5e6f").unread,
@@ -606,6 +622,45 @@ test("outlook: a forced run stops new body fetches at the 60 s budget", async (t
   assert.equal(auto.bodies, 3);
 });
 
+test("outlook: a check-now joining an auto run arms the budget mid-run", async (t) => {
+  before(t);
+  const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
+  const gated = (i) => ({
+    ...rest.value[0],
+    Id: `B-${i}`,
+    ConversationId: `conv-b-${i}`,
+  });
+  let clock = NOW_MS;
+  // The shared control content.js hands to env.budgetCtl: 0 until a
+  // check-now joins, then the orchestrator-bounded deadline.
+  const ctl = { forceUntil: 0 };
+  const { env } = outlookEnv({
+    settings: { outlookCount: 50 },
+    pages: [{ value: [gated(1), gated(2), gated(3)] }],
+  });
+  env.wallNow = () => clock;
+  env.budgetCtl = ctl;
+  const rawFetch = env.fetchImpl;
+  env.fetchImpl = async (/** @type {string} */ url, /** @type {any} */ init) => {
+    const res = await rawFetch(url, init);
+    if (/me\/messages\//.test(url)) {
+      clock += 40000; // each body costs 40 s of wall time
+      // The check-now lands while this AUTOMATIC run is in flight —
+      // content.js stamps forceUntil = now + 60 s. Arm it just past the
+      // second body so the third is cut.
+      if (!ctl.forceUntil) ctl.forceUntil = NOW_MS + 50000;
+    }
+    return res;
+  };
+  const r = await backfillRound(env, outlookBackfill);
+  assert.equal(r.partial, true);
+  assert.equal(r.bodies, 2);
+  assert.equal(r.bodySkipped, 1);
+  const done = doneFromResult(r);
+  assert.equal(done.ok, true);
+  assert.equal(done.partial, true);
+});
+
 test("outlook: reads the newest N — outlookCount 50/100/200", async (t) => {
   before(t);
   const rest = JSON.parse(fs.readFileSync(path.join(DIR, "outlook-rest.json"), "utf8"));
@@ -774,6 +829,71 @@ test("adapter: a backfill batch scopes, marks readOk, and records state", async 
   assert.ok(!res.state.backfill);
   assert.ok(res.items.length >= 1);
   assert.equal(res.items[0].source, "gmail");
+});
+
+test("adapter: a bodySkipped row keeps its body-derived items", async () => {
+  // kA's deadline is only visible in the body — a preview-only re-read
+  // must not drop it.
+  const row = (over) => ({
+    key: "kA",
+    url: "https://mail.google.com/mail/u/0/#inbox/kA",
+    from: "Jane Smith",
+    fromEmail: "jsmith@uwaterloo.ca",
+    subject: "Lab sections",
+    receivedAt: "2026-09-29T18:00:00.000Z",
+    links: [],
+    ...over,
+  });
+  const batch = (messages, tag) =>
+    adapter.observe.parse(
+      payload("gmail", {
+        v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+        messages,
+        check: { runId: tag, since: NOW.toISOString(), batch: 0, final: true, checked: 1, ok: true },
+      }),
+      ctx({}),
+    );
+  const fold = (prevRaw, res) =>
+    applyResult(prevRaw, res, { mode: "scope", scope: res.scope });
+
+  const b1 = await batch([row({ sig: "rev1", bodyFetched: true, body: "The lab report is due October 15 at 11:59 PM." })], "g1");
+  const deadline = b1.items.find((i) => i.type === "deadline");
+  assert.ok(deadline, "body read should produce a deadline item");
+  let raw = fold(null, b1);
+  assert.ok(raw.items.some((i) => i.id === deadline.id));
+
+  // (a) same signature, bodySkipped — the re-read is additive: nothing in
+  // the batch re-emits the item, but its per-message scope is excluded
+  // from replaceScopes, so applyResult keeps it.
+  const b2 = await batch([row({ sig: "rev1", bodySkipped: true, preview: "The lab report is…" })], "g2");
+  assert.ok(!b2.items.some((i) => i.id === deadline.id));
+  assert.deepEqual(b2.replaceScopes, []);
+  raw = fold(raw, b2);
+  assert.ok(
+    raw.items.some((i) => i.id === deadline.id),
+    "sig-match bodySkipped must not drop the body-derived item",
+  );
+
+  // (b) budget-cut bodySkipped (signature moved on but no fetch happened)
+  // — same protection.
+  const b3 = await batch([row({ sig: "rev2", bodySkipped: true, preview: "The lab report is…" })], "g3");
+  assert.ok(!b3.items.some((i) => i.id === deadline.id));
+  raw = fold(raw, b3);
+  assert.ok(
+    raw.items.some((i) => i.id === deadline.id),
+    "budget-cut bodySkipped must not drop the body-derived item",
+  );
+
+  // (c) a row that WAS re-read for real and no longer yields the item
+  // still drops — replacement semantics unchanged for full reads.
+  const b4 = await batch([row({ preview: "no dates in this one" })], "g4");
+  assert.ok(!b4.items.some((i) => i.id === deadline.id));
+  assert.deepEqual(b4.replaceScopes, ["email:gmail:kA"]);
+  raw = fold(raw, b4);
+  assert.ok(
+    !raw.items.some((i) => i.id === deadline.id),
+    "a fully re-read message that stops producing an item still drops it",
+  );
 });
 
 test("adapter: bodyRead records the signature of each fetched body", async () => {

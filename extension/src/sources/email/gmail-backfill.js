@@ -8,7 +8,8 @@
       first inbox page ("#inbox", not "#inbox/p2" or a thread id); runs are
       gated on that by content.js and again by impl.skipReason below.
       `tr.zA` rows' `data-legacy-thread-id` / `data-legacy-last-message-id`
-      feed the Atom threadMap, and the `zE` class marks unread rows.
+      (stamped on a descendant element live) feed the Atom threadMap and
+      the body-read signature; the `zE` class marks unread rows.
     - bodies come from `GET /mail/u/<n>/?view=pt&search=all&th=<threadHex>`,
       the rendered print view (no `ik` needed — `view=om` is NOT used),
       fetched only for needsBody candidates under the shared rate cap.
@@ -216,9 +217,21 @@ export const gmailBackfill = {
     const unread = new Set();
     {
       const rows = doc.querySelectorAll("tr.zA");
+      // The last-message id lives on a descendant span of the row
+      // (verified live: 0 on tr, 50 on descendants); the thread id is
+      // read both ways — a descendant match wins nothing on the tr.
+      const descAttr = (/** @type {any} */ tr, /** @type {string} */ a) => {
+        const el = tr.querySelector(`[${a}]`);
+        return el ? el.getAttribute(a) : null;
+      };
+      const lastMsgId = (/** @type {any} */ tr) =>
+        descAttr(tr, "data-legacy-last-message-id");
+      const threadId = (/** @type {any} */ tr) =>
+        tr.getAttribute("data-legacy-thread-id") ||
+        descAttr(tr, "data-legacy-thread-id");
       for (const tr of rows) {
-        const th = tr.getAttribute("data-legacy-thread-id");
-        const lm = tr.getAttribute("data-legacy-last-message-id");
+        const th = threadId(tr);
+        const lm = lastMsgId(tr);
         if (th && lm && lm !== th) threadMap[lm] = th;
       }
       let i = 0;
@@ -226,11 +239,11 @@ export const gmailBackfill = {
       for (const tr of rows) {
         if (i >= messages.length) break;
         if (/\bzE\b/.test(String(tr.className || ""))) unread.add(i);
-        // The thread's last-message id is the body-read signature: a new
-        // reply bumps it, so a stale signature means refetch the body.
-        const sig =
-          tr.getAttribute("data-legacy-last-message-id") ||
-          tr.getAttribute("data-legacy-thread-id");
+        // The last-message id is the body-read signature: a new reply
+        // bumps it, so a stale signature means refetch the body. No
+        // thread-id fallback — the thread id never changes on reply, so
+        // a reply's body would be skipped forever. No sig → always fetch.
+        const sig = lastMsgId(tr);
         if (sig) messages[i].sig = sig;
         i++;
       }

@@ -180,8 +180,18 @@ const adapter = {
        * mode doesn't read `replaceScopes` yet, so until it does a backfill
        * re-read is additive (items a message no longer produces stay, like
        * the list/Atom reads); once wired, per-message scopes replace. */
+      // A bodySkipped row was re-derived from its preview only — its
+      // per-message scope must NOT replace, or the items its last body
+      // read produced would drop and (sig unchanged / budget cut) never
+      // come back. Same additive treatment as list/Atom reads.
       const replaceScopes = isBackfill
-        ? [...new Set(msgs.map((m) => `email:${provider}:${String(m.key)}`))]
+        ? [
+            ...new Set(
+              msgs
+                .filter((m) => !m.bodySkipped)
+                .map((m) => `email:${provider}:${String(m.key)}`),
+            ),
+          ]
         : undefined;
 
       // Backfill bookkeeping: threadMap (lastMessageId -> threadId, newest

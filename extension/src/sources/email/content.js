@@ -38,6 +38,7 @@ import {
   BF_TICK_MS,
   BF_LOCK_PREFIX,
   BF_FAIL_PREFIX,
+  BF_FORCE_BUDGET_MS,
 } from "./backfill.js";
 import { gmailBackfill } from "./gmail-backfill.js";
 import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
@@ -213,6 +214,9 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
     /** @type {{folder: string, messages: any[]}[]|null} in-memory cache of
      * the last run's rows (never persisted). */
     let cache = null;
+    /** Shared with the in-flight run: a check-now that joins an automatic
+     * run stamps a forced-run deadline here so the body budget applies. */
+    const runCtl = { forceUntil: 0 };
     const env = {
       fetchImpl: (/** @type {any} */ url, /** @type {any} */ init) => fetch(url, init),
       sendMessage,
@@ -272,14 +276,18 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
       pageUrl: location.href,
       doc: () => document,
       onInbox,
+      budgetCtl: runCtl,
       ...(provider === "gmail"
         ? { account: gmailAccountIndex(location.pathname) }
         : { lsValues: lsTokenValues }),
     };
     const impl = provider === "gmail" ? gmailBackfill : outlookBackfill;
-    const box = makeRunBox((/** @type {boolean} */ force) =>
-      backfillRound({ ...env, now: new Date(), force }, impl),
-    );
+    const box = makeRunBox((/** @type {boolean} */ force) => {
+      // A fresh start clears any stale join-armed deadline; a forced run
+      // arms its own budget from now.
+      runCtl.forceUntil = force ? Date.now() + BF_FORCE_BUDGET_MS : 0;
+      return backfillRound({ ...env, now: new Date(), force }, impl);
+    });
 
     // Automatic cadence: on load, every 30 min, and on hashchange to the
     // inbox (Gmail). backfillRound itself enforces the 30-min gate, the
@@ -315,6 +323,11 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
         const runId = String(msg.runId || "");
         lastBody = null;
         send(); // re-extract the visible list — dedupe bypassed
+        // If this joins an AUTOMATIC run already in flight (the tab's own
+        // autoTick or a just-injected copy beat us to it), the run's
+        // env.force is false — arm the same body deadline so the answer
+        // still lands inside the orchestrator's timeout.
+        runCtl.forceUntil = Date.now() + BF_FORCE_BUDGET_MS;
         box
           .run(true)
           .then((res) => {
