@@ -52,9 +52,9 @@ WaterlooWorks → Setup → "Refresh WaterlooWorks automatically".
 **WaterlooWorks events and shortlisted jobs.** The extension also reads the
 "Upcoming Events / Workshops" list on your WaterlooWorks dashboard. Events
 you're registered for go on your calendar. Other events wait in Review until
-you add or dismiss them, and nothing is ever registered for you. If you've
-shortlisted jobs, the refresh also reads your shortlist, using only the same
-read-only "View" links and page numbers. For each shortlisted job that is
+you add or dismiss them, and nothing is ever registered for you. If you open
+your WaterlooWorks shortlist, the extension reads it the same way it reads any
+WaterlooWorks page you open. For each shortlisted job that is
 still open and not yet applied to, it creates an "Apply" to-do due at the
 posting's deadline. It never applies, never adds or removes jobs from your
 shortlist, and never reads job postings you haven't shortlisted or opened
