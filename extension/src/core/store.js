@@ -131,6 +131,9 @@ const DEV_PROFILE =
 const BUILD_SERVICE_URL =
   typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
 
+/** The compiled-in shared calendar server URL ("" when the build sets none). */
+export const BUILT_IN_SERVICE_URL = BUILD_SERVICE_URL;
+
 /**
  * `defaults` deep-merged with a developer profile: plain objects merge,
  * arrays and scalars replace. Pure — used by getSettings and the UI client.
@@ -164,7 +167,7 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched"]);
 
 /** Recursive merge for plain-object values; arrays and scalars overwrite. */
-function deepMerge(base, patch) {
+export function deepMerge(base, patch) {
   const out = { ...(isObj(base) ? base : {}) };
   for (const [k, v] of Object.entries(patch || {})) {
     if (REPLACE_KEYS.has(k) && isObj(v)) {
@@ -188,7 +191,14 @@ export function resolveSettings(saved) {
   if (BUILD_SERVICE_URL) {
     base = deepMerge(base, { calendar: { serviceUrl: BUILD_SERVICE_URL } });
   }
-  return deepMerge(base, isObj(saved) ? saved : {});
+  const s = isObj(saved) ? { ...saved } : {};
+  // A saved "" means "use the built-in server", not "no server" — otherwise a
+  // blank field would shadow the shared server the build ships with.
+  if (BUILD_SERVICE_URL && isObj(s.calendar) && s.calendar.serviceUrl === "") {
+    const { serviceUrl: _dropped, ...rest } = s.calendar;
+    s.calendar = rest;
+  }
+  return deepMerge(base, s);
 }
 
 /** Settings deep-merged over DEFAULT_SETTINGS (+ dev profile). */

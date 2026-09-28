@@ -8,7 +8,7 @@
 */
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { resolveSettings, SETTINGS_KEY, setLocal } from "../core/store.js";
+import { deepMerge, resolveSettings, setSettings, SETTINGS_KEY, setLocal } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
 
@@ -215,6 +215,15 @@ export function useStore() {
       },
       projectDelete(id) {
         return send({ type: UI.PROJECT_DELETE, id });
+      },
+      /**
+       * Settings writes — the same `setSettings` the options page uses, plus
+       * an optimistic merge so previews re-render without chrome.storage.
+       */
+      saveSettings(patch) {
+        setState((s) => ({ ...s, settings: deepMerge(s.settings, patch) }));
+        if (IS_PREVIEW) return Promise.resolve(null);
+        return setSettings(patch).catch(() => null);
       },
     }),
     [state.userState]

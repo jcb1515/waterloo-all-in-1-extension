@@ -262,6 +262,14 @@ export const BellIcon = (p) => (
   </Svg>
 );
 
+export const MoreIcon = (p) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+    <circle cx="5" cy="12" r="1" />
+  </Svg>
+);
+
 export const InboxIcon = (p) => (
   <Svg {...p}>
     <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />

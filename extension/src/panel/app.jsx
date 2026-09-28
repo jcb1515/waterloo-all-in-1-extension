@@ -378,7 +378,13 @@ export function App() {
         ) : overlay === "checkreaders" ? (
           <CheckReaders state={state} actions={actions} now={now} />
         ) : tab === "agenda" ? (
-          <Agenda state={state} actions={actions} now={now} onGoSources={() => setOverlay("sources")} />
+          <Agenda
+            state={state}
+            actions={actions}
+            now={now}
+            onGoSources={() => setOverlay("sources")}
+            onGoCalendar={() => setTab("calendar")}
+          />
         ) : tab === "todo" ? (
           <Todo state={state} actions={actions} now={now} orgs={orgs} />
         ) : tab === "projects" ? (
