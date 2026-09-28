@@ -12,6 +12,7 @@ import {
   shouldSendProbe,
   checkReport,
   CHECK_SOURCES,
+  PORTAL_OPEN_ROW,
   READ_STATS_CAP,
 } from "../../extension/src/sources/probes.js";
 
@@ -200,4 +201,33 @@ test("checkReport: statuses + probes + readStats + structures, no page text", ()
   const json = JSON.stringify(report);
   assert.ok(!json.includes("REDACTED PAGE TITLE"), "titles must not leak into the report");
   assert.ok(!json.includes('"net"'), "net records stay out of the check report");
+});
+
+test("v2 row metadata: learn/portal urls, essential, refreshDays", () => {
+  const [home, course] = CHECK_SOURCES.learn.checklist;
+  assert.equal(home.id, "learn-home");
+  assert.equal(home.url, "https://learn.uwaterloo.ca/d2l/home");
+  assert.equal(home.essential, true);
+  assert.equal(course.url, undefined);
+  assert.ok(!course.essential);
+
+  const [sched, exams] = CHECK_SOURCES.portal.checklist;
+  assert.equal(sched.url, "https://portal.uwaterloo.ca/");
+  assert.equal(sched.essential, true);
+  assert.equal(sched.refreshDays, 30);
+  assert.equal(exams.url, "https://portal.uwaterloo.ca/");
+  assert.equal(exams.essential, true);
+  assert.equal(exams.refreshDays, 14);
+});
+
+test("PORTAL_OPEN_ROW: ready for W2's auto-fetch swap", () => {
+  assert.deepEqual(PORTAL_OPEN_ROW, {
+    id: "portal-open",
+    label: "Open Portal once",
+    how: "Open any Portal page — your schedule, exams and term dates are read while it's open.",
+    url: "https://portal.uwaterloo.ca/",
+    essential: true,
+    refreshDays: 14,
+    stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+  });
 });
