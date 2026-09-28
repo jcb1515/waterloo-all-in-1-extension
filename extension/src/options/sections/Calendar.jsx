@@ -7,7 +7,7 @@ import { useState } from "preact/hooks";
 import { Card, Field, Toggle } from "../bits.jsx";
 import { send, IS_PREVIEW } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
-import { mutateKey } from "../../core/store.js";
+import { mutateKey, BUILT_IN_SERVICE_URL } from "../../core/store.js";
 import { validServiceUrl, FEED_KEY } from "../../calendar/publish.js";
 import { buildFeedPayload } from "../../calendar/payload.js";
 // Pure feed renderers shared with the worker — same UIDs as the live feed.
@@ -96,14 +96,14 @@ export function CalendarSection({ settings, save, state }) {
       <Card title="Calendar server">
         <Field
           label="Feed server URL"
-          help="Deploy your own server (see server/README.md in the repo) or use one someone shares with you."
+          help="Uses the shared Waterloo All-in-1 server by default. You can run your own; see server/README.md."
         >
           <div class="inline-row">
             <input
               class="input"
               type="url"
               value={cal.serviceUrl || ""}
-              placeholder="https://waterloo-all-in-1-feed.<you>.workers.dev"
+              placeholder={BUILT_IN_SERVICE_URL || "https://waterloo-all-in-1-feed.<you>.workers.dev"}
               onInput={(e) => patch({ serviceUrl: /** @type {any} */ (e.target).value.trim() })}
             />
             <button
@@ -115,6 +115,23 @@ export function CalendarSection({ settings, save, state }) {
               {testState && testState.busy ? "Testing…" : "Test"}
             </button>
           </div>
+          {BUILT_IN_SERVICE_URL && cal.serviceUrl === BUILT_IN_SERVICE_URL ? (
+            <p class="help status-ok">
+              <CheckIcon size={12} /> Shared Waterloo All-in-1 server (default)
+            </p>
+          ) : null}
+          {BUILT_IN_SERVICE_URL && cal.serviceUrl && cal.serviceUrl !== BUILT_IN_SERVICE_URL ? (
+            <p class="help">
+              Custom server —{" "}
+              <button
+                type="button"
+                class="linklike"
+                onClick={() => patch({ serviceUrl: "" })}
+              >
+                Use shared server
+              </button>
+            </p>
+          ) : null}
         </Field>
         {testState && !testState.busy ? (
           testState.ok ? (
