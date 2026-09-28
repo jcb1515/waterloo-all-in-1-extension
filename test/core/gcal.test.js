@@ -318,3 +318,52 @@ test("a wa1 feed event never suppresses the class it republishes", () => {
   const legacy = ev({ title: "ECE 105 · Lecture", calendarKind: "subscribed", startAt: "2026-10-06T14:30:00.000Z" });
   assert.equal(marked(suppressAgainstCalendar(items, [legacy], NOW)).length, 0);
 });
+
+test("an event titled exactly our feed summary never suppresses (renamed feed)", () => {
+  // The user can rename the calendar — label and title-shape checks can
+  // both miss, so a non-own event whose title equals the item's feed
+  // summary is treated as our own republish.
+  const items = { a: classItem("a") };
+  const renamed = ev({
+    title: "ECE 105 · Lecture",
+    calendarKind: "subscribed",
+    startAt: "2026-10-06T14:30:00.000Z",
+  });
+  assert.equal(marked(suppressAgainstCalendar(items, [renamed], NOW)).length, 0);
+  // "✓ " and "Cancelled: " prefixed summaries count too (they dodge the
+  // leading-code title regex).
+  const done = ev({
+    title: "✓ ECE 105 · Lecture",
+    calendarKind: "subscribed",
+    startAt: "2026-10-06T14:30:00.000Z",
+  });
+  assert.equal(marked(suppressAgainstCalendar(items, [done], NOW)).length, 0);
+  const cancel = ev({
+    title: "Cancelled: ECE 105 · Lecture",
+    calendarKind: "unknown",
+    startAt: "2026-10-06T14:30:00.000Z",
+  });
+  assert.equal(marked(suppressAgainstCalendar(items, [cancel], NOW)).length, 0);
+  // A no-org item published as its bare title: a subscribed twin is the
+  // feed copy, not independent evidence (accepted loss).
+  const rw = {
+    a: item("a", {
+      title: "Reading week",
+      org: "",
+      dueAt: "2026-10-12T04:00:00.000Z",
+      startAt: undefined,
+      allDay: true,
+    }),
+  };
+  const feedRw = ev({
+    title: "Reading week",
+    calendarKind: "subscribed",
+    startAt: "2026-10-12T04:00:00.000Z",
+    allDay: true,
+  });
+  assert.equal(marked(suppressAgainstCalendar(rw, [feedRw], NOW)).length, 0);
+  // …but the same title on the user's OWN calendar still suppresses —
+  // that's genuinely the user's event.
+  const ownRw = ev({ title: "Reading week", startAt: "2026-10-12T04:00:00.000Z", allDay: true });
+  assert.equal(marked(suppressAgainstCalendar(rw, [ownRw], NOW)).length, 1);
+});

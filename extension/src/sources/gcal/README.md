@@ -98,7 +98,9 @@ parsing — nothing else leaves the ICS.
   segment names the chip's calendar: it marks the event `subscribed` unless
   the decoded event id already says `own` — and `Calendar: Waterloo
   All-in-1` (or a `<CODE> · <Label>` feed title) marks it `wa1`, our own
-  feed, which never suppresses the items it came from.
+  feed, which never suppresses the items it came from. A non-own chip with
+  no `Calendar:` segment is `unknown` — the event id alone (even `@import`)
+  can't prove which feed it came from.
 - **Dedupe** is lowercase title + startAt; on a tie the better calendarKind
   wins (own > wa1 > subscribed > unknown), so an open popup merges with its chip
   and a multi-day event's one-chip-per-day cells collapse to one event.

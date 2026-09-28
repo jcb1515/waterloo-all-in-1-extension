@@ -144,6 +144,39 @@ const suppressible = (/** @type {any} */ e) =>
   (e.calendarKind === "own" || e.calendarKind === "subscribed") &&
   !isWa1Event(e);
 
+const normTitle = (/** @type {any} */ s) =>
+  String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * The SUMMARY our feed publishes for an item (mirrors the server's
+ * summaryOf): "<org> · <title>" when org is set and the title does not
+ * already start with it, else the bare title.
+ * @param {any} it
+ */
+const feedSummary = (it) => {
+  const title = String(it.title || "");
+  const org = String(it.org || "");
+  return org && !title.toLowerCase().startsWith(org.toLowerCase())
+    ? `${org} · ${title}`
+    : title;
+};
+
+/**
+ * A non-own event whose title is exactly the item's feed summary is our
+ * own feed republishing the item — the calendar may have been renamed,
+ * which dodges the label/title-shape checks, so compare the summary
+ * directly ("✓ " and "Cancelled: " prefixes stripped). Never let it
+ * suppress: hiding the item empties the feed event, which would then
+ * un-hide the item — a self-suppression flip-flop.
+ * @param {any} it @param {any} ev
+ */
+const feedRepublish = (it, ev) => {
+  const want = normTitle(feedSummary(it));
+  if (!want) return false;
+  const got = normTitle(ev.title).replace(/^(?:✓|cancelled:)\s*/i, "");
+  return got === want;
+};
+
 /**
  * The events suppression is allowed to see: own calendars plus other
  * subscribed calendars (UW Flow exports, Quest exporters) — minus this
@@ -206,6 +239,7 @@ const deadlineMatch = (it, ev, iMs, eMs) => {
  * @param {any} it @param {any} ev
  */
 function eventMatches(it, ev) {
+  if (ev.calendarKind !== "own" && feedRepublish(it, ev)) return false;
   const anchor = it.dueAt || it.startAt;
   const iMs = anchor ? Date.parse(anchor) : NaN;
   const eMs = ev && ev.startAt ? Date.parse(ev.startAt) : NaN;
