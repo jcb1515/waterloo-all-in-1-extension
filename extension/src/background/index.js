@@ -16,8 +16,9 @@
 import { MSG } from "../core/contract.js";
 import { UI } from "../core/messages.js";
 import { ADAPTERS, adapterForSource, observePatternsFor } from "../core/registry.js";
-import { migrateStorage, getLocal, setLocal, enqueue } from "../core/store.js";
+import { migrateStorage, getLocal, setLocal, enqueue, mutateKey } from "../core/store.js";
 import { auditStore, applySafeFixes } from "../core/audit.js";
+import { recordProbe, checkReport } from "../sources/probes.js";
 import {
   runSync,
   recomputeAll,
@@ -252,6 +253,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     auditFix(msg.issueIds).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
+  if (msg.type === UI.PROBE) {
+    if (!msg.source || !msg.page) return false;
+    recordProbeResult(msg).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg.type === UI.CHECK_REPORT) {
+    buildCheckReport().then(sendResponse, () => sendResponse({ ok: false }));
+    return true;
+  }
   return false;
 });
 
@@ -270,6 +280,34 @@ async function runAudit() {
     else if (i.severity === "warn") warns++;
   }
   await setLocal("lastAudit", { at: new Date().toISOString(), errors, warns });
+  return { ok: true, report };
+}
+
+/** wa1:probe — a content script's page probe. Latest result per page only. */
+async function recordProbeResult(msg) {
+  return enqueue(() =>
+    mutateKey("probes", (cur) => recordProbe(cur || {}, msg))
+  );
+}
+
+/**
+ * The "Download check report" payload: probes + readStats + checklist
+ * statuses + the saved page structures — counts and redacted outlines only.
+ */
+async function buildCheckReport() {
+  const all = await chrome.storage.local.get(null);
+  const snap = all || {};
+  /** @type {Record<string, any>} */
+  const discovery = {};
+  for (const [k, v] of Object.entries(snap)) {
+    if (k.startsWith("discovery:")) discovery[k] = v;
+  }
+  const report = checkReport({
+    probes: /** @type {any} */ (snap.probes) || {},
+    readStats: /** @type {any} */ (snap.readStats) || [],
+    discovery,
+    now: new Date(),
+  });
   return { ok: true, report };
 }
 

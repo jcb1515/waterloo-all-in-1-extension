@@ -8,7 +8,7 @@ import { storeSyncSummary } from "./model/sources.js";
 import { visibleTabs } from "./model/tabs.js";
 import { ADAPTERS, stageForAdapter } from "../core/registry.js";
 import { BrandMark } from "../ui/brand.jsx";
-import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon, PlusIcon } from "../ui/icons.jsx";
+import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon, PlusIcon, ClipboardCheckIcon } from "../ui/icons.jsx";
 import { Agenda } from "./views/Agenda.jsx";
 import { Todo } from "./views/Todo.jsx";
 import { CalendarView } from "./views/Calendar.jsx";
@@ -21,6 +21,7 @@ import { Updates } from "./views/Updates.jsx";
 import { ItemSheet } from "./views/ItemSheet.jsx";
 import { QuickAdd } from "./views/QuickAdd.jsx";
 import { Teams } from "./views/Teams.jsx";
+import { CheckReaders } from "./views/CheckReaders.jsx";
 
 const OVERLAY_TITLES = {
   review: "Review",
@@ -28,6 +29,7 @@ const OVERLAY_TITLES = {
   sources: "Sources",
   item: "Item",
   quickadd: "Quick add",
+  checkreaders: "Check readers",
 };
 
 /** Items still awaiting a review verdict. */
@@ -110,6 +112,10 @@ export function App() {
       openReviewOrg(org) {
         setReviewOrg(org || null);
         setOverlay("review");
+      },
+      /** Open the Check readers overlay. */
+      openCheckReaders() {
+        setOverlay("checkreaders");
       },
     }),
     [state.actions]
@@ -220,6 +226,16 @@ export function App() {
           </div>
         </div>
         <div class="header-actions">
+          {overlay === "sources" ? (
+            <button
+              type="button"
+              class="btn btn-sm"
+              title="Check readers — verify each source sees what it expects"
+              onClick={() => setOverlay("checkreaders")}
+            >
+              <ClipboardCheckIcon size={13} /> Check readers
+            </button>
+          ) : null}
           <button
             type="button"
             class="btn-icon"
@@ -359,6 +375,8 @@ export function App() {
           />
         ) : overlay === "sources" ? (
           <Sources state={state} actions={actions} now={now} />
+        ) : overlay === "checkreaders" ? (
+          <CheckReaders state={state} actions={actions} now={now} />
         ) : tab === "agenda" ? (
           <Agenda state={state} actions={actions} now={now} onGoSources={() => setOverlay("sources")} />
         ) : tab === "todo" ? (

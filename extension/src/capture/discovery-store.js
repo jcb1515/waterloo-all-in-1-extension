@@ -54,6 +54,7 @@ const nowIso = () => new Date().toISOString();
  * @property {number} count
  * @property {string} firstAt
  * @property {string} lastAt
+ * @property {string} [note]
  * @property {Variant[]} variants
  */
 
@@ -167,6 +168,7 @@ export function mergeEntries(data, entries, now) {
       rec.count += 1;
       rec.lastAt = now;
       rec.title = entry.title || rec.title;
+      if (typeof entry.note === "string" && entry.note) rec.note = entry.note;
       addVariant(rec.variants, "outline", entry.outline, now);
       capRecords(data.pages, PAGE_CAP);
     }

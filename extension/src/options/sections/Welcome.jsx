@@ -154,6 +154,10 @@ export function WelcomeSection({ settings, state }) {
           deadlines, what's next, and what changed. Press <kbd>/</kbd> there to
           search.
         </p>
+        <p class="help">
+          <a class="welcome-link" href="../panel/panel.html?view=checkreaders" target="_blank" rel="noreferrer">Check readers</a>{" "}
+          verifies each source sees what it expects on the pages you open.
+        </p>
       </Card>
     </div>
   );

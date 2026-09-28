@@ -26,6 +26,8 @@ const KEYS = [
   "updatesSeenAt",
   "projects",
   "lastAudit",
+  "probes",
+  "readStats",
   SETTINGS_KEY,
 ];
 
@@ -70,6 +72,8 @@ async function readAll() {
     updatesSeenAt: typeof all.updatesSeenAt === "string" ? all.updatesSeenAt : null,
     projects: Array.isArray(all.projects) ? all.projects : [],
     lastAudit: isObj(all.lastAudit) ? all.lastAudit : null,
+    probes: isObj(all.probes) ? all.probes : {},
+    readStats: Array.isArray(all.readStats) ? all.readStats : [],
     settings: mergeSettings(all[SETTINGS_KEY]),
   };
 }
@@ -89,6 +93,8 @@ function blank() {
     updatesSeenAt: null,
     projects: [],
     lastAudit: null,
+    probes: {},
+    readStats: [],
     settings: mergeSettings(null),
   });
 }
@@ -124,6 +130,8 @@ export function useStore() {
         updatesSeenAt: fx.updatesSeenAt || null,
         projects: Array.isArray(fx.projects) ? fx.projects : [],
         lastAudit: fx.lastAudit || null,
+        probes: isObj(fx.probes) ? fx.probes : {},
+        readStats: Array.isArray(fx.readStats) ? fx.readStats : [],
         settings: mergeSettings(fx.settings),
       });
       return;

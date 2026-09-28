@@ -1702,3 +1702,74 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   gap: var(--sp-1);
   font-size: var(--fs-sm);
 }
+
+/* ------------------------- Check readers ------------------------- */
+
+.check-rows {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.check-row {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+}
+.check-row.check-fail { border-color: var(--warn, #b45309); }
+.check-row-head {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.check-dot { font-weight: 700; font-size: var(--fs-sm); line-height: 1.4; }
+.check-dot.check-ok { color: var(--ok, #15803d); }
+.check-dot.check-fail { color: var(--danger, #b91c1c); }
+.check-dot.check-none { color: var(--text-3); }
+.check-row-body { display: flex; flex-direction: column; gap: 2px; }
+.check-label { font-weight: 600; font-size: var(--fs-sm); }
+.check-status { font-size: var(--fs-sm); color: var(--text-1); }
+.check-how { font-size: var(--fs-xs); color: var(--text-2); }
+.check-hints {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.check-saw { margin-top: var(--sp-1); }
+.check-saw summary {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.check-counts {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.check-counts .tabular { text-align: right; }
+.check-missed { margin-top: var(--sp-2); }
+.check-missed-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.check-note {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  color: var(--text-1);
+}

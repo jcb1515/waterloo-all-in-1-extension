@@ -28,6 +28,8 @@ import { extractDates } from "../lib/textdates/index.js";
 import { scheduleFeedPublish } from "../calendar/publish.js";
 import { effectiveItem, isVisible } from "./effective.js";
 import { rescheduleReminders } from "./remind.js";
+import { appendReadStat } from "../sources/probes.js";
+import { normalizePath } from "../capture/redact.js";
 
 const MAX_CONCURRENT = 2;
 const MINUTE = 60 * 1000;
@@ -328,9 +330,31 @@ async function doSync(adapter, settings, reason) {
     }));
     bumpStateVersion(id);
     await appendLog(id, `sync (${reason}) ${result.error ? `error ${result.error.code}` : `ok ${result.items.length} items`}`);
+    await recordReadStat({
+      source: id,
+      at: now.toISOString(),
+      kind: "sync",
+      scope: result.scope,
+      items: Array.isArray(result.items) ? result.items.length : 0,
+      ...(result.error ? { error: String(result.error.code || result.error) } : {}),
+    });
     await recomputeAll(now, resultUpdates(result));
     return result;
   });
+}
+
+/** Last-N observe/sync results for "Check readers" (capped by appendReadStat). */
+async function recordReadStat(entry) {
+  await mutateKey("readStats", (cur) => appendReadStat(cur, entry));
+}
+
+/** Path only, query values removed — readStats never stores URLs verbatim. */
+function statPath(url) {
+  try {
+    return normalizePath(String(url || ""), []);
+  } catch {
+    return "";
+  }
 }
 
 /* --------------------------- ingests --------------------------- */
@@ -383,11 +407,26 @@ export async function handleObserved(payload) {
     } catch (e) {
       const err = /** @type {any} */ (e);
       await appendLog(source, `observe failed: ${(err && err.message) || err}`);
+      await recordReadStat({
+        source,
+        at: new Date().toISOString(),
+        kind: "observe",
+        path: statPath(payload.url),
+        error: String((err && err.message) || err),
+      });
       return;
     }
     if (!result || !Array.isArray(result.items)) return;
     const raw = applyResult(mv.raws[source] || null, result, { mode: "scope", scope: result.scope });
     await setLocal(rawKey(source), raw);
+    await recordReadStat({
+      source,
+      at: new Date().toISOString(),
+      kind: "observe",
+      path: statPath(payload.url),
+      scope: result.scope,
+      items: result.items.length,
+    });
     // The adapter's private state moves forward on every observe too, so its
     // next diff/compares start from this read; the visible status fields move
     // only per nextSourceState's rules.

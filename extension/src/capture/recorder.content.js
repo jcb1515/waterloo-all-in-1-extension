@@ -17,6 +17,8 @@
 import { MSG, PAGE_EVENT, SITE_BY_HOST } from "../core/contract.js";
 import { normalizePath, bodyShape, htmlOutline, redactText, hashString } from "./redact.js";
 import { readBodyInto } from "./fetch.js";
+import { UI } from "../core/messages.js";
+import { probeFor, shouldSendProbe } from "../sources/probes.js";
 
 (() => {
   const site = /** @type {Record<string, string>} */ (SITE_BY_HOST)[location.hostname];
@@ -265,9 +267,98 @@ import { readBodyInto } from "./fetch.js";
     }
   }
 
+  /* ------------------------- reader probe ------------------------- */
+
+  // "Check readers": run the site's probe on load and after page mutations,
+  // report COUNTS ONLY (never text) at most once per PROBE_MIN_INTERVAL_MS
+  // and only when the result changed.
+  const probeFn = probeFor(site);
+  const PROBE_THROTTLE_MS = 3000;
+  const PROBE_MIN_INTERVAL_MS = 5000;
+  let probeLast = { at: 0, json: "" };
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let probeTimer = null;
+
+  function runProbe() {
+    if (!probeFn) return;
+    try {
+      const res = probeFn(document, location.href);
+      if (!res || typeof res !== "object") return;
+      const now = Date.now();
+      const json = JSON.stringify([res.page, res.counts, res.ok, res.hints]);
+      if (!shouldSendProbe(probeLast, json, now, PROBE_MIN_INTERVAL_MS)) return;
+      probeLast = { at: now, json };
+      send({
+        type: UI.PROBE,
+        source: site,
+        page: res.page || "unknown",
+        counts: res.counts || {},
+        ok: !!res.ok,
+        hints: Array.isArray(res.hints) ? res.hints : [],
+        at: new Date().toISOString(),
+      });
+    } catch {
+      /* probe must never break the page */
+    }
+  }
+
+  function startProbe() {
+    if (!probeFn) return;
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", runProbe, { once: true });
+    } else {
+      runProbe();
+    }
+    window.addEventListener("load", runProbe, { once: true });
+    try {
+      new MutationObserver(() => {
+        if (!probeTimer) {
+          probeTimer = setTimeout(() => {
+            probeTimer = null;
+            runProbe();
+          }, PROBE_THROTTLE_MS);
+        }
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /* ---------------------- "Something missed?" snapshot ---------------------- */
+
+  // The panel asks the recorder on this tab to save a structural page
+  // outline plus the user's note into the discovery store. Uses the site's
+  // privacy policy — Discord/email stay structural, so no text leaves here.
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (!msg || msg.type !== UI.PROBE_SNAPSHOT) return false;
+    try {
+      const path = normalizePath(location.href, redactWords);
+      const outline = htmlOutline(document, outlineOpts());
+      const title = structural
+        ? `<text ${String(document.title || "").replace(/\s+/g, " ").trim().length}>`
+        : redactText(document.title, redactWords);
+      send({
+        type: MSG.DISCOVERY,
+        site,
+        entry: {
+          kind: "page",
+          path,
+          title,
+          outline,
+          note: String(msg.note || "").slice(0, 500),
+        },
+      });
+      sendResponse({ ok: true });
+    } catch {
+      sendResponse({ ok: false });
+    }
+    return false;
+  });
+
   /* ------------------------- settings ------------------------- */
 
   wire(); // net events feed OBSERVED forwarding whether or not discovery is on
+  startProbe();
   try {
     chrome.storage.local
       .get("discoverySettings")

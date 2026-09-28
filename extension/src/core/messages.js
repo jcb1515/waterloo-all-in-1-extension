@@ -40,4 +40,10 @@ export const UI = Object.freeze({
   AUDIT_RUN: "wa1:audit-run",
   /** options -> background: { type, issueIds? } apply the safe fixes, re-run */
   AUDIT_FIX: "wa1:audit-fix",
+  /** recorder content script -> background: { type, source, page, counts, ok, hints, at } */
+  PROBE: "wa1:probe",
+  /** panel -> recorder tab (via chrome.tabs.sendMessage): { type, note } save page structure */
+  PROBE_SNAPSHOT: "wa1:snapshot",
+  /** panel -> background: { type } build the redacted check-readers report */
+  CHECK_REPORT: "wa1:check-report",
 });
