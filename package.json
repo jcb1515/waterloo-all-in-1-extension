@@ -6,6 +6,9 @@
   "description": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
   "license": "MIT",
   "repository": "https://github.com/jcb1515/waterloo-all-in-1-extension",
+  "config": {
+    "calendarServiceUrl": "https://waterloo-all-in-1-feed.jb-wat.workers.dev"
+  },
   "engines": {
     "node": ">=20"
   },

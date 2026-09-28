@@ -16,10 +16,10 @@ Waterloo All-in-1 pulls the dated things in a UW student's life into one place:
 - **Email (Outlook + Gmail)** — calendar invites and dated mail (interviews, offers, course mail) read passively in mail tabs you open; each provider is a separate optional permission.
 - **Courses** — per-course assessment timelines, grading schemes, a needed-on-remaining calculator and office hours.
 - **Teams** — Discord design-team servers: meetings, assigned tasks, deadlines and watched channels (read-only, passive).
-- **One Google Calendar feed** — opt-in publishing to a single private subscription feed you host or choose; or a one-off .ics download.
+- **One Google Calendar feed** — opt-in publishing to a single private subscription feed (shared server built in; self-host supported); or a one-off .ics download.
 - **Reminders** — per-type lead times, quiet hours, a morning briefing and a weekly digest.
 
-**Privacy-first.** Everything is extracted and stored locally in your browser. Nothing leaves your device unless you turn on calendar sync, and even then only event data goes to the feed server you configured. No accounts, no analytics, no ads.
+**Privacy-first.** Everything is extracted and stored locally in your browser. Nothing leaves your device unless you turn on calendar sync, and even then only event data goes to the feed server. No accounts, no analytics, no ads.
 
 **Not affiliated with or endorsed by the University of Waterloo.**
 
@@ -65,7 +65,7 @@ Optional host permissions (requested only when the user enables the source):
 
 - The extension does not collect, transmit, sell or share user data.
 - All extracted items and settings stay in `chrome.storage.local` on the user's device.
-- If the user enables Google Calendar sync, event data (titles, times, locations) is sent to a feed server the user configures themselves (self-hosted Cloudflare Worker; see `server/`).
+- If the user enables Google Calendar sync, event data (titles, times, locations) is sent to a calendar feed server: the developer's shared server (the built-in default, a Cloudflare Worker + D1 run by the maintainer) or one the user configures themselves. Anyone with the resulting feed link can read that feed; the user can delete it any time from Settings → Calendar.
 - No analytics, advertising, or third-party trackers. No credentials, tokens, or message bodies are stored.
 - Optional permissions (Discord, email) are requested in-context only when the user enables those sources, and can be revoked from the browser at any time.
 

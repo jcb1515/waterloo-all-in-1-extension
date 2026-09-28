@@ -12,31 +12,52 @@
  *   focus from the entry.
  * - `watched` empty/missing: EVERY guild seen in the rail is watched with
  *   no focus — channel suggestions + pings still work.
+ * - `targets` (`sources.discord.channelTargets = {"<guild name>": string[]}`)
+ *   narrows one guild to an explicit channel list (ids or names, same key
+ *   matching). A non-empty list overrides `entry.channels`; it never makes
+ *   `watched` exclusive — with an empty `watched` map every server stays
+ *   watched and only the targeted guild narrows.
  *
  * @param {string} guildName
  * @param {Record<string, {focus?: string[], channels?: string[]}>} [watched]
+ * @param {Record<string, string[]>} [targets]
  * @returns {{team: string, focus: string[], settings?: {focus?: string[], channels?: string[]}}|null}
  */
-export function watchConfig(guildName, watched) {
+export function watchConfig(guildName, watched, targets) {
   const name = String(guildName || "").trim();
   if (!name) return null;
+  const lower = name.toLowerCase();
+  /** @type {string[] | null} */
+  let targeted = null;
+  for (const [key, list] of Object.entries(
+    targets && typeof targets === "object" ? targets : {}
+  )) {
+    if (key.trim().toLowerCase() === lower && Array.isArray(list) && list.length) {
+      targeted = list.map(String);
+      break;
+    }
+  }
   const entries = Object.entries(
     watched && typeof watched === "object" ? watched : {}
   );
   if (entries.length) {
-    const lower = name.toLowerCase();
     for (const [key, entry] of entries) {
       if (key.trim().toLowerCase() === lower) {
         return {
           team: key.trim(),
           focus: Array.isArray(entry?.focus) ? [...entry.focus] : [],
-          settings: entry && typeof entry === "object" ? entry : {},
+          settings: {
+            ...(entry && typeof entry === "object" ? entry : {}),
+            ...(targeted ? { channels: targeted } : {}),
+          },
         };
       }
     }
     return null; // a non-empty list is exclusive
   }
-  return { team: name, focus: [] };
+  return targeted
+    ? { team: name, focus: [], settings: { channels: targeted } }
+    : { team: name, focus: [] };
 }
 
 /**

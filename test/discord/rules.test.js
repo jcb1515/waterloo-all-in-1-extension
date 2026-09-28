@@ -96,3 +96,44 @@ test("watchForGuild: suggestions top-12 by score, settings replace", () => {
   assert.equal(set.from, "settings");
   assert.deepEqual(set.channelIds.sort(), ["c3", "c9"]); // name + unknown id kept
 });
+
+test("channelTargets narrow a guild without making watched exclusive", () => {
+  const targets = { " robotics club ": ["c1", "c2"] }; // keys match like watched
+  // Empty watched: the targeted guild gets the list, every other guild
+  // stays watched with plain suggestions.
+  assert.deepEqual(watchConfig("Robotics Club", {}, targets), {
+    team: "Robotics Club",
+    focus: [],
+    settings: { channels: ["c1", "c2"] },
+  });
+  assert.deepEqual(watchConfig("Fan Community", {}, targets), {
+    team: "Fan Community",
+    focus: [],
+  });
+});
+
+test("channelTargets override a watched entry's channels", () => {
+  const watched = {
+    "Robotics Club": { focus: ["electrical"], channels: ["old-channel"] },
+    "Rocket Team": {},
+  };
+  const cfg = watchConfig("ROBOTICS CLUB", watched, {
+    "robotics club": ["c1", "c2"],
+  });
+  assert.equal(cfg?.team, "Robotics Club");
+  assert.deepEqual(cfg?.focus, ["electrical"]);
+  assert.deepEqual(cfg?.settings?.channels, ["c1", "c2"]);
+  // Untargeted watched guilds keep their own entry untouched.
+  assert.deepEqual(
+    watchConfig("Rocket Team", watched, { "robotics club": ["c1"] })?.settings,
+    {}
+  );
+  // An empty target list is no target — the entry's channels win.
+  const cfg2 = watchConfig("Robotics Club", watched, { "Robotics Club": [] });
+  assert.deepEqual(cfg2?.settings?.channels, ["old-channel"]);
+  // Targets never rescue a guild an exclusive watched list drops.
+  assert.equal(
+    watchConfig("Fan Community", watched, { "Fan Community": ["x"] }),
+    null
+  );
+});

@@ -3,10 +3,13 @@
 // Opened automatically on install (options.html#welcome) and pinned first in
 // the nav.
 
-import { Card } from "../bits.jsx";
+import { Card, OpenPanelButton } from "../bits.jsx";
 import { CheckIcon } from "../../ui/icons.jsx";
 import { AllowSourceButton, useAccessMap, useSourceAccess } from "../../ui/permissions.jsx";
 import { GROUP_LABELS, neededGroups } from "../../core/permissions.js";
+import { setSettings } from "../../core/store.js";
+import { send, IS_PREVIEW } from "../../panel/data.js";
+import { UI } from "../../core/messages.js";
 
 /** @param {{ok?: boolean, label: string, todo?: string}} p */
 function StatusChip({ ok, label, todo }) {
@@ -83,20 +86,21 @@ export function WelcomeSection({ settings, state }) {
             Open learn.uwaterloo.ca and sign in like normal — the extension reads
             deadlines and classes with your existing session.
           </Step>
-          <Step n={2} done={sectionCount > 0} title={<>Check your sections and tutorials <a class="welcome-link" href="#profile">Profile</a></>}>
-            These fill in automatically from Portal once Portal support arrives;
-            until then, add them under Profile so the agenda shows your section only.
+          <Step n={2} done={sectionCount > 0} title={<>Check your sections and tutorials <OpenPanelButton label="Courses → a course → Setup" className="welcome-link btn-link" /></>}>
+            Portal fills these in automatically; your entry covers any section
+            type it doesn't list — set them in the side panel's course Setup card
+            so the agenda shows your section only.
             {sectionCount > 0 ? ` ${sectionCount} set.` : ""}
           </Step>
-          <Step n={3} done={outlineCount > 0} title={<>Add course outlines <a class="welcome-link" href="#sources">Sources</a></>}>
-            Paste outline URLs or import saved outline pages (Ctrl+S) under
-            Sources → Course outlines.{outlineCount > 0 ? ` ${outlineCount} added.` : ""}
+          <Step n={3} done={outlineCount > 0} title={<>Add course outlines <OpenPanelButton label="Courses tab → Add outline" className="welcome-link btn-link" /></>}>
+            Paste outline URLs or import saved outline pages (Ctrl+S) from the
+            Courses tab's Add outline card.{outlineCount > 0 ? ` ${outlineCount} added.` : ""}
           </Step>
           <Step n={4} done={!!(ss.waterlooworks && ss.waterlooworks.lastOkAt)} title={<>WaterlooWorks: just browse it <a class="welcome-link" href={WW_URL} target="_blank" rel="noreferrer">Open</a></>}>
             No sync button needed — applications and interviews update while you
             browse the site.
           </Step>
-          <Step n={5} done={watchedCount > 0} title={<>Discord: pick the servers to watch <a class="welcome-link" href="#sources">Sources</a></>}>
+          <Step n={5} done={watchedCount > 0} title={<>Discord: pick the servers to watch <OpenPanelButton label="Sources → Discord" className="welcome-link btn-link" /></>}>
             Read-only and passive — the extension never posts or fetches; it only
             notes dated messages in servers you already read.
             {watchedCount > 0 ? ` ${watchedCount} watched.` : ""}
@@ -126,12 +130,27 @@ export function WelcomeSection({ settings, state }) {
             }
           >
             Publish your agenda to one private feed and subscribe to it from
-            Google Calendar — no duplicates.
+            Google Calendar — no duplicates. Uses the shared Waterloo All-in-1
+            server; nothing to configure.{" "}
+            {!cal.enabled ? (
+              <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                onClick={() => {
+                  if (IS_PREVIEW) return;
+                  setSettings({ calendar: { enabled: true } })
+                    .then(() => send({ type: UI.CALENDAR_PUBLISH }))
+                    .catch(() => {});
+                }}
+              >
+                Turn on
+              </button>
+            ) : null}
           </Step>
           <Step
             n={7}
             done={emailNeeded.length > 0 && emailMissing.length === 0}
-            title={<>Outlook / Gmail: allow reading invites <a class="welcome-link" href="#sources">Sources</a></>}
+            title={<>Outlook / Gmail: allow reading invites <OpenPanelButton label="Sources → Email" className="welcome-link btn-link" /></>}
           >
             Optional permissions, asked per provider — the extension only reads
             calendar invites and dated mail in Outlook or Gmail tabs you open.
@@ -152,7 +171,7 @@ export function WelcomeSection({ settings, state }) {
             title={
               <>
                 Google Calendar: skip what's already on it{" "}
-                <a class="welcome-link" href="#sources">Sources</a>
+                <OpenPanelButton label="Sources → Google Calendar" className="welcome-link btn-link" />
               </>
             }
           >
@@ -183,6 +202,9 @@ export function WelcomeSection({ settings, state }) {
         <p class="help">
           <a class="welcome-link" href="../panel/panel.html?view=checkreaders" target="_blank" rel="noreferrer">Check readers</a>{" "}
           verifies each source sees what it expects on the pages you open.
+        </p>
+        <p>
+          <OpenPanelButton />
         </p>
       </Card>
     </div>
