@@ -46,9 +46,13 @@ function fieldsFrom(parsed) {
 
 /**
  * @param {{state: any, actions: any, now: Date, orgs: string[],
- *   editItem?: any, initialText?: string, onClose: () => void}} props
+ *   editItem?: any, initialText?: string,
+ *   preset?: {type?: string, date?: string} | null,
+ *   onClose: () => void}} props
+ *   preset seeds a new item's type/date — edit items and dates parsed from
+ *   the text always win over it.
  */
-export function QuickAdd({ state, actions, now, orgs, editItem, initialText = "", onClose }) {
+export function QuickAdd({ state, actions, now, orgs, editItem, initialText = "", preset = null, onClose }) {
   const [text, setText] = useState(initialText);
   const parseText = (v) => {
     // A leading "#project" routes the item into that project.
@@ -60,16 +64,23 @@ export function QuickAdd({ state, actions, now, orgs, editItem, initialText = ""
       f.org = proj.name;
       f.projectId = proj.id;
     }
+    // The caller's preset date is the default — a date in the text wins.
+    if (!f.date && preset && preset.date) f.date = preset.date;
     return f;
   };
 
-  const [fields, setFields] = useState(() =>
-    editItem
+  const [fields, setFields] = useState(() => {
+    const f = editItem
       ? fieldsFrom(editItem)
       : initialText
         ? parseText(initialText)
-        : fieldsFrom({})
-  );
+        : fieldsFrom({});
+    if (!editItem && !f.date && preset) {
+      if (preset.type) f.type = preset.type;
+      if (preset.date) f.date = preset.date;
+    }
+    return f;
+  });
 
   const set = (k, v) => setFields((f) => ({ ...f, [k]: v }));
 

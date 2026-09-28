@@ -66,6 +66,7 @@ export function App() {
   const tabsNav = useRef(/** @type {any} */ (null));
   const [sheetId, setSheetId] = useState(() => query.get("item"));
   const [qaEditId, setQaEditId] = useState(() => null);
+  const [qaPreset, setQaPreset] = useState(/** @type {{type?: string, date?: string} | null} */ (null));
   const [reviewOrg, setReviewOrg] = useState(() => query.get("org"));
   const [overlay, setOverlay] = useState(() => {
     if (query.get("item")) return "item";
@@ -111,6 +112,13 @@ export function App() {
       /** Open the Quick add form prefilled from a manual item (edit mode). */
       editManual(item) {
         setQaEditId(item && item.id ? item.id : null);
+        setQaPreset(null);
+        setOverlay("quickadd");
+      },
+      /** Open Quick add for a new item; preset seeds type/date. */
+      openQuickAdd(preset = {}) {
+        setQaEditId(null);
+        setQaPreset(preset);
         setOverlay("quickadd");
       },
       /** Open the Review overlay filtered to one org (Teams "Needs review"). */
@@ -251,8 +259,8 @@ export function App() {
             aria-label="Quick add"
             title="Quick add"
             onClick={() => {
-              setQaEditId(null);
-              setOverlay(overlay === "quickadd" ? null : "quickadd");
+              if (overlay === "quickadd") setOverlay(null);
+              else actions.openQuickAdd({});
             }}
           >
             <PlusIcon size={17} />
@@ -380,6 +388,7 @@ export function App() {
             now={now}
             orgs={orgs}
             editItem={qaEditId ? state.items[qaEditId] : null}
+            preset={qaPreset}
             initialText={query.get("q") || ""}
             onClose={() => setOverlay(null)}
           />

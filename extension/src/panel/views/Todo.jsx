@@ -190,6 +190,15 @@ export function Todo({ state, actions, now, orgs = [] }) {
 
   return (
     <div class="todo-view">
+      <div class="view-acts">
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={() => actions.openQuickAdd && actions.openQuickAdd({ type: "task" })}
+        >
+          <PlusIcon size={13} /> Add to-do
+        </button>
+      </div>
       <form
         class="todo-add"
         onSubmit={(e) => {

@@ -1330,6 +1330,18 @@ html[data-theme="dark"] .src-tile-icon {
   color: var(--danger);
 }
 
+/* "+ Add to-do" / "+ Add" affordances at the top of views. */
+.view-acts {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-2);
+}
+.qa-add {
+  flex: none;
+  align-self: center;
+  margin-right: var(--sp-2);
+}
+
 /* Small inline action inside a to-do row's meta line (Snooze / Open). */
 .linklike.row-act {
   display: inline-flex;
@@ -1426,6 +1438,7 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-gutter { width: 34px; }
 .cal-day-head {
+  position: relative;
   background: var(--heat, transparent);
   border-left: 1px solid var(--border);
   padding: var(--sp-1) 3px;
@@ -1447,6 +1460,30 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   display: block;
   font-size: var(--fs-sm);
   font-weight: var(--w-semibold);
+}
+/* Tiny per-day quick-add affordance (month cell top-right, week header). */
+.cal-add {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 2px;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  opacity: 0.65;
+}
+.cal-add:hover,
+.cal-add:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface-2);
+}
+.cal-day-head > .cal-add {
+  position: absolute;
+  top: 1px;
+  right: 1px;
 }
 .cal-day-head.today .cal-date { color: var(--gold-ink); }
 .cal-due {
@@ -1632,6 +1669,12 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-cell.off { opacity: 0.45; }
 .cal-cell.sel { outline: 2px solid var(--gold-strong); outline-offset: -2px; }
+.cal-cell-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
 .cal-cell-num {
   align-self: flex-start;
   font-size: var(--fs-xs);
@@ -1675,11 +1718,19 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
 }
 .cal-day-items { margin-top: var(--sp-3); }
 .cal-day-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-sm);
   font-weight: var(--w-semibold);
   margin: 0 0 var(--sp-2);
 }
-.cal-empty-day { padding: var(--sp-3) var(--sp-4); margin: 0; }
+.cal-day-title .linklike {
+  font-weight: inherit;
+  text-decoration: none;
+}
+.cal-day-title .linklike:hover { text-decoration: underline; }
+.cal-empty-day { padding: var(--sp-3) var(--sp-4); margin: 0; cursor: pointer; }
 
 .cal-legend {
   display: flex;

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { weekModel, monthModel, weekStartOf, dayKeyOf, shortLabel } from "../model/calendar.js";
 import { fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { orgStyle } from "../../ui/colors.js";
-import { ChevronRightIcon, AlertTriangleIcon, ExternalLinkIcon, MoreIcon, RefreshIcon } from "../../ui/icons.jsx";
+import { ChevronRightIcon, AlertTriangleIcon, ExternalLinkIcon, MoreIcon, RefreshIcon, PlusIcon } from "../../ui/icons.jsx";
 import { ItemRow } from "../components/ItemRow.jsx";
 import {
   maskUrl,
@@ -232,7 +232,7 @@ function SyncStrip({ state, actions }) {
 const hourLabel = (h) => (h === 12 ? "12 PM" : h < 12 ? `${h}` : `${h - 12} PM`);
 
 /** The Week grid. */
-function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
+function WeekView({ state, actions, now, cursor, showClasses, onPick, onAdd }) {
   const model = useMemo(
     () =>
       weekModel(state.items, state.userState, state.settings, cursor, now, {
@@ -273,6 +273,14 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
           <div key={d.date} class={`cal-day-head${d.today ? " today" : ""}`} data-heat={d.heat}>
             <span class="cal-dow">{WD_SHORT[i]}</span>
             <span class="cal-date tabular">{d.date.slice(8)}</span>
+            <button
+              type="button"
+              class="cal-add"
+              aria-label={`Add on ${fmtDay(`${d.date}T12:00`)}`}
+              onClick={() => onAdd(d.date)}
+            >
+              <PlusIcon size={11} />
+            </button>
             <div class="cal-due">
               {d.due.slice(0, 3).map((it) => {
                 const sl = pillNarrow ? shortLabel(it) : null;
@@ -378,7 +386,7 @@ function WeekView({ state, actions, now, cursor, showClasses, onPick }) {
 }
 
 /** The Month grid + selected-day rows. */
-function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
+function MonthView({ state, actions, now, cursor, selDay, onSelectDay, onAdd }) {
   const model = useMemo(
     () => monthModel(state.items, state.userState, state.settings, cursor, now, state.projects),
     [state.items, state.userState, state.settings, state.projects, cursor, now]
@@ -397,14 +405,35 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
       </div>
       <div class="cal-month">
         {model.cells.map((c) => (
-          <button
+          <div
             key={c.date}
-            type="button"
+            role="button"
+            tabIndex={0}
+            aria-label={fmtDay(`${c.date}T12:00`)}
             class={`cal-cell${c.inMonth ? "" : " off"}${c.today ? " today" : ""}${selDay === c.date ? " sel" : ""}`}
             data-heat={c.heat}
             onClick={() => onSelectDay(c.date)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelectDay(c.date);
+              }
+            }}
           >
-            <span class="cal-cell-num tabular">{c.day}</span>
+            <span class="cal-cell-top">
+              <span class="cal-cell-num tabular">{c.day}</span>
+              <button
+                type="button"
+                class="cal-add"
+                aria-label={`Add on ${fmtDay(`${c.date}T12:00`)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdd(c.date);
+                }}
+              >
+                <PlusIcon size={11} />
+              </button>
+            </span>
             <span class="cal-cell-marks">
               {c.markers.map((m) => (
                 <span
@@ -421,7 +450,7 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
                 <span class="cal-mark classes">{c.classCount} classes</span>
               ) : null}
             </span>
-          </button>
+          </div>
         ))}
       </div>
       <label class="switch cal-toggle">
@@ -434,16 +463,51 @@ function MonthView({ state, actions, now, cursor, selDay, onSelectDay }) {
         <span>Show class counts</span>
       </label>
       {sel ? (
-        <div class="cal-day-items">
+        <div
+          class="cal-day-items"
+          onClick={(e) => {
+            // Empty space in the day list starts a quick add for that day;
+            // clicks on real children (ItemRow) keep their own handlers.
+            if (e.target === e.currentTarget) onAdd(sel.date);
+          }}
+        >
           {/* Anchor at noon so the bare date can't shift back a day in TZ. */}
-          <h3 class="cal-day-title">{fmtDay(`${sel.date}T12:00`)}</h3>
-          <div class="card row-card" role="list">
+          <h3 class="cal-day-title">
+            <button
+              type="button"
+              class="linklike"
+              title="Add on this day"
+              onClick={() => onAdd(sel.date)}
+            >
+              {fmtDay(`${sel.date}T12:00`)}
+            </button>
+            <button
+              type="button"
+              class="cal-add"
+              aria-label={`Add on ${fmtDay(`${sel.date}T12:00`)}`}
+              onClick={() => onAdd(sel.date)}
+            >
+              <PlusIcon size={12} />
+            </button>
+          </h3>
+          <div
+            class="card row-card"
+            role="list"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) onAdd(sel.date);
+            }}
+          >
             {sel.items.length ? (
               sel.items.map((it) => (
                 <ItemRow key={it.id} item={it} now={now} actions={actions} projects={state.projects} />
               ))
             ) : (
-              <p class="help cal-empty-day">Nothing on this day.</p>
+              <p
+                class="help cal-empty-day"
+                onClick={() => onAdd(sel.date)}
+              >
+                Nothing on this day — click to add.
+              </p>
             )}
           </div>
         </div>
@@ -537,6 +601,7 @@ export function CalendarView({ state, actions, now }) {
           cursor={weekStart}
           showClasses={showClasses}
           onPick={(it) => actions.openItem && actions.openItem(it)}
+          onAdd={(date) => actions.openQuickAdd && actions.openQuickAdd({ date })}
         />
       ) : (
         <MonthView
@@ -546,6 +611,7 @@ export function CalendarView({ state, actions, now }) {
           cursor={cursor}
           selDay={selDay}
           onSelectDay={setSelDay}
+          onAdd={(date) => actions.openQuickAdd && actions.openQuickAdd({ date })}
         />
       )}
 

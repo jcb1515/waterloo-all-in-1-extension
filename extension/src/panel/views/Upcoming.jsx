@@ -223,6 +223,13 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
       </section>
 
       <div class="filter-bar" role="toolbar" aria-label="Filters">
+        <button
+          type="button"
+          class="btn btn-sm qa-add"
+          onClick={() => actions.openQuickAdd && actions.openQuickAdd({})}
+        >
+          + Add
+        </button>
         <div class="search-wrap">
           <SearchIcon size={14} />
           <input
