@@ -499,6 +499,245 @@ html[data-theme="dark"] .card {
 
 /* --------------------------------- scrollbar -------------------------------- */
 
+/* ---------------- shared setup blocks (panel + options) ---------------- */
+
+.field {
+  margin-top: var(--sp-2);
+}
+
+/* editable tables */
+.edit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.edit-table th {
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: var(--w-semibold);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+.edit-table td {
+  padding: var(--sp-1) var(--sp-2);
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+.edit-table .add-row td {
+  border-top: 1px dashed var(--border-strong);
+}
+.edit-table .row-act {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.edit-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.edit-table .code-cell {
+  width: 90px;
+  font-weight: var(--w-semibold);
+}
+.edit-table .url-cell {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+/* a labelled sub-block inside a card */
+.src-sub {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.inline-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inline-row .input {
+  flex: 1;
+  min-width: 220px;
+}
+.toggle-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.switch.disabled {
+  opacity: 0.5;
+}
+.status-ok {
+  color: var(--ok, #1a7f37);
+}
+.status-err {
+  color: var(--danger, #b42318);
+}
+.status-ok svg, .status-err svg {
+  vertical-align: -2px;
+}
+
+/* guided mail scan */
+.mail-scan-query {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.mail-scan-code {
+  display: block;
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+
+/* Courses tab: term line + Add outline, files list, waiting rows */
+.courses-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.courses-term {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-medium);
+  color: var(--text-3);
+}
+.outline-add-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.outline-add-head h3 {
+  margin: 0;
+}
+.outline-add .help {
+  margin: 0 0 var(--sp-2);
+}
+.outline-code-input {
+  flex: 0 0 90px;
+  min-width: 0;
+}
+.outline-files summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: var(--w-semibold);
+}
+.outline-files[open] summary {
+  margin-bottom: var(--sp-2);
+}
+.waiting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  border-top: 1px solid var(--border);
+}
+.waiting-url {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Course Setup card */
+.setup-card h3 {
+  margin: 0 0 var(--sp-1);
+}
+.setup-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+}
+.setup-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.setup-row .input {
+  align-self: stretch;
+}
+.group-input {
+  max-width: 120px;
+}
+.outline-edit {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.outline-url {
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+.outline-edit-acts {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+
+/* Discord channel picker */
+.discord-guild {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px dashed var(--border);
+}
+.discord-guild-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.discord-guild-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--w-semibold);
+}
+.discord-cat {
+  margin-top: var(--sp-1);
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  padding: 2px 0;
+}
+.check-row .help {
+  margin-left: auto;
+}
+.btn-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--gold-ink);
+  cursor: pointer;
+}
+.btn-link:hover {
+  text-decoration: underline;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
