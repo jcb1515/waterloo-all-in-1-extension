@@ -89,7 +89,8 @@ const adapter = {
     async parse(payload, ctx) {
       const prev = ctx.state && typeof ctx.state === "object" ? ctx.state : {};
       /** @type {{courses: Record<string, any>, terms: Record<string, any>,
-       *   instructors: Record<string, {name: string, email?: string}[]>}} */
+       *   instructors: Record<string, {name: string, email?: string}[]>,
+       *   examIndex?: Record<string, any[]>, tstIndex?: Record<string, any[]>}} */
       const state = {
         ...prev,
         courses: { ...prev.courses },
