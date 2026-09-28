@@ -141,7 +141,7 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
     !onboarding.length ||
     onboardingDone ||
     !!(state.userState && state.userState.onboardingDismissedAt);
-  const visits = nudges(state, now);
+  const visits = visitNudges(state, now);
   const openUrl = (url) => {
     if (IS_PREVIEW) {
       window.open(url, "_blank");

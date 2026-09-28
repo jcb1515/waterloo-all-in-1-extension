@@ -75,7 +75,7 @@ export function NudgeCard({ nudges, limit, onOpen, onSnooze }) {
             <li key={`${n.source}:${n.row.id}`} class="nudge-row">
               <span class="nudge-text">
                 <span class="nudge-name">{nudgeLabel(n)}</span>
-                <span class="nudge-when">— last checked {days} day{days === 1 ? "" : "s"} ago</span>
+                <span class="nudge-when"> — last checked {days} day{days === 1 ? "" : "s"} ago</span>
               </span>
               <span class="nudge-actions">
                 {n.row.url ? (
