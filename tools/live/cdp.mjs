@@ -146,6 +146,22 @@ export function swExtId(target) {
 }
 
 /**
+ * Non-service-worker targets under an extension id — an offscreen document
+ * or an open extension page that can wake a sleeping/dead MV3 worker.
+ * @param {any[]} targets @param {string} extId
+ */
+export function extPageTargets(targets, extId) {
+  const prefix = `chrome-extension://${String(extId || "").toLowerCase()}/`;
+  return (Array.isArray(targets) ? targets : []).filter(
+    (t) =>
+      t &&
+      t.type !== "service_worker" &&
+      typeof t.url === "string" &&
+      t.url.toLowerCase().startsWith(prefix),
+  );
+}
+
+/**
  * Narrow service-worker candidates by an extension-id selector
  * (--ext <id> / WA1_EXT_ID). No selector keeps them all; a selector must
  * match at least one or the caller reports the miss.
@@ -890,42 +906,115 @@ async function cmdStorage(key, sourceId, extId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Close a tool-owned tab, ignoring failures; drop its .opened.json entry. */
+async function closeTargetQuiet(targetId) {
+  try {
+    const browser = await browserCdp();
+    try {
+      await browser.send("Target.closeTarget", { targetId });
+    } finally {
+      browser.close();
+    }
+  } catch {
+    /* already gone */
+  }
+  writeOpened(readOpened().filter((e) => String(e.targetId) !== String(targetId)));
+}
+
+/** Poll /json/list until a service worker for `id` appears (10 s). */
+async function waitForServiceWorker(id) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const sw = serviceWorkerTargets(await listTargets()).find((t) => swExtId(t) === id);
+    if (sw) return sw;
+    await sleep(250);
+  }
+  return null;
+}
+
 /**
  * Reload our own extension: chrome.runtime.reload() evaluated inside its
  * service worker (the socket drops — that is success), then poll for the
- * new worker. Only that one extension id's worker target is touched.
+ * new worker. A sleeping worker is woken first — via a runtime message in
+ * any live extension page, else by loading the panel in a tool-owned tab
+ * that is closed once the worker answers. Only that one extension id's
+ * targets are touched.
  * @param {string|null} extId
  */
 async function cmdReloadExt(extId) {
   const id = String(extId || process.env.WA1_EXT_ID || "");
   if (!id) die("usage: reload-ext [--ext <id>] — or set WA1_EXT_ID.");
-  const targets = await listTargets();
-  const sw = serviceWorkerTargets(targets).find((t) => swExtId(t) === id);
+  let sw = serviceWorkerTargets(await listTargets()).find((t) => swExtId(t) === id);
+  let wakeTabId = null;
   if (!sw) {
-    die(`no service worker for extension "${id}" — is it loaded in that Edge?`);
-  }
-  const cdp = new Cdp(sw.webSocketDebuggerUrl);
-  try {
-    await cdp.open();
-    const name = await cdp.eval("chrome.runtime.getManifest().name").catch(() => "");
-    if (name !== EXT_NAME) die(`extension "${id}" is not "${EXT_NAME}".`);
-    await cdp.eval("chrome.runtime.reload()").catch(() => {});
-  } finally {
-    cdp.close();
-  }
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    await sleep(250);
-    const again = (await listTargets()).find(
-      (t) =>
-        t.type === "service_worker" && swExtId(t) === id && String(t.id) !== String(sw.id),
-    );
-    if (again) {
-      console.log(`reloaded ${id}\t${again.id}\t${again.url}`);
-      return;
+    const page = extPageTargets(await listTargets(), id)[0];
+    if (page && page.webSocketDebuggerUrl) {
+      const w = new Cdp(page.webSocketDebuggerUrl);
+      try {
+        await w.open();
+        await w.eval('chrome.runtime.sendMessage({type:"wa1:ping"}).catch(()=>{})').catch(() => {});
+      } finally {
+        w.close();
+      }
+    } else {
+      const url = extPageUrl(id, "src/panel/panel.html");
+      if (!url) die(`cannot build a wake page for extension "${id}".`);
+      const browser = await browserCdp();
+      try {
+        const created = await browser.send("Target.createTarget", { url });
+        wakeTabId = created && created.targetId;
+      } finally {
+        browser.close();
+      }
+      if (wakeTabId) {
+        writeOpened([
+          ...readOpened(),
+          {
+            targetId: String(wakeTabId),
+            url,
+            source: "extension",
+            rowId: "page",
+            openedAt: new Date().toISOString(),
+          },
+        ]);
+      }
+    }
+    sw = await waitForServiceWorker(id);
+    if (!sw) {
+      if (wakeTabId) await closeTargetQuiet(wakeTabId);
+      die(`extension "${id}" never spawned a service worker — is it loaded in that Edge?`);
     }
   }
-  die(`service worker for "${id}" did not reappear within 10s.`);
+  let err = null;
+  try {
+    const cdp = new Cdp(sw.webSocketDebuggerUrl);
+    try {
+      await cdp.open();
+      const name = await cdp.eval("chrome.runtime.getManifest().name").catch(() => "");
+      if (name !== EXT_NAME) throw new Error(`extension "${id}" is not "${EXT_NAME}".`);
+      await cdp.eval("chrome.runtime.reload()").catch(() => {});
+    } finally {
+      cdp.close();
+    }
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await sleep(250);
+      const again = (await listTargets()).find(
+        (t) =>
+          t.type === "service_worker" && swExtId(t) === id && String(t.id) !== String(sw.id),
+      );
+      if (again) {
+        console.log(`reloaded ${id}\t${again.id}\t${again.url}`);
+        return;
+      }
+    }
+    throw new Error(`service worker for "${id}" did not reappear within 10s.`);
+  } catch (e) {
+    err = e;
+  } finally {
+    if (wakeTabId) await closeTargetQuiet(wakeTabId);
+  }
+  die(String((err && err.message) || err));
 }
 
 /**

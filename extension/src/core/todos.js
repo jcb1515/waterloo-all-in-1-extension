@@ -178,6 +178,9 @@ export function deriveTodos({ items = {}, applications = {}, userState = {}, set
         dueAt: deadlineItem ? deadlineItem.dueAt || deadlineItem.startAt : undefined,
         meta: {
           auto: "offer",
+          // The shared action seam — WW/email offer tasks fold into this row.
+          action: "respond-offer",
+          employer: app.employer || undefined,
           applicationId: app.id,
           // The linked offer-deadline row is suppressed in the to-do list —
           // this derived row carries the deadline itself.
@@ -257,6 +260,9 @@ export function deriveTodos({ items = {}, applications = {}, userState = {}, set
         status: done ? "done" : "open",
         meta: {
           auto: "rank",
+          // The shared action seam — WW/email rankings tasks fold into this row.
+          action: "submit-rankings",
+          employer: "Co-op",
           parentId: c.id,
           completesWhen: "when WaterlooWorks shows your rankings",
           createdAt: firstAt(id),
@@ -345,12 +351,13 @@ export function todoSourceItem(item, settings = {}) {
     return true; // manual + future project tasks always list
   }
   if (item.category === "reply" || item.category === "book-call") return cfg.replies !== false;
-  // WaterlooWorks timeslot picks and co-op deadlines.
-  if (
-    item.type === "application-deadline" ||
-    item.type === "offer-deadline" ||
-    item.category === "interview-timeslot"
-  ) {
+  // Application deadlines are calendar events — only action tasks (the WW
+  // `apply` seam) may list as to-dos; a bare deadline stays off the list.
+  if (item.type === "application-deadline") {
+    return typeof action === "string" && COOP_ACTIONS.has(action) && cfg.coop !== false;
+  }
+  // WaterlooWorks timeslot picks and offer deadlines.
+  if (item.type === "offer-deadline" || item.category === "interview-timeslot") {
     return cfg.coop !== false;
   }
   // School deadlines: deadlines, quizzes, labs with a due date.

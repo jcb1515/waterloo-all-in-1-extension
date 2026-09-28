@@ -165,7 +165,7 @@ test("moreSheetRows: course count and singular/plural", () => {
   );
   assert.equal(many.find((r) => r.id === "courses").count, "3 courses");
   assert.equal(many.find((r) => r.id === "courses").description,
-    "Outlines, grades and sections for each course");
+    "Outlines, grades and sections");
 });
 
 test("moreSheetRows: upcoming interviews beat the application count", () => {

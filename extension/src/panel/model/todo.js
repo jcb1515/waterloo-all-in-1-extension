@@ -8,6 +8,7 @@
 
 import { effectiveItem, isVisible } from "../../core/effective.js";
 import { autoDoneRule, todoSourceItem } from "../../core/todos.js";
+import { orgsCompatible } from "../../core/merge.js";
 import { normCourseCode } from "../../core/contract.js";
 import { projectById } from "../../core/projects.js";
 import { startOfDay, fmtAgo, fmtDay, fmtTime } from "./agenda.js";
@@ -107,28 +108,40 @@ export function buildTodos({ items = {}, todos = {}, applications = {}, userStat
     if (m.parentId) suppressed.add(m.parentId);
   }
 
-  // One rankings to-do per work term: an emailed/other-source
-  // "submit-rankings" task within a week of a derived rank to-do's date is
-  // the same ask — the derived row carries it.
-  const rankDues = Object.values(todos)
-    .filter((t) => t && t.meta && t.meta.auto === "rank")
+  // A source item with meta.action X is suppressed when a derived to-do
+  // carries the same action for a compatible employer/org (meta.employer ||
+  // org, both sides) and a due date within a week — the derived row owns
+  // the done logic. If either side has no date, action + employer suffice;
+  // if either side has no employer, action + date suffice.
+  const derivedActions = Object.values(todos)
+    .filter((t) => t && t.meta && t.meta.auto && typeof t.meta.action === "string")
     .map((t) => {
       const a = anchorOf(t);
       const ms = a ? Date.parse(a) : NaN;
-      return Number.isNaN(ms) ? null : ms;
-    })
-    .filter((ms) => ms != null);
-  const suppressedByRank = (/** @type {any} */ raw) => {
-    if (!raw.meta || raw.meta.action !== "submit-rankings") return false;
+      return {
+        action: /** @type {string} */ (t.meta.action),
+        who: (t.meta && t.meta.employer) || t.org || null,
+        ms: Number.isNaN(ms) ? null : ms,
+      };
+    });
+  const suppressedByAction = (/** @type {any} */ raw) => {
+    const m = raw.meta;
+    if (!m || typeof m.action !== "string" || !m.action) return false;
+    const who = m.employer || raw.org || null;
     const a = anchorOf(raw);
     const ms = a ? Date.parse(a) : NaN;
-    if (Number.isNaN(ms)) return false;
-    return rankDues.some((d) => Math.abs(/** @type {number} */ (d) - ms) <= 7 * DAY);
+    const rawMs = Number.isNaN(ms) ? null : ms;
+    return derivedActions.some((d) => {
+      if (d.action !== m.action) return false;
+      if (d.who && who && !orgsCompatible(who, d.who)) return false;
+      if (d.ms != null && rawMs != null && Math.abs(d.ms - rawMs) > 7 * DAY) return false;
+      return true;
+    });
   };
 
   const collect = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
     if (!raw || !raw.id) return;
-    if (!isDerived && (suppressed.has(raw.id) || suppressedByRank(raw))) return;
+    if (!isDerived && (suppressed.has(raw.id) || suppressedByAction(raw))) return;
     const project = raw.meta && raw.meta.projectId ? projectById(projects, raw.meta.projectId) : null;
     if (project && project.status !== "active") return; // done/archived projects hide their items
     const us = userState[raw.id];

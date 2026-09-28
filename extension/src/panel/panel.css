@@ -131,32 +131,33 @@
   position: sticky;
   top: 56px;
   z-index: 9;
-  padding: var(--sp-2) var(--sp-4);
+  padding: var(--sp-2);
   background: var(--bg);
 }
 .panel-tabs .segmented {
   display: flex;
   width: 100%;
+  gap: 2px;
+  padding: 2px;
   /* The five tabs share the strip — no horizontal scroll at any width. */
   overflow: visible;
 }
 .panel-tabs .segmented > button,
 .panel-tabs .segmented > .more-wrap {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 1 auto;
 }
 .panel-tabs .segmented button {
-  padding: 4px 5px;
-  font-size: var(--fs-xs);
+  /* Tight padding/font so every label fits; only the More label ellipsizes. */
+  padding: 4px 3px;
+  font-size: 12.5px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-/* More ▾ button inside the tab strip */
+/* More ▾ button inside the tab strip — only its label may ellipsize. */
 .more-wrap {
   position: relative;
   display: flex;
+  min-width: 54px; /* "More" + chevron */
 }
 .more-wrap .more-btn {
   flex: 1;
@@ -164,7 +165,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 .more-wrap .more-btn .more-label {
   min-width: 0;
@@ -241,9 +242,11 @@
 .more-row-desc {
   font-size: var(--fs-xs);
   color: var(--text-3);
-  white-space: nowrap;
+  /* Descriptions wrap to at most two lines instead of truncating. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .more-row-count {
   flex: none;
@@ -1393,16 +1396,14 @@ html[data-theme="dark"] .src-tile-icon {
   color: var(--danger);
 }
 
-/* "+ Add to-do" / "+ Add" affordances at the top of views. */
-.view-acts {
+/* "+ Add" sits at the right end of the Upcoming search row, input height. */
+.search-row {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--sp-2);
+  align-items: center;
+  gap: var(--sp-2);
 }
 .qa-add {
   flex: none;
-  align-self: center;
-  margin-right: var(--sp-2);
 }
 
 /* Small inline action inside a to-do row's meta line (Snooze / Open). */

@@ -150,7 +150,13 @@ test("buildTodos: done reasons — Checked off, Submitted on Learn, auto rules",
       source: "waterlooworks",
       type: "application-deadline",
       dueAt: iso(t0 + DAY),
-      meta: { jobId: "9" },
+      meta: { jobId: "9", action: "apply" },
+    }),
+    bareAppDl: item("bareAppDl", {
+      source: "waterlooworks",
+      type: "application-deadline",
+      dueAt: iso(t0 + 2 * DAY),
+      meta: { jobId: "10" },
     }),
   };
   const userState = { manual: { done: true, doneAt: iso(t0 - 3600000) } };
@@ -163,6 +169,7 @@ test("buildTodos: done reasons — Checked off, Submitted on Learn, auto rules",
   assert.equal(rows.sub.doneReason, "Submitted on Learn");
   assert.equal(rows.appDl.doneReason, "Applied on WaterlooWorks");
   assert.equal(rows.appDl.done, true);
+  assert.equal(rows.bareAppDl, undefined, "a bare application-deadline stays off the list");
   assert.equal(doneLine(rows.manual, NOW), "Checked off · 1h ago");
 });
 
@@ -328,13 +335,96 @@ test("buildTodos: an emailed submit-rankings task folds into the derived rank to
       type: "task",
       title: "Submit your rankings",
       dueAt: iso(t0 + 5 * DAY),
-      meta: { auto: "rank" },
+      meta: { auto: "rank", action: "submit-rankings", employer: "Co-op" },
     }),
   };
   const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
     .groups.flatMap((g) => g.rows.map((r) => r.item.id))
     .sort();
   assert.deepEqual(ids, ["emFar", "todo:rank:w"], "near rank to-do suppressed, far one stays");
+});
+
+test("buildTodos: a WW rankings task folds into the derived rank to-do", () => {
+  const items = {
+    ww: item("ww", {
+      source: "waterlooworks",
+      type: "deadline",
+      title: "Submit your rankings",
+      dueAt: iso(t0 + 6 * DAY),
+      meta: { action: "submit-rankings", employer: "Co-op" },
+    }),
+  };
+  const todos = {
+    "todo:rank:w": item("todo:rank:w", {
+      source: "manual",
+      type: "task",
+      title: "Submit your rankings",
+      dueAt: iso(t0 + 5 * DAY),
+      meta: { auto: "rank", action: "submit-rankings", employer: "Co-op" },
+    }),
+  };
+  const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
+    .groups.flatMap((g) => g.rows.map((r) => r.item.id));
+  assert.deepEqual(ids, ["todo:rank:w"], "the derived row wins — it carries the done logic");
+});
+
+test("buildTodos: a WW respond-offer task folds into the derived offer to-do", () => {
+  const items = {
+    ww: item("ww", {
+      source: "waterlooworks",
+      type: "deadline",
+      title: "Respond to offer — Acme Corp",
+      dueAt: iso(t0 + 2 * DAY),
+      meta: { action: "respond-offer", employer: "Acme Corp" },
+    }),
+  };
+  const todos = {
+    "todo:offer:a1": item("todo:offer:a1", {
+      source: "manual",
+      type: "task",
+      title: "Respond to offer — Acme Corp",
+      dueAt: iso(t0 + DAY),
+      meta: {
+        auto: "offer",
+        action: "respond-offer",
+        employer: "Acme Corp",
+        applicationId: "a1",
+      },
+    }),
+  };
+  const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
+    .groups.flatMap((g) => g.rows.map((r) => r.item.id));
+  assert.deepEqual(ids, ["todo:offer:a1"]);
+});
+
+test("buildTodos: a different employer's offer task does not fold", () => {
+  const items = {
+    ww: item("ww", {
+      source: "waterlooworks",
+      type: "deadline",
+      title: "Respond to offer — OtherCo",
+      dueAt: iso(t0 + 2 * DAY),
+      meta: { action: "respond-offer", employer: "OtherCo" },
+    }),
+  };
+  const todos = {
+    "todo:offer:a1": item("todo:offer:a1", {
+      source: "manual",
+      type: "task",
+      title: "Respond to offer — Acme Corp",
+      dueAt: iso(t0 + DAY),
+      meta: {
+        auto: "offer",
+        action: "respond-offer",
+        employer: "Acme Corp",
+        applicationId: "a1",
+      },
+    }),
+  };
+  const ids = buildTodos({ items, todos, settings: SETTINGS, now: NOW })
+    .groups.flatMap((g) => g.rows.map((r) => r.item.id))
+    .sort();
+  assert.deepEqual(ids, ["todo:offer:a1", "ww"], "different employers stay two rows");
 });
 
 test("buildTodos: meta.undated keeps its bucket but reads 'No due date · by <day>'", () => {

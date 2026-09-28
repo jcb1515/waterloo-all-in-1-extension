@@ -19,6 +19,10 @@ const CRUNCH_WINDOW = 24 * HOUR;
 
 const SEVERE_TYPES = new Set(["exam", "interview"]);
 
+/* Windowed calendar facts — never a timed overlap, even when they carry a
+ * time (they describe a window, not an appointment). */
+const NON_TIMED_TYPES = new Set(["cycle-date", "term-date"]);
+
 /**
  * @param {Record<string, any>} items  merged items map
  * @param {Record<string, any>} userState
@@ -40,7 +44,7 @@ export function findClashes(items, userState = {}, now = new Date(), opts = {}) 
     const eff = effectiveItem(raw, userState[raw && raw.id], { acceptPending });
     if (!isVisible(eff, nowMs)) continue;
     if (eff.status !== "open") continue;
-    if (eff.startAt) {
+    if (eff.startAt && !eff.allDay && !NON_TIMED_TYPES.has(eff.type)) {
       const s = Date.parse(eff.startAt);
       const e = eff.endAt ? Date.parse(eff.endAt) : s + DEFAULT_END_MS;
       if (!Number.isNaN(s) && s < nowMs + horizon && e > nowMs) {

@@ -21,6 +21,7 @@ import {
   serviceWorkerTargets,
   swExtId,
   pickServiceWorker,
+  extPageTargets,
   buildAllowlist,
   resolveTarget,
   canTouch,
@@ -286,6 +287,39 @@ test("extPageUrl builds chrome-extension urls for relative paths only", () => {
   // bad inputs
   assert.equal(extPageUrl("not-an-id", "src/x"), null);
   assert.equal(extPageUrl(MAIN_ID, ""), null);
+});
+
+test("extPageTargets picks non-SW extension pages for worker wake-up", () => {
+  const targets = [
+    {
+      type: "service_worker",
+      url: `chrome-extension://${MAIN_ID}/src/background/index.js`,
+    },
+    {
+      type: "page",
+      url: `chrome-extension://${MAIN_ID}/src/panel/panel.html`,
+    },
+    {
+      type: "other",
+      url: `chrome-extension://${MAIN_ID}/src/capture/offscreen.html`,
+    },
+    // other extension, web page, and a missing url never match
+    { type: "page", url: "chrome-extension://otherextid00000000000000/src/panel/panel.html" },
+    { type: "page", url: "https://example.com/" },
+    { type: "page" },
+  ];
+  const hits = extPageTargets(targets, MAIN_ID);
+  assert.equal(hits.length, 2);
+  assert.deepEqual(
+    hits.map((t) => t.url),
+    [
+      `chrome-extension://${MAIN_ID}/src/panel/panel.html`,
+      `chrome-extension://${MAIN_ID}/src/capture/offscreen.html`,
+    ],
+  );
+  assert.equal(extPageTargets(targets, "otherextid00000000000000").length, 1);
+  assert.equal(extPageTargets(targets, "nosuchid0000000000000000").length, 0);
+  assert.equal(extPageTargets(undefined, MAIN_ID).length, 0);
 });
 
 test("canTouch trusts only ids recorded in .opened.json", () => {

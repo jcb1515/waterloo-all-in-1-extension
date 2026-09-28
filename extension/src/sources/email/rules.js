@@ -379,13 +379,16 @@ const appList = (v) =>
  * @param {any} msg
  * @param {{courses?: any[], settings?: Record<string, any>, applications?: any}} [ctx]
  * @returns {{ok: boolean, course?: string, team?: string, coop?: boolean,
- *   employer?: string, jobId?: string}}
+ *   employer?: string, jobId?: string, blocked?: boolean}}
  */
 export function senderGate(msg, { courses = [], settings = {}, applications } = {}) {
   const email = String(msg.fromEmail || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   const subject = String(msg.subject || "");
   const fromLine = `${msg.from || ""} ${email}`.toLowerCase();
+
+  // A block entry wins over every other rule — no items, no tasks.
+  if (senderBlocked(email, settings)) return { ok: false, blocked: true };
 
   if (isCoopSender(msg)) {
     return {
@@ -412,9 +415,9 @@ export function senderGate(msg, { courses = [], settings = {}, applications } = 
   for (const t of list(settings.teams)) {
     if (fromLine.includes(t.toLowerCase())) return { ok: true, team: t };
   }
-  for (const s of list(settings.senders)) {
-    if (fromLine.includes(s.toLowerCase())) return { ok: true };
-  }
+  // allowSenders (exact address or domain incl. subdomains) plus the legacy
+  // `senders` substrings.
+  if (senderListed(msg, settings)) return { ok: true };
   // An application employer: fuzzy on the display name or the domain label,
   // or a literal domain-label token inside the employer name.
   const domainLabel = (domain.split(".")[0] || "").toLowerCase();
@@ -448,3 +451,103 @@ export function cleanSubject(subject) {
   }
   return s.slice(0, 100);
 }
+
+/* ---- sender lists -----------------------------------------------------
+ * settings.allowSenders / settings.blockSenders: each entry is an address
+ * ("a@b.example.com" — exact match) or a domain ("acme.com" or "@acme.com" —
+ * matches that domain and its subdomains). Block wins over allow. Legacy
+ * `senders` substrings keep working as allow entries. */
+
+/**
+ * Does one allow/block entry match this address?
+ * @param {string} entry @param {string} email
+ */
+export function senderEntryMatch(entry, email) {
+  const e = String(entry || "").trim().toLowerCase();
+  const addr = String(email || "").toLowerCase();
+  if (!e || !addr) return false;
+  const domain = addr.split("@")[1] || "";
+  if (e.includes("@") && !e.startsWith("@")) return addr === e;
+  const d = e.startsWith("@") ? e.slice(1) : e;
+  return domain === d || domain.endsWith(`.${d}`);
+}
+
+/** Legacy `senders` are substring matches on name+address (gate only). @param {any} settings */
+export function senderBlocked(email, settings) {
+  const s = settings || {};
+  return list(s.blockSenders).some((e) => senderEntryMatch(e, email));
+}
+
+/** allowSenders (entry match) or legacy `senders` (substring match). @param {any} msg @param {any} settings */
+export function senderListed(msg, settings) {
+  const s = settings || {};
+  const email = String(msg.fromEmail || "").toLowerCase();
+  if (list(s.allowSenders).some((e) => senderEntryMatch(e, email))) return true;
+  const fromLine = `${msg.from || ""} ${email}`.toLowerCase();
+  return list(s.senders).some((e) => fromLine.includes(e.toLowerCase()));
+}
+
+/* ---- the backfill body gate --------------------------------------------
+ * Which list rows deserve a body fetch. Uses ONLY what the content script
+ * knows (settings + the row itself): never courses/applications. */
+
+/** Applicant-tracking / employer-ish senders (their mail often schedules). */
+export const ATS_RE =
+  /(?:^|[@.])(?:greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|smartrecruiters\.com|icims\.com|jobvite\.com|taleo\.net|bamboohr\.com|hirevue\.com|successfactors\.(?:com|eu)|waterlooworks\.uwaterloo\.ca|uwaterloo\.ca)$/i;
+
+/** A course-code-looking token, e.g. "ECE105" / "MATH 115". */
+export const COURSE_CODE_RE = /\b[A-Z]{2,5}\s?\d{3}[A-Z]?\b/;
+
+/** The whole "this mail wants something" cue set, for subject+preview. */
+export function bodyCueRe(extra) {
+  const kw = keywordRe(extra);
+  return new RegExp(
+    [
+      kw.source,
+      OA_KW.source,
+      EVENT_ANY_RE.source,
+      DEADLINE_CUE_RE.source,
+      CONFIRM_RE.source,
+      REPLY_RE.source,
+      BOOK_RE.source,
+      SLOT_RE.source,
+      GCAL_INVITE_RE.source,
+      WHEN_LINE.source,
+      "pleased to offer|offer of employment|offer letter|extend an offer",
+      "forms\\.office\\.com|docs\\.google\\.com\\/forms|forms\\.gle|qualtrics\\.com|calendly\\.com",
+      "please (?:submit|upload|sign|complete and return)",
+      "tuition|payment due|amount due",
+    ].join("|"),
+    "im",
+  );
+}
+
+/**
+ * Should this list row's body be fetched? Blocked senders never; then any
+ * gated reason: allow-listed, co-op/Learn/uwaterloo.ca, a known
+ * ATS/employer-ish domain, a course code in the subject, or a
+ * trigger/keyword/booking/form/offer/fee cue in subject+preview. With the
+ * onlyCourseCoop preset only course/co-op/Learn/allow-listed senders count.
+ * Bulk senders without a gated reason never get bodies.
+ * @param {any} msg  list-row Msg ({fromEmail, from, subject, preview, key})
+ * @param {{settings?: Record<string, any>, kwRe?: RegExp}} [opts]
+ */
+export function needsBody(msg, { settings = {}, kwRe } = {}) {
+  if (!msg || !msg.key) return false;
+  const email = String(msg.fromEmail || "").toLowerCase();
+  if (senderBlocked(email, settings)) return false;
+  const listed = senderListed(msg, settings);
+  const coop = isCoopSender(msg);
+  const learn = /learn|d2l/i.test(email);
+  const uw = /@(?:[a-z0-9-]+\.)*uwaterloo\.ca$/i.test(email);
+  const subjectHasCode = COURSE_CODE_RE.test(String(msg.subject || ""));
+  if (settings.onlyCourseCoop) {
+    return listed || coop || learn || uw || subjectHasCode;
+  }
+  if (listed || coop || learn || uw) return true;
+  if (ATS_RE.test(email)) return true;
+  if (subjectHasCode) return true;
+  const text = `${msg.subject || ""}\n${msg.preview || ""}`;
+  return (kwRe || bodyCueRe(settings.keywords)).test(text);
+}
+

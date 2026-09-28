@@ -38,7 +38,10 @@ If the port isn't reachable, every command exits with a pointer back here.
   to a CHECKLIST row first.
 - `reload-ext` and `screenshot` touch **our own extension only**:
   `reload-ext` evaluates `chrome.runtime.reload()` inside the selected
-  extension's service worker and nothing else; `screenshot` opens a
+  extension's service worker and nothing else (when the worker is asleep
+  it sends `chrome.runtime.sendMessage` in one of that extension's own
+  pages to wake it, or loads `src/panel/panel.html` in a tool-created tab
+  that it closes once the worker answers); `screenshot` opens a
   `chrome-extension://<id>/` page the tool itself created in a new tab and
   closes it afterwards (it never navigates an existing tab).
 - A GET-only `fetch` from the page context is allowed for the feasibility
@@ -99,7 +102,13 @@ set WA1_EXT_ID=maihpiennplbbcopdcklaobaoipbejjb && npm run live -- watch
 `reload-ext` needs an extension id (`--ext` or `WA1_EXT_ID`), finds that
 copy's `chrome-extension://<id>/` service worker, evaluates
 `chrome.runtime.reload()` in it (the socket dropping is success) and prints
-the new worker when it reappears. No page target is touched.
+the new worker when it reappears. If no worker target exists — MV3 workers
+sleep — it first tries to wake the extension by evaluating
+`chrome.runtime.sendMessage({type:"wa1:ping"})` in any live
+`chrome-extension://<id>/` page (offscreen document, an open panel), or by
+loading `src/panel/panel.html` in a tool-created tab (closed once the worker
+answers, on success or failure). No page outside that extension id is
+touched.
 
 `screenshot` needs an extension page path relative to the extension root
 (`src/panel/panel.html`, `src/options/options.html`, query strings allowed).
