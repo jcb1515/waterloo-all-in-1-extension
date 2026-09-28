@@ -1,16 +1,11 @@
 // @ts-check
-// Guided mail scan wiring: the UI message constants exist and the adapter's
-// start/stop helpers produce the state shape the panel reads.
+// Guided mail scan helpers (deprecated adapter exports): the state shape
+// they produce still matches what the source state may carry. The UI wiring
+// (UI.MAIL_SCAN_* messages, background handlers, Sources controls) is gone.
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { UI } from "../../extension/src/core/messages.js";
 import { startMailScan, stopMailScan } from "../../extension/src/sources/email/index.js";
-
-test("mail-scan UI messages are defined", () => {
-  assert.equal(UI.MAIL_SCAN_START, "wa1:mail-scan-start");
-  assert.equal(UI.MAIL_SCAN_STOP, "wa1:mail-scan-stop");
-});
 
 test("startMailScan: gmail returns a mail.google.com url; the state shape feeds the panel", () => {
   const r = startMailScan({}, { provider: "gmail", now: new Date("2026-01-19T16:00:00Z"), days: 60 });

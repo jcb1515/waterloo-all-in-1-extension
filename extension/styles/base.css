@@ -671,25 +671,6 @@ html[data-theme="dark"] .card {
   vertical-align: -2px;
 }
 
-/* guided mail scan */
-.mail-scan-query {
-  margin-top: var(--sp-2);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  align-items: flex-start;
-}
-.mail-scan-code {
-  display: block;
-  font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
-  color: var(--text-2);
-}
-
 /* Courses tab: term line + Add outline, files list, waiting rows */
 .courses-head {
   display: flex;
@@ -984,21 +965,3 @@ html[data-theme="dark"] .card {
   padding-left: var(--sp-3);
 }
 
-/* mail scan (Outlook paste-query box) */
-.mail-scan-query {
-  margin-top: var(--sp-2);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  align-items: flex-start;
-}
-.mail-scan-code {
-  display: block;
-  font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
-  color: var(--text-2);
-}

@@ -37,7 +37,6 @@ import {
   projectDelete,
 } from "../core/scheduler.js";
 import { resetSweep } from "../sources/discord/index.js";
-import { startMailScan, stopMailScan } from "../sources/email/index.js";
 import { handleDiscoveryMessage } from "../capture/discovery-store.js";
 import {
   publishFeed,
@@ -250,14 +249,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     manualSetAll(msg.items).then(sendResponse, () => sendResponse({ ok: false }));
     return true;
   }
-  if (msg.type === UI.MAIL_SCAN_START) {
-    mailScanStart(msg.provider).then(sendResponse, () => sendResponse({ ok: false }));
-    return true;
-  }
-  if (msg.type === UI.MAIL_SCAN_STOP) {
-    mailScanStop().then(sendResponse, () => sendResponse({ ok: false }));
-    return true;
-  }
   if (msg.type === UI.PROJECT_UPSERT) {
     if (!msg.project) return false;
     projectUpsert(msg.project).then(sendResponse, () => sendResponse({ ok: false }));
@@ -348,29 +339,6 @@ async function auditFix(issueIds) {
     await recomputeAll();
   }
   return runAudit();
-}
-
-/**
- * "Scan my mail" — startMailScan runs inside the email adapter's ingest
- * queue so the stored scan state stays consistent with observe writes. The
- * {url, query} pair goes back to the UI; nothing navigates on its own.
- * @param {string} provider "outlook" | "gmail"
- */
-async function mailScanStart(provider) {
-  /** @type {any} */
-  let out = null;
-  await mutateSourceState("outlook", (state) => {
-    const r = startMailScan(state, { provider, now: new Date(), days: 60 });
-    out = r;
-    return r.state;
-  });
-  return { ok: true, url: out && out.url, query: out && out.query };
-}
-
-/** Stop the running guided scan; already-scanned keys stay remembered. */
-async function mailScanStop() {
-  await mutateSourceState("outlook", (state) => stopMailScan(state));
-  return { ok: true };
 }
 
 /**

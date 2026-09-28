@@ -4,9 +4,54 @@
   plus its sourceState entry into a status pill. No DOM, no chrome.*.
 */
 
-import { sourceFreshness } from "./onboarding.js";
+import { sourceEnabled, sourceFreshness } from "./onboarding.js";
+import { checklistFor } from "../../sources/probes.js";
 
 const HOUR = 3600000;
+const SYNC_ON_OPEN_MAX_AGE = 30 * 60000;
+
+/**
+ * The site URL a source's "Open site" affordance should open: the first
+ * checklist row with an https url when the source has a checklist (Outlook
+ * lands on /mail/inbox rather than the bare origin), else the adapter's
+ * first origin.
+ * @param {import("../../core/contract.js").Adapter} adapter
+ * @returns {string|null}
+ */
+export function sourceSiteUrl(adapter) {
+  try {
+    const rows = checklistFor((adapter && adapter.id) || "") || [];
+    const hit = rows.find((r) => {
+      const url = r && r.row && r.row.url;
+      return typeof url === "string" && url.startsWith("https://");
+    });
+    const url = hit && hit.row && hit.row.url;
+    if (typeof url === "string") return url;
+  } catch {
+    /* fall through to origins */
+  }
+  const origins = (adapter && adapter.origins) || [];
+  return origins[0] ? `${origins[0]}/` : null;
+}
+
+/**
+ * Should the panel ask for a sync of `source` once it opens? Fetch-type
+ * sources (gcal) have no page-open trigger of their own, so a stale or
+ * never-run source gets one `UI.SYNC` nudge per panel open. Disabled
+ * sources never nudge.
+ * @param {any} state  merged panel state ({settings, sourceState})
+ * @param {string} source
+ * @param {Date|number} now
+ * @param {number} [maxAgeMs]
+ */
+export function shouldSyncOnOpen(state, source, now, maxAgeMs = SYNC_ON_OPEN_MAX_AGE) {
+  if (!sourceEnabled(state && state.settings, source)) return false;
+  const st = ((state && state.sourceState) || {})[source];
+  const last = st && st.lastRunAt ? Date.parse(st.lastRunAt) : NaN;
+  if (Number.isNaN(last)) return true;
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  return nowMs - last > maxAgeMs;
+}
 
 /**
  * @param {import("../../core/contract.js").Adapter} adapter

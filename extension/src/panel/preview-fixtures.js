@@ -43,11 +43,10 @@ const seen = (source, key, scope, at) => [{ source, key, scope, at }];
 
 /**
  * @param {Date} [nowD]
- * @param {{cal?: string|null, imports?: boolean, mailscan?: boolean}} [variants]
+ * @param {{cal?: string|null, imports?: boolean}} [variants]
  *   cal: "published" | "split" | "error" — calendar feed states for the
  *   options screenshots ("empty"/undefined = never published).
  *   imports: show two imported outline files under Sources.
- *   mailscan: an in-progress guided Gmail scan on the Email source card.
  */
 export function previewState(nowD = new Date(), variants = {}) {
   const now = nowD.getTime();
@@ -778,31 +777,7 @@ export function previewState(nowD = new Date(), variants = {}) {
       complete: false,
       failures: 0,
       itemCount: 2,
-      state: variants.mailscan
-        ? {
-            scan: {
-              provider: "gmail",
-              startedAt: iso(now - 40 * MIN),
-              days: 60,
-              query: 'newer_than:60d (subject:interview OR subject:deadline OR subject:"calendar event")',
-            },
-            scanQueue: [
-              {
-                provider: "gmail",
-                key: "t9",
-                subject: "Acme Analog — interview confirmation",
-                url: "https://mail.google.com/mail/u/0/#all/thread-t9",
-              },
-              {
-                provider: "gmail",
-                key: "t10",
-                subject: "Copperleaf Energy — your co-op offer",
-                url: "https://mail.google.com/mail/u/0/#all/thread-t10",
-              },
-            ],
-            scanned: { t7: iso(now - 30 * MIN) },
-          }
-        : {},
+      state: {},
     },
     discord: {
       lastRunAt: iso(now - 20 * MIN),

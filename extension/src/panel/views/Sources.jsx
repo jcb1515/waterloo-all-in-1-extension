@@ -9,12 +9,10 @@ import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
 import { onboardingRows, nudges as visitNudges } from "../model/onboarding.js";
 import { OnboardingCard, NudgeCard } from "../../ui/Onboarding.jsx";
-import { IS_PREVIEW, send } from "../data.js";
-import { UI } from "../../core/messages.js";
+import { IS_PREVIEW } from "../data.js";
 import {
   GROUP_LABELS,
   neededGroups,
-  OPTIONAL_PERMISSION_GROUPS,
   requestSourceAccess,
 } from "../../core/permissions.js";
 import { AllowSourceButton, useAccessMap } from "../../ui/permissions.jsx";
@@ -28,7 +26,6 @@ import { Check } from "./sources/Check.jsx";
 import {
   RefreshIcon,
   ShieldIcon,
-  ArrowRightIcon,
   ArrowLeftIcon,
   ClipboardCheckIcon,
   SettingsIcon,
@@ -181,8 +178,8 @@ export function Sources({ state, actions, now, onGoCourses, onOpenCheck }) {
 
 /**
  * One source's page: header (name, status, Enabled toggle), the Segmented
- * picker and the three slot segments; Outlook also shows mail-scan
- * controls (sync/open/clear now live in W3's Check segment).
+ * picker and the three slot segments (sync/open/clear live in W3's Check
+ * segment).
  * @param {{card: any, state: any, actions: any, now: Date, segment: string,
  *   setSegment: (s: string) => void, onBack: () => void,
  *   onGoCourses?: () => void, onOpenCheck?: () => void}} p
@@ -305,11 +302,6 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
         </>
       )}
 
-      {enabled && adapter.id === "outlook" && !needsPerm ? (
-        <div class="source-actions">
-          <EmailScanControls st={st} />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -332,55 +324,6 @@ function OpenOptionsLink({ hash }) {
     <button type="button" class="btn btn-sm" onClick={open}>
       <SettingsIcon size={13} /> Open Settings
     </button>
-  );
-}
-
-/**
- * Guided mail-scan progress (kept on the source page's action row). While
- * sourceState.outlook.state.scan is set, the next queued subject is a
- * click-through into the user's own mail tab; Stop clears the scan.
- * @param {{st: any}} p
- */
-function EmailScanControls({ st }) {
-  const state = (st && st.state) || {};
-  const scan = state.scan;
-  const queue = Array.isArray(state.scanQueue) ? state.scanQueue : [];
-  const next = queue[0] || null;
-  if (!scan) return null;
-
-  const providerLabel = scan.provider === "gmail" ? "Gmail" : "Outlook";
-  const hostPatterns = /** @type {Record<string, string[]>} */ (OPTIONAL_PERMISSION_GROUPS)[scan.provider] || [];
-
-  const openQueued = async (url) => {
-    if (IS_PREVIEW || !url) return;
-    try {
-      const tabs = hostPatterns.length ? await chrome.tabs.query({ url: hostPatterns }) : [];
-      const tab = (tabs || []).find((t) => t.id != null && !t.discarded);
-      if (tab) await chrome.tabs.update(tab.id, { url, active: true });
-      else await chrome.tabs.create({ url });
-    } catch {
-      window.open(url, "_blank");
-    }
-  };
-
-  return (
-    <>
-      {next ? (
-        <button
-          type="button"
-          class="btn btn-sm"
-          title={`Mail scan — ${next.url}`}
-          onClick={() => openQueued(next.url)}
-        >
-          <ArrowRightIcon size={13} /> Mail scan ({queue.length} left): {next.subject}
-        </button>
-      ) : (
-        <span class="source-detail">Mail scan running — {providerLabel}, queue empty.</span>
-      )}
-      <button type="button" class="btn btn-sm btn-ghost" onClick={() => send({ type: UI.MAIL_SCAN_STOP })}>
-        Stop scan
-      </button>
-    </>
   );
 }
 

@@ -1,7 +1,12 @@
 // @ts-check
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sourceStatus, attentionSource } from "../../extension/src/panel/model/sources.js";
+import {
+  sourceStatus,
+  attentionSource,
+  shouldSyncOnOpen,
+  sourceSiteUrl,
+} from "../../extension/src/panel/model/sources.js";
 
 const NOW = new Date("2026-09-27T16:00:00.000Z");
 const HOUR = 3600000;
@@ -286,4 +291,45 @@ test("state given: error and signed-out still win over freshness", () => {
     sourceState: { portal: st({ error: { code: "http-500", message: "boom" } }) },
   });
   assert.equal(sourceStatus(portal, errState.sourceState.portal, "live", NOW, errState).key, "error");
+});
+
+test("shouldSyncOnOpen: enabled + missing/stale lastRunAt syncs, recent/disabled doesn't", () => {
+  const state = (srcState, enabled = true) =>
+    panelState({
+      settings: { sources: { gcal: { enabled } } },
+      sourceState: { gcal: srcState },
+    });
+
+  // disabled → never, even when the source has never run
+  assert.equal(shouldSyncOnOpen(state(null, false), "gcal", NOW), false);
+  // enabled, never run (no entry / no lastRunAt) → sync
+  assert.equal(shouldSyncOnOpen(state(null), "gcal", NOW), true);
+  assert.equal(shouldSyncOnOpen(state({}), "gcal", NOW), true);
+  // enabled, ran 10 min ago → no
+  assert.equal(
+    shouldSyncOnOpen(state(st({ lastRunAt: iso(NOW.getTime() - 10 * 60000) })), "gcal", NOW),
+    false,
+  );
+  // enabled, ran 40 min ago → yes
+  assert.equal(
+    shouldSyncOnOpen(state(st({ lastRunAt: iso(NOW.getTime() - 40 * 60000) })), "gcal", NOW),
+    true,
+  );
+  // missing state entry for the source counts as never run
+  const other = panelState({
+    settings: { sources: { gcal: { enabled: true } } },
+    sourceState: { learn: st() },
+  });
+  assert.equal(shouldSyncOnOpen(other, "gcal", NOW), true);
+});
+
+test("sourceSiteUrl: checklist url wins (outlook inbox), origins otherwise", () => {
+  assert.equal(
+    sourceSiteUrl(adapter("outlook", 0)),
+    "https://outlook.office.com/mail/inbox",
+  );
+  const plain = adapter("nosuch", 0);
+  plain.origins = ["https://example.com"];
+  assert.equal(sourceSiteUrl(plain), "https://example.com/");
+  assert.equal(sourceSiteUrl(adapter("nosuch2", 0)), null);
 });

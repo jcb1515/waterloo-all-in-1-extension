@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { applySettingsPatch, mutateKey, resolveSettings, SETTINGS_KEY, setLocal, setSettings } from "../core/store.js";
 import { UI } from "../core/messages.js";
 import { previewState } from "./preview-fixtures.js";
+import { shouldSyncOnOpen } from "./model/sources.js";
 
 const KEYS = [
   "items",
@@ -113,7 +114,6 @@ export function useStore() {
         : previewState(new Date(), {
             cal: query.get("cal"),
             imports: query.has("imports"),
-            mailscan: query.get("mailscan") === "1" || query.get("mailscan") === "panel",
           });
       setState({
         ready: true,
@@ -137,9 +137,21 @@ export function useStore() {
       return;
     }
     let alive = true;
+    let firstLoad = true;
     const load = () =>
       readAll()
-        .then((s) => alive && setState({ ready: true, ...s }))
+        .then((s) => {
+          if (!alive) return;
+          setState({ ready: true, ...s });
+          // Fetch-type sources have no page-open trigger — nudge a stale or
+          // never-run one exactly once per panel open (never in preview).
+          if (firstLoad) {
+            firstLoad = false;
+            if (shouldSyncOnOpen(s, "gcal", new Date())) {
+              send({ type: UI.SYNC, source: "gcal" }).catch(() => {});
+            }
+          }
+        })
         .catch(() => alive && setState((s) => ({ ...s, ready: true })));
     load();
     const onChange = (/** @type {any} */ _c, /** @type {string} */ area) => {
