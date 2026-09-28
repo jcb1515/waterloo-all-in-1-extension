@@ -984,13 +984,16 @@ export function parseCoopDates(doc) {
  * are emitted only when their structure is present — the adapter treats
  * presence as "that module was read".
  * @param {any} doc
+ * @param {{notices?: boolean}} [opts]  notices only collect on the dashboard
+ *   itself (.alert exists on many WW pages) — parseAll gates on the detected
+ *   page; direct callers on a dashboard doc keep the collecting default.
  * @returns {{ok: boolean, schedule?: {tables: number, rows: any[]},
  *   events?: {tables: number, rows: any[]}, newMessages?: number,
  *   webcamAppointments?: number,
  *   rankings?: {term: string|undefined, open: boolean, note: string|undefined},
  *   notices?: {heading: string, text: string}[]}}
  */
-export function parseDashboard(doc) {
+export function parseDashboard(doc, opts = {}) {
   /** @type {{tables: number, rows: any[]}|undefined} */
   let schedule;
   /** @type {{tables: number, rows: any[]}|undefined} */
@@ -1140,31 +1143,34 @@ export function parseDashboard(doc) {
     }
   }
 
-  // Notices/alerts/posts: alert boxes, the posting-actions module and the
-  // user-dashboard post region — submit-document deadlines live in their
-  // text ("Work-term report due ..."). A block nested inside another kept
-  // region (an .alert inside .user-dashboard) is deduped on text.
+  // Notices/alerts/posts: alert boxes, the posting-actions module and each
+  // user-dashboard post item — submit-document deadlines live in their
+  // text ("Work-term report due ..."). Only collected when the doc is the
+  // dashboard (.alert is common on other WW pages), and notices alone never
+  // mark the dashboard read. A block nested inside another kept region (an
+  // .alert inside a post item) is deduped on text.
   /** @type {{heading: string, text: string}[]|undefined} */
   let notices;
-  /** @type {Set<string>} */
-  const seenNotice = new Set();
-  for (const block of doc.querySelectorAll(DASH_NOTICE_SELECTOR)) {
-    const text = cleanText(block);
-    if (!text || seenNotice.has(text)) continue;
-    seenNotice.add(text);
-    const headingEl = block.querySelector("strong, b, h2, h3, h4");
-    if (!notices) notices = [];
-    notices.push({
-      heading: headingEl ? cleanText(headingEl) : "",
-      text,
-    });
+  if (opts.notices !== false) {
+    /** @type {Set<string>} */
+    const seenNotice = new Set();
+    for (const block of doc.querySelectorAll(DASH_NOTICE_SELECTOR)) {
+      const text = cleanText(block);
+      if (!text || seenNotice.has(text)) continue;
+      seenNotice.add(text);
+      const headingEl = block.querySelector("strong, b, h2, h3, h4");
+      if (!notices) notices = [];
+      notices.push({
+        heading: headingEl ? cleanText(headingEl) : "",
+        text,
+      });
+    }
   }
 
   const ok = Boolean(
     schedule ||
       events ||
       rankings ||
-      notices ||
       newMessages !== undefined ||
       webcamAppointments !== undefined
   );
@@ -1209,7 +1215,7 @@ export function parseAll(doc, opts = {}) {
     out.shortlist = parseShortlist(doc);
   const landing = landingKind(doc);
   if (landing) out.landing = { kind: landing };
-  const dashboard = parseDashboard(doc);
+  const dashboard = parseDashboard(doc, { notices: page === "dashboard" });
   if (dashboard.ok) out.dashboard = dashboard;
   return out;
 }

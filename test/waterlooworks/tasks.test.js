@@ -118,6 +118,43 @@ test("a non-offer message with a date stays a generic item", () => {
   assert.equal(items[0].meta.action, undefined);
 });
 
+test("'we offer flexible hours' in an interview invite is not an offer", () => {
+  // Linked to a job, but the body phrase is not offer-of-employment language.
+  const items = messageDateItems(
+    {
+      ...offerMsg,
+      subject: "Interview scheduled",
+      category: "Interviews",
+      text: "Your interview is on October 12, 2026 — we offer flexible hours.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].meta.action, undefined);
+  assert.notEqual(items[0].title, "Respond to offer — Northbay Software");
+});
+
+test("on offer mail only the response-sentence hit converts", () => {
+  const items = messageDateItems(
+    {
+      ...offerMsg,
+      subject: "Job Offer - Northbay Software",
+      category: "Offers",
+      text: "Interview wrap-up is on October 12, 2026. Respond to your offer by October 20, 2026.",
+    },
+    extractDates,
+    NOW_ISO
+  );
+  const respond = items.filter((i) => i.meta.action === "respond-offer");
+  const generic = items.filter((i) => i.meta.action !== "respond-offer");
+  assert.equal(respond.length, 1);
+  assert.match(respond[0].dueAt, /^2026-10-20/);
+  assert.equal(respond[0].title, "Respond to offer — Northbay Software");
+  assert.equal(generic.length, 1);
+  assert.equal(generic[0].meta.action, undefined);
+});
+
 // --- submit-rankings ----------------------------------------------------
 
 const inFlightApp = (cycle, status = "selected-for-interview") => ({
@@ -218,6 +255,36 @@ test("open rankings without a coop-date fall back to the undated rule", () => {
   assert.equal(items[0].dueAt, "2026-09-22T21:00:00.000Z");
 });
 
+test("the undated rankings anchor is first-seen-open, not the latest read", () => {
+  // state.rankings.at moves on every dashboard read; rankingsOpenSeen keeps
+  // the first time the term was seen open so the dueAt never drifts.
+  const input = {
+    applications: [inFlightApp("2027 - Winter")],
+    cycleItems: [],
+    rankingsOpenSeen: { "Winter 2027": "2026-09-15T12:00:00.000Z" },
+  };
+  const first = rankingsTaskItems(
+    {
+      ...input,
+      rankings: { term: "2027 - Winter", open: true, at: "2026-09-20T12:00:00.000Z" },
+    },
+    NOW
+  );
+  const later = rankingsTaskItems(
+    {
+      ...input,
+      rankings: { term: "2027 - Winter", open: true, at: "2026-09-25T12:00:00.000Z" },
+    },
+    NOW
+  );
+  assert.equal(first.length, 1);
+  assert.equal(later.length, 1);
+  assert.equal(first[0].id, later[0].id);
+  assert.equal(first[0].dueAt, later[0].dueAt);
+  // anchored at first-seen Sep 15 -> +2d 17:00 Toronto = Sep 17 21:00Z.
+  assert.equal(first[0].dueAt, "2026-09-17T21:00:00.000Z");
+});
+
 // --- shortlist / apply --------------------------------------------------
 
 test("parseShortlist reads the shortlist grid under its own marker", () => {
@@ -250,6 +317,8 @@ test("applyItems: future deadlines only, applied jobs skipped", () => {
   const [first] = items;
   assert.equal(first.id, "waterlooworks:apply:161616");
   assert.equal(first.type, "deadline");
+  // The student shortlisted it and the deadline is structured grid data.
+  assert.equal(first.review, "auto");
   assert.equal(first.meta.category, "apply");
   assert.equal(first.meta.action, "apply");
   assert.equal(first.title, "Apply: Firmware Engineering Co-op — Northbay Software");
@@ -284,6 +353,11 @@ test("notice negatives: video post, study-term alert, rankings closed", () => {
       },
       { heading: "Reminder", text: "Forms are fun." }, // doc noun, no due cue
       { heading: "Report due soon", text: "Your report is due soon." }, // no date
+      {
+        // doc noun + a date, but "written by" is not a due cue.
+        heading: "Report notes",
+        text: "Your report was written by Jane Smith on October 15, 2026.",
+      },
     ],
     extractDates,
     NOW_ISO
@@ -426,4 +500,83 @@ test("an incomplete snapshot emits no per-page readOk scopes", async () => {
   );
   assert.equal(result.complete, false);
   assert.equal(result.readOk, undefined);
+});
+
+test("alerts on non-dashboard pages yield no notice item or dashboard read", async () => {
+  // .alert exists on many WW pages — an interviews page carrying a
+  // submit-document alert must not produce a notice item, replace
+  // lastGood.notices, or tick the dashboard read scope.
+  const ctx = makeCtx({
+    lastGood: {
+      notices: {
+        items: [
+          {
+            id: "waterlooworks:notice:keep",
+            source: "waterlooworks",
+            type: "deadline",
+            title: "Kept notice",
+            dueAt: "2026-10-15T04:00:00.000Z",
+          },
+        ],
+        at: AT,
+      },
+    },
+  });
+  const result = await adapter.observe.parse(
+    {
+      source: "waterlooworks",
+      kind: "dom",
+      url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm",
+      body: `<html data-wa1-complete="1"><body>
+        <div class="alert alert-warning"><strong>Reminder</strong><br>
+          Submit your form due October 10, 2026.</div>
+        ${fixture("interviews.html")}
+      </body></html>`,
+      at: AT,
+    },
+    ctx
+  );
+  assert.ok(result.readOk.includes("waterlooworks:interviews"));
+  assert.ok(!result.readOk.includes("waterlooworks:dashboard"));
+  assert.equal(
+    result.items.find((i) => i.meta?.action === "submit-document"),
+    undefined
+  );
+  // The pre-existing notices bucket survives untouched.
+  const notices = ctx.state.lastGood.notices.items;
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].id, "waterlooworks:notice:keep");
+});
+
+test("two dashboard reads keep the undated rankings dueAt stable", async () => {
+  // The open-rankings notice re-reads on every dashboard pass; the task's
+  // +2d anchor is the FIRST time rankings were seen open for the term.
+  const openRankings = `<html data-wa1-complete="1"><body>
+    <div class="orbis-posting-actions"><strong>RANKING (2027 - Winter)</strong></div>
+  </body></html>`;
+  const url = "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm";
+  const ctx = makeCtx({
+    applications: [
+      {
+        jobId: "161616",
+        cycle: "2027 - Winter",
+        status: "selected-for-interview",
+      },
+    ],
+  });
+  const parse = (at) =>
+    adapter.observe.parse(
+      { source: "waterlooworks", kind: "dom", url, body: openRankings, at },
+      ctx
+    );
+  const r1 = await parse("2026-09-20T12:00:00.000Z");
+  ctx.state = r1.state; // the core persists each result's state
+  const r2 = await parse("2026-09-25T12:00:00.000Z");
+  const key = "waterlooworks:rankings:winter-2027";
+  const t1 = r1.items.find((i) => i.id === key);
+  const t2 = r2.items.find((i) => i.id === key);
+  assert.ok(t1 && t2);
+  assert.equal(t1.dueAt, t2.dueAt);
+  // first seen open Sep 20 -> +2d 17:00 Toronto = Sep 22 21:00Z (EDT).
+  assert.equal(t1.dueAt, "2026-09-22T21:00:00.000Z");
 });

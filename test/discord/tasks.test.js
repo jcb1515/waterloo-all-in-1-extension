@@ -129,7 +129,7 @@ test("settled guild-channel inventory -> complete + discord:channel", async () =
   };
   const r = await adapter.observe.parse(dom(extract), makeCtx());
   assert.equal(r.complete, true);
-  assert.deepEqual(r.readOk, ["discord:channel"]);
+  assert.deepEqual(r.readOk, ["discord", "discord:channel"]);
 });
 
 test("unsettled inventory read is not complete", async () => {
@@ -158,7 +158,7 @@ test("settled events modal with zero cards -> discord:events", async () => {
   };
   const r = await adapter.observe.parse(dom(extract), makeCtx());
   assert.equal(r.complete, true);
-  assert.deepEqual(r.readOk, ["discord:events"]);
+  assert.deepEqual(r.readOk, ["discord", "discord:events"]);
 });
 
 test("unsettled events modal is not complete", async () => {

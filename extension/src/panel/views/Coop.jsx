@@ -142,7 +142,9 @@ function EventRow({ item, state, actions, pending }) {
           </button>
         </span>
       ) : (
-        <span class="badge badge-ok">Registered</span>
+        <span class="badge badge-ok">
+          {item.meta?.registered === true ? "Registered" : "Added"}
+        </span>
       )}
     </div>
   );

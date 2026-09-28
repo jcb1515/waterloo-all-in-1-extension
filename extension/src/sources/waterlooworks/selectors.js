@@ -112,10 +112,11 @@ export const DASH_ACTIONS_SELECTOR = ".orbis-posting-actions";
 
 /**
  * Dashboard notice/alert/post blocks scanned for submit-document deadlines:
- * info alerts, the posting-actions module, and the user-dashboard posts.
+ * each alert box, the posting-actions module, and each user-dashboard post
+ * item (.grid-item-*) — never the whole .user-dashboard region as one text.
  */
 export const DASH_NOTICE_SELECTOR =
-  ".alert, .orbis-posting-actions, .user-dashboard";
+  '.alert, .orbis-posting-actions, .user-dashboard [class*="grid-item"]';
 
 /**
  * Elements that can identify the page itself as the Shortlist: real headings,

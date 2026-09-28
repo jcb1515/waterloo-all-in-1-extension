@@ -32,6 +32,7 @@ import {
   applyItems,
 } from "./map.js";
 import { diffApplications } from "./diff.js";
+import { termKey } from "../../core/todos.js";
 
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
 
@@ -56,6 +57,31 @@ const COOP_FETCH_MS = DAY_MS;
 export const COOP_DATES_VERSION = 2;
 /** The parsed public entry list kept on state (public data, no personal info). */
 const COOP_ENTRIES_CAP = 400;
+
+/**
+ * First time the rankings notice was seen OPEN per term — the undated
+ * rankings task anchors there so re-reads don't drift its dueAt into
+ * phantom "moved" updates. Pruned to terms still present (the current open
+ * term plus terms the stored applications belong to).
+ * @param {Record<string, any>} state  mutated in place
+ * @param {{term?: string, open?: boolean}} rank
+ * @param {string} at
+ */
+function noteRankingsOpen(state, rank, at) {
+  if (!rank || rank.open === false) return;
+  const term = termKey(rank.term);
+  if (!term) return;
+  const seen = { ...obj(state.rankingsOpenSeen) };
+  if (!seen[term]) seen[term] = at;
+  const keep = new Set([term]);
+  for (const app of arr(state.applications)) {
+    const t = termKey(app && app.cycle);
+    if (t) keep.add(t);
+  }
+  state.rankingsOpenSeen = Object.fromEntries(
+    Object.entries(seen).filter(([t]) => keep.has(t))
+  );
+}
 
 /**
  * Re-map stored public entries when the mapping version moved — no fetch.
@@ -643,6 +669,7 @@ export default {
           note: parsed.rankings.note,
           at: payload.at,
         };
+        noteRankingsOpen(state, parsed.rankings, payload.at);
         readOk.push("rankings");
         delete state.needsUpdate.rankings;
       }
@@ -677,6 +704,7 @@ export default {
             note: rank.note,
             at: payload.at,
           };
+          noteRankingsOpen(state, rank, payload.at);
         }
         if (dash.notices) {
           state.lastGood.notices = {
@@ -743,6 +771,7 @@ export default {
             applications: arr(state.applications),
             cycleItems: arr(state.lastGood["coop-dates"]?.items),
             rankings: state.rankings,
+            rankingsOpenSeen: state.rankingsOpenSeen,
           },
           now
         ),

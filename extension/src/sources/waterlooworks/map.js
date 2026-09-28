@@ -593,6 +593,11 @@ export function postingItems(posting, now) {
 
 /** Message-date items are kept only when the hit clears this bar. */
 const MSG_MIN_CONFIDENCE = 0.6;
+/** Offer phrasing that marks a message body as an actual job offer. */
+const OFFER_BODY_RE =
+  /\b(?:job\s+offer|offer\s+of\s+employment|employment\s+offer|respond\s+to\s+(?:the|this|your)\s+offer|accept\s+(?:the|this|your)\s+offer|offer\s+(?:deadline|expires?))\b/i;
+/** Within an offer message, only a hit whose sentence asks for a response. */
+const OFFER_HIT_RE = /\b(?:respond|accept|decline|deadline|expires?|by)\b/i;
 /** Hits more than this far before the message's send time are past references. */
 const MSG_PAST_MS = DAY_MS;
 const SNIPPET_MAX = 300;
@@ -697,13 +702,15 @@ export function messageDateItems(msg, extractDates, nowIso) {
   const employer = normEmployer(msg.employer);
   // Offer mail linked to a job/employer turns its date hits into
   // respond-to-offer tasks rather than generic message items (same id, so
-  // they replace rather than duplicate).
+  // they replace rather than duplicate). The body must use explicit
+  // offer-of-employment phrasing — "we offer flexible hours" in an
+  // interview invite is not an offer.
   const offerMessage =
     Boolean(employer || msg.jobId) &&
     (/\boffers?\b/i.test(
       `${msg.subject || ""} ${msg.category || ""} ${msg.subCategory || ""}`
     ) ||
-      /\b(?:job\s+)?offers?\b/i.test(String(msg.text || "")));
+      OFFER_BODY_RE.test(String(msg.text || "")));
   const items = [];
   for (const hit of hits || []) {
     if (hit.confidence < MSG_MIN_CONFIDENCE) continue;
@@ -748,7 +755,9 @@ export function messageDateItems(msg, extractDates, nowIso) {
       item.startAt = hit.startAt;
       if (hit.endAt) item.endAt = hit.endAt;
     }
-    if (offerMessage) {
+    // Even on offer mail, only a hit whose own sentence carries a response
+    // cue converts — an unrelated date in the same body stays generic.
+    if (offerMessage && OFFER_HIT_RE.test(snippet || "")) {
       item.type = "deadline";
       item.title = employer
         ? `Respond to offer — ${employer}`
@@ -763,6 +772,7 @@ export function messageDateItems(msg, extractDates, nowIso) {
       meta.action = "respond-offer";
       meta.employer = employer;
       meta.jobId = msg.jobId || undefined;
+      item.meta = meta;
     }
     items.push(item);
   }
@@ -785,7 +795,10 @@ function undatedDueAt(anchor) {
 
 const NOTICE_DOC_RE =
   /\b(reports?|forms?|evaluations?|documents?|reflections?|resumes?|résumés?|cover\s+letters?|transcripts?)\b/i;
-const NOTICE_DUE_RE = /\b(due|submits?|submit|deadlines?|by)\b/i;
+// Due cue: "due"/"deadline", or "submit(ted) by/before/no later than" — a
+// bare "by" (a post's "Posted by", an author's name) is not a cue.
+const NOTICE_DUE_RE =
+  /\bdue\b|\bdeadlines?\b|\bsubmit(?:ted)?\s+(?:by|before|no\s+later\s+than)\b/i;
 
 /**
  * Dashboard notices/alerts/posts -> "submit a document" hard deadlines.
@@ -854,10 +867,12 @@ const RANKINGS_IN_FLIGHT = new Set([
  * One "Submit your rankings" task per work term that has an in-flight app.
  * dueAt = the earliest upcoming rankings-due co-op date for that term; when
  * none exists but the dashboard shows rankings open for the term the
- * undated rule anchors the task at the notice's read time.
+ * undated rule anchors at the FIRST time rankings were seen open for the
+ * term (rankingsOpenSeen) — the notice's `at` changes on every dashboard
+ * read and would drift the dueAt, producing phantom "moved" updates.
  * @param {{applications?: any[], cycleItems?: Item[],
  *   rankings?: {term?: string, open?: boolean, note?: string,
- *   at?: string}}} input
+ *   at?: string}, rankingsOpenSeen?: Record<string, string>}} input
  * @param {Date} now
  * @returns {Item[]}
  */
@@ -900,7 +915,11 @@ export function rankingsTaskItems(input, now) {
       type: undated ? "task" : "deadline",
       title: `Submit your rankings — ${term}`,
       org: "Co-op",
-      dueAt: undated ? undatedDueAt(rankings?.at || now) : due,
+      dueAt: undated
+        ? undatedDueAt(
+            (input?.rankingsOpenSeen || {})[term] || rankings?.at || now
+          )
+        : due,
       status: "open",
       review: "auto",
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
@@ -954,7 +973,9 @@ export function applyItems(rows, applications, now) {
       org: employer,
       dueAt: row.appDeadline,
       status: "open",
-      review: "pending",
+      // Structured grid data the student shortlisted themselves — straight
+      // to the feed, no Review stop.
+      review: "auto",
       seenIn: [{ source: SOURCE, key, scope: SCOPE, at: nowIso }],
       evidence: { method: "html" },
       meta: {

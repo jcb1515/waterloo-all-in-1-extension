@@ -1017,7 +1017,7 @@ export default {
             loc.guildId &&
             loc.guildId !== "@me"
           ) {
-            result.readOk = ["discord:channel"];
+            result.readOk = [SCOPE, "discord:channel"];
             result.complete = true;
             return finish();
           }
@@ -1112,7 +1112,7 @@ export default {
             guildId &&
             guildId !== "@me"
           ) {
-            result.readOk = ["discord:events"];
+            result.readOk = [SCOPE, "discord:events"];
             result.complete = true;
             return finish();
           }
