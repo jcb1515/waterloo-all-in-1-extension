@@ -22,9 +22,10 @@ const FILTERS = [
 ];
 
 /**
- * @param {{state: any, actions: any, now: Date, onGoSources: () => void}} props
+ * @param {{state: any, actions: any, now: Date, onGoSources: () => void,
+ *   onGoCalendar?: () => void}} props
  */
-export function Agenda({ state, actions, now, onGoSources }) {
+export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
   const [filter, setFilter] = useState(query0("filter") || "all");
   const [org, setOrg] = useState(null);
   const [q, setQ] = useState("");
@@ -95,7 +96,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
   return (
     <div class="agenda">
       {calErr ? (
-        <button type="button" class="attention-strip" onClick={openCalendarSettings}>
+        <button type="button" class="attention-strip" onClick={onGoCalendar}>
           <AlertTriangleIcon size={14} /> Calendar: {calErr}
         </button>
       ) : null}
@@ -253,15 +254,6 @@ export function Agenda({ state, actions, now, onGoSources }) {
 /** Row priority — rows already carry effective fields. */
 function rowPriority(item, now) {
   return priorityOf(item, now);
-}
-
-/** Open the options page's calendar section. */
-function openCalendarSettings() {
-  try {
-    chrome.tabs.create({ url: chrome.runtime.getURL("src/options/options.html#calendar") });
-  } catch {
-    /* preview / no extension context */
-  }
 }
 
 function query0(name) {

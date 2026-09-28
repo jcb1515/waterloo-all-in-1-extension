@@ -15,7 +15,8 @@
     "test": "node --test \"test/**/*.test.js\" && npm --prefix server test",
     "typecheck": "tsc --noEmit",
     "package": "node tools/package.mjs",
-    "verify": "node tools/verify.mjs"
+    "verify": "node tools/verify.mjs",
+    "live": "node tools/live/cdp.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",

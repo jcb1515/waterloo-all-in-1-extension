@@ -262,6 +262,23 @@ export const BellIcon = (p) => (
   </Svg>
 );
 
+export const BellOffIcon = (p) => (
+  <Svg {...p}>
+    <path d="M8.7 3A6 6 0 0 1 18 8a21 21 0 0 0 .6 5" />
+    <path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    <path d="m2 2 20 20" />
+  </Svg>
+);
+
+export const MoreIcon = (p) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+    <circle cx="5" cy="12" r="1" />
+  </Svg>
+);
+
 export const InboxIcon = (p) => (
   <Svg {...p}>
     <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />

@@ -101,56 +101,11 @@ html[data-theme="dark"] .opt-nav-links a.active {
   font-weight: var(--w-semibold);
 }
 
-.field {
-  margin-top: var(--sp-2);
-}
-
 .term-line {
   font-size: var(--fs-lg);
   font-weight: var(--w-semibold);
 }
 
-/* editable tables */
-.edit-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-sm);
-}
-.edit-table th {
-  text-align: left;
-  font-size: var(--fs-xs);
-  font-weight: var(--w-semibold);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0 var(--sp-2) var(--sp-2);
-}
-.edit-table td {
-  padding: var(--sp-1) var(--sp-2);
-  border-top: 1px solid var(--border);
-  vertical-align: middle;
-}
-.edit-table .add-row td {
-  border-top: 1px dashed var(--border-strong);
-}
-.edit-table .row-act {
-  width: 1%;
-  white-space: nowrap;
-  text-align: right;
-}
-.edit-table .num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.edit-table .code-cell {
-  width: 90px;
-  font-weight: var(--w-semibold);
-}
-.edit-table .url-cell {
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  word-break: break-all;
-}
 .disco-table td .btn {
   margin-left: var(--sp-1);
 }
@@ -176,11 +131,6 @@ html[data-theme="dark"] .opt-nav-links a.active {
   gap: 4px;
   font-size: var(--fs-xs);
   color: var(--text-3);
-}
-.src-sub {
-  margin-top: var(--sp-2);
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
 }
 .discord-advanced > summary {
   cursor: pointer;
@@ -327,73 +277,6 @@ kbd {
 }
 
 /* calendar feed */
-.inline-row {
-  display: flex;
-  gap: var(--sp-2);
-  align-items: center;
-  flex-wrap: wrap;
-}
-.inline-row .input {
-  flex: 1;
-  min-width: 220px;
-}
-.toggle-col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  margin-top: var(--sp-1);
-}
-.switch.disabled {
-  opacity: 0.5;
-}
-.status-ok {
-  color: var(--ok, #1a7f37);
-}
-.status-err {
-  color: var(--danger, #b42318);
-}
-.status-ok svg, .status-err svg {
-  vertical-align: -2px;
-}
-.banner {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-2, 8px);
-  font-size: var(--fs-sm);
-}
-.banner-warn {
-  background: var(--gold-soft);
-  color: var(--gold-ink);
-}
-.feed-link {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-.feed-link-label {
-  flex: none;
-  width: 130px;
-  font-weight: var(--w-medium);
-  font-size: var(--fs-sm);
-}
-.feed-url {
-  flex: 1;
-  min-width: 180px;
-  font-size: var(--fs-xs);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: var(--sp-1) var(--sp-2);
-  word-break: break-all;
-}
-.feed-link-acts {
-  display: flex;
-  gap: var(--sp-1);
-  flex: none;
-}
 .linklike {
   background: none;
   border: 0;
@@ -407,17 +290,6 @@ kbd {
 .linklike.danger {
   color: var(--danger, #b42318);
 }
-.help-details summary {
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-  cursor: pointer;
-}
-.skipped-list {
-  margin: 0;
-  padding-left: var(--sp-4);
-  font-size: var(--fs-xs);
-}
-
 /* ------------------------------- reminders -------------------------------- */
 
 .lead-table {
@@ -460,15 +332,6 @@ kbd {
 .time-input {
   width: 110px;
 }
-.inline-row .num-input {
-  flex: 0 0 auto;
-  min-width: 0;
-  width: 76px;
-}
-.class-weeks {
-  padding-left: var(--sp-3);
-}
-
 /* ------------------------- hidden & snoozed items -------------------------- */
 
 .hidden-row {
@@ -524,26 +387,6 @@ kbd {
   font-size: var(--fs-sm);
 }
 .tab-edit-label { flex: 1; font-size: var(--fs-sm); }
-
-/* ----------------------------- mail scan ------------------------------ */
-
-.mail-scan-query {
-  margin-top: var(--sp-2);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  align-items: flex-start;
-}
-.mail-scan-code {
-  display: block;
-  font-size: var(--fs-xs);
-  overflow-wrap: anywhere;
-  color: var(--text-2);
-}
 
 /* ------------------------------ backup ------------------------------ */
 

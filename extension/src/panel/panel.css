@@ -1773,3 +1773,71 @@ html[data-theme="dark"] [data-heat="3"] { --heat: rgb(254 211 76 / 0.42); }
   background: var(--bg-1);
   color: var(--text-1);
 }
+
+/* --------------------------- calendar sync strip --------------------------- */
+
+.cal-sync {
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.cal-sync-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.cal-sync-head h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+.cal-sync .help-details summary {
+  margin-top: var(--sp-2);
+}
+.cal-sync .feed-url {
+  display: block;
+  margin: var(--sp-2) 0;
+}
+.cal-sync-collapsed {
+  padding: var(--sp-2) var(--sp-3);
+}
+.cal-sync-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.cal-sync-status {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* --------------------------- reminder pause row --------------------------- */
+
+.updates-rem-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  margin-bottom: var(--sp-3);
+}
+.updates-rem-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.updates-rem-acts {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  margin-left: auto;
+}

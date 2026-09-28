@@ -6,8 +6,21 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { weekModel, monthModel, weekStartOf, dayKeyOf, shortLabel } from "../model/calendar.js";
 import { fmtDay, fmtTime, fmtRange } from "../model/agenda.js";
 import { orgStyle } from "../../ui/colors.js";
-import { ChevronRightIcon } from "../../ui/icons.jsx";
+import { ChevronRightIcon, AlertTriangleIcon, ExternalLinkIcon, MoreIcon, RefreshIcon } from "../../ui/icons.jsx";
 import { ItemRow } from "../components/ItemRow.jsx";
+import {
+  maskUrl,
+  googleAddUrl,
+  copyText,
+  relAgo,
+  feedStatusLine,
+  IncludeToggles,
+  SplitCalendars,
+} from "../../ui/calendarFeed.jsx";
+import { send, IS_PREVIEW } from "../data.js";
+import { UI } from "../../core/messages.js";
+import { mutateKey } from "../../core/store.js";
+import { validServiceUrl, FEED_KEY } from "../../calendar/publish.js";
 
 const PX_PER_MIN = 0.8;
 const WD_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -24,6 +37,195 @@ function query0(name) {
   } catch {
     return null;
   }
+}
+
+/** Open the options page's calendar section (Settings → Calendar). */
+function openCalendarOptions() {
+  const url = IS_PREVIEW
+    ? "/src/options/options.html#calendar"
+    : chrome.runtime.getURL("src/options/options.html#calendar");
+  try {
+    if (!IS_PREVIEW && chrome.tabs) {
+      chrome.tabs.create({ url });
+      return;
+    }
+  } catch {
+    /* fall through */
+  }
+  window.open(url, "_blank");
+}
+
+/**
+ * The calendar-sync strip atop the Calendar tab. Off: a compact card with a
+ * Turn on button. On: a status line + Sync now / Add / Copy, the resubscribe
+ * banner, and a "What's included" disclosure with the include toggles and
+ * split-by-type feeds. Collapses to one line once the user has subscribed;
+ * `?calsync=open` forces the expanded layout for previews.
+ * @param {{state: any, actions: any}} p
+ */
+function SyncStrip({ state, actions }) {
+  const cal = (state.settings && state.settings.calendar) || {};
+  const feed = state.calendarFeed;
+  const origin = validServiceUrl(cal.serviceUrl);
+  const subscribed = !!(cal.subscribed || (feed && feed.lastPublishedAt));
+  const [expanded, setExpanded] = useState(() => query0("calsync") === "open" || !subscribed);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!subscribed) setExpanded(true);
+  }, [subscribed]);
+
+  const patchCal = (p) => actions.saveSettings({ calendar: p });
+  const publishNow = () => send({ type: UI.CALENDAR_PUBLISH });
+  const markSubscribed = () => patchCal({ subscribed: true });
+  const dismissResubscribe = () => {
+    if (IS_PREVIEW) return;
+    mutateKey(FEED_KEY, (cur) => (cur ? { ...cur, needsResubscribe: false } : cur)).catch(() => {});
+  };
+
+  if (!cal.enabled) {
+    return (
+      <section class="card cal-sync">
+        <div class="cal-sync-head">
+          <h3>Sync to Google Calendar</h3>
+        </div>
+        <p class="help">
+          Sends event titles, times and places to the calendar server; your link is private.
+        </p>
+        <div class="inline-row">
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            disabled={!origin}
+            onClick={() => patchCal({ enabled: true })}
+          >
+            Turn on
+          </button>
+          {!origin ? (
+            <button type="button" class="linklike" onClick={openCalendarOptions}>
+              No calendar server set — Settings → Calendar
+            </button>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <section class="card cal-sync cal-sync-collapsed">
+        <div class="cal-sync-line">
+          <span class="help cal-sync-status">
+            {feed && feed.status === "ok" && feed.lastPublishedAt
+              ? `Synced ${relAgo(feed.lastPublishedAt)}`
+              : feed && feed.status === "publishing"
+                ? "Publishing…"
+                : feed && feed.status === "error"
+                  ? `Sync failed — ${feed.error || "publish error"}`
+                  : "Calendar sync on"}
+          </span>
+          <button type="button" class="btn btn-sm" onClick={publishNow}>
+            Sync now
+          </button>
+          <button
+            type="button"
+            class="btn-icon"
+            aria-label="Calendar sync options"
+            onClick={() => setExpanded(true)}
+          >
+            <MoreIcon size={15} />
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const statusLine = feedStatusLine(feed);
+  return (
+    <section class="card cal-sync">
+      <div class="cal-sync-head">
+        <h3>Sync to Google Calendar</h3>
+        {subscribed ? (
+          <button
+            type="button"
+            class="linklike"
+            onClick={() => setExpanded(false)}
+          >
+            Collapse
+          </button>
+        ) : null}
+      </div>
+
+      {feed && feed.needsResubscribe ? (
+        <div class="banner banner-warn" role="alert">
+          <AlertTriangleIcon size={14} />
+          <span>Your calendar link changed — remove the old calendar in Google and add this one.</span>
+          <button type="button" class="btn btn-sm" onClick={dismissResubscribe}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {statusLine ? (
+        <p class="help status-ok">{statusLine}</p>
+      ) : feed && feed.status === "error" ? (
+        <p class="help status-err">
+          {feed.error || "Publish failed"}
+          {feed.retryAt ? ` · retrying ${relAgo(feed.retryAt, true)}` : ""}
+        </p>
+      ) : feed && feed.status === "publishing" ? (
+        <p class="help">Publishing…</p>
+      ) : (
+        <p class="help">Not published yet — it publishes a minute after the next change.</p>
+      )}
+
+      {feed && feed.feedUrl ? (
+        <code class="feed-url">{maskUrl(feed.feedUrl)}</code>
+      ) : null}
+
+      <div class="inline-row">
+        <button type="button" class="btn btn-sm" onClick={publishNow}>
+          <RefreshIcon size={13} /> Sync now
+        </button>
+        {feed && feed.feedUrl ? (
+          <>
+            <a
+              class="btn btn-sm btn-primary"
+              href={googleAddUrl(feed.feedUrl)}
+              target="_blank"
+              rel="noreferrer"
+              onClick={markSubscribed}
+            >
+              <ExternalLinkIcon size={12} /> Add to Google Calendar
+            </a>
+            <button
+              type="button"
+              class="btn btn-sm"
+              onClick={async () => {
+                if (await copyText(feed.feedUrl)) {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1400);
+                }
+              }}
+            >
+              {copied ? "Copied" : "Copy link"}
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      <details class="help-details">
+        <summary>What's included</summary>
+        <IncludeToggles cal={cal} patch={patchCal} />
+        <SplitCalendars cal={cal} feed={feed} patch={patchCal} reveal={false} />
+      </details>
+
+      <p class="help">
+        <button type="button" class="linklike" onClick={openCalendarOptions}>
+          More calendar settings
+        </button>
+      </p>
+    </section>
+  );
 }
 
 /** One hour-tick label, e.g. "8", "12 PM". */
@@ -283,6 +485,8 @@ export function CalendarView({ state, actions, now }) {
 
   return (
     <div class="cal">
+      <SyncStrip state={state} actions={actions} />
+
       <div class="cal-toolbar">
         <div class="segmented" role="tablist" aria-label="Calendar range">
           {["week", "month"].map((m) => (
