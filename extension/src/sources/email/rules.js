@@ -37,9 +37,41 @@ export const BOOK_RE =
 export const SLOT_RE =
   /\bselect(?:ing)? (?:an?|your|the) (?:interview )?(?:time ?)?slots?\b|\bselect(?:ing)? (?:an?|your|the|a) (?:interview )?time\b|\bchoose (?:an?|your|the|a) (?:time ?slots?|slots?|times?)\b|\bsign ?up for (?:an?|your|the|a) (?:interview|slots?|times?)\b/i;
 
-/** Phrases that mean a reply is owed, plus "?"-sentences addressed to "you". */
-export const REPLY_RE =
-  /\b(please (reply|respond|confirm|let me know)|let me know|get back to me|are you (available|free)|what times? works?|when (are|would) you (be )?(free|available)|rsvp)\b/i;
+/** Phrases that mean a reply is owed — explicit asks only; a bare
+ * "?"-sentence addressed to "you" is NOT an ask (newsletter rhetoric). */
+export const REPLY_RE = new RegExp(
+  [
+    /\bplease (?:reply|respond|confirm|let me know|advise)\b/,
+    /\blet me know\b/,
+    /\bget back to me\b/,
+    /\b(?:could|can|would|will) you (?:please )?(?:confirm|let me know|reply|respond|send|share|provide|get back|fill)\b/,
+    /\bare you (?:available|free|able to (?:make|attend|join))\b/,
+    /\bwhat (?:time|day)s? (?:work|suit)s?\b/,
+    /\bwhen (?:are|would) you (?:be )?(?:free|available)\b/,
+    /\bdoes\b[^.!?\n]{0,40}\bwork for you\b/,
+    /\brsvp\b/,
+  ]
+    .map((r) => r.source)
+    .join("|"),
+  "i",
+);
+
+/** Politeness boilerplate in the same sentence voids an apparent ask. */
+export const PLEASANTRY_RE =
+  /if you have any questions|let me know if you (?:have|need)|feel free|don'?t hesitate|happy to help/i;
+
+/**
+ * Broadcast mail: delivered to a list (I'm not in To/Cc) or to a large
+ * recipient set. Unknown (passive DOM rows, no recipient data) is not
+ * broadcast.
+ * @param {any} msg
+ */
+export function isBroadcast(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  if (msg.toMe === false) return true;
+  const n = Number(msg.recipients);
+  return Number.isFinite(n) && n > 10;
+}
 
 /** The first matching line ends the new part of a message body (quotes). */
 /**
@@ -316,14 +348,17 @@ export function mailType(sentence) {
   return { type: "event" };
 }
 
-/** Bulk sender mail: no-reply-style local parts or list-footer boilerplate. */
+/** Bulk sender mail: no-reply-style local parts, a "[List]" subject tag, or
+ * list-footer boilerplate. */
 export function isBulk(msg) {
   const local = String(msg.fromEmail || "").split("@")[0] || "";
   if (
     /^(no-?reply|do-?not-?reply|notifications?|newsletters?|alerts?|account|security|support|mailer|daemon|postmaster|bounce|system|service|digest|updates?)\b/i
       .test(local)
   ) return true;
-  return /unsubscribe|view (it |this (email |message )?)?in (your )?browser|manage (your )?(email |subscription )?preferences/i
+  // Mailing-list subject tags: "[ECE Grad] Weekly digest".
+  if (/^\s*\[[^\]\n]{2,40}\]/.test(String(msg.subject || ""))) return true;
+  return /unsubscribe|view (?:it |this |the )?(?:email |message |post )?(?:online|in (?:your )?browser)|change how you receive these emails|stop receiving (?:email )?notifications|you are receiving this (?:email|message) because|mailing list|listserv|manage (?:your )?subscription|update your (?:email )?preferences|manage (?:your )?(?:email |subscription )?preferences/i
     .test(String(msg.body || ""));
 }
 
@@ -365,7 +400,7 @@ export function isCoopSender(msg) {
   const email = String(msg.fromEmail || "").toLowerCase();
   const domain = email.split("@")[1] || "";
   if (domain.includes("waterlooworks")) return true;
-  return /uwaterloo\.ca$/.test(domain) && /co-?op|waterlooworks|ccd|career/i.test(`${msg.from} ${msg.subject}`);
+  return /uwaterloo\.ca$/.test(domain) && /co-?op|waterlooworks|ccd|ceca|career/i.test(`${msg.from} ${msg.subject}`);
 }
 
 /** ctx.applications may be an array or an id-keyed map. @param {any} v */
@@ -491,20 +526,44 @@ export function senderListed(msg, settings) {
  * Which list rows deserve a body fetch. Uses ONLY what the content script
  * knows (settings + the row itself): never courses/applications. */
 
-/** Applicant-tracking / employer-ish senders (their mail often schedules). */
+/** Applicant-tracking / employer-ish senders (their mail often schedules).
+ * uwaterloo.ca is deliberately NOT one — it would make every Waterloo
+ * sender "employerish" (newsletters would mint book-interview/offer). */
 export const ATS_RE =
-  /(?:^|[@.])(?:greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|smartrecruiters\.com|icims\.com|jobvite\.com|taleo\.net|bamboohr\.com|hirevue\.com|successfactors\.(?:com|eu)|waterlooworks\.uwaterloo\.ca|uwaterloo\.ca)$/i;
+  /(?:^|[@.])(?:greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|smartrecruiters\.com|icims\.com|jobvite\.com|taleo\.net|bamboohr\.com|hirevue\.com|successfactors\.(?:com|eu)|waterlooworks\.uwaterloo\.ca)$/i;
 
 /** A course-code-looking token, e.g. "ECE105" / "MATH 115". */
 export const COURSE_CODE_RE = /\b[A-Z]{2,5}\s?\d{3}[A-Z]?\b/;
 
-/** The whole "this mail wants something" cue set, for subject+preview. */
+/** A date-looking token near "meeting/call/chat" upgrades it to a cue. */
+const DATEISH =
+  `${EXPLICIT_DATE_RE.source}|\\b(?:mon|tue(?:s)?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\\b|\\btoday\\b|\\btomorrow\\b|\\btonight\\b|\\d{1,2}:\\d{2}`;
+const MEET_DATE_RE = new RegExp(
+  `(?:meetings?|calls?|chats?|catch ?ups?|syncs?)\\b[^.!?\n]{0,60}(?:${DATEISH})` +
+    `|(?:${DATEISH})[^.!?\n]{0,60}\\b(?:meetings?|calls?|chats?|catch ?ups?|syncs?)\\b`,
+  "i",
+);
+
+/**
+ * The strong "this mail wants something" cue set, for subject+preview.
+ * Deliberately narrow: the broad KEYWORDS list (call/meet/available/book/
+ * confirm/reminder/event/schedule/due/sync…) is a body-fetch firehose —
+ * only hard asks and date-pinned wording qualify, plus the user's own
+ * keywords.
+ */
 export function bodyCueRe(extra) {
-  const kw = keywordRe(extra);
+  const words = list(extra).map(esc);
+  const user = words.length ? `\\b(?:${words.join("|")})\\b` : "";
   return new RegExp(
     [
-      kw.source,
-      OA_KW.source,
+      "\\binterviews?\\b|\\bscreens?\\b|screening|hirevue",
+      "pleased to offer|offer of employment|offer letter|extend (?:an|you an) offer",
+      "\\brank(?:ing|ings)?\\b",
+      "\\bdeadline\\b|\\bdue (?:by|on)\\b",
+      "\\bexams?\\b|\\bmid-?terms?\\b",
+      "\\binvites?\\b|\\binvitations?\\b|\\brsvp\\b|\\bregist(?:er|ration)\\b",
+      MEET_DATE_RE.source,
+      "\\bassessments?\\b|\\bcoding challenge\\b|\\bonline assessment\\b",
       EVENT_ANY_RE.source,
       DEADLINE_CUE_RE.source,
       CONFIRM_RE.source,
@@ -513,21 +572,23 @@ export function bodyCueRe(extra) {
       SLOT_RE.source,
       GCAL_INVITE_RE.source,
       WHEN_LINE.source,
-      "pleased to offer|offer of employment|offer letter|extend an offer",
       "forms\\.office\\.com|docs\\.google\\.com\\/forms|forms\\.gle|qualtrics\\.com|calendly\\.com",
-      "please (?:submit|upload|sign|complete and return)",
-      "tuition|payment due|amount due",
-    ].join("|"),
+      "please (?:submit|upload|sign|complete and return|return)",
+      "\\btuition\\b|\\bfees? (?:is |are )?(?:now )?due\\b|\\bpayment due\\b|\\bamount (?:due|owing)\\b|\\bbalance owing\\b|\\boutstanding balance\\b",
+      user,
+    ]
+      .filter(Boolean)
+      .join("|"),
     "im",
   );
 }
 
 /**
  * Should this list row's body be fetched? Blocked senders never; then any
- * gated reason: allow-listed, co-op/Learn/uwaterloo.ca, a known
- * ATS/employer-ish domain, a course code in the subject, or a
- * trigger/keyword/booking/form/offer/fee cue in subject+preview. With the
- * onlyCourseCoop preset only course/co-op/Learn/allow-listed senders count.
+ * gated reason: allow-listed, co-op/Learn, a known ATS/employer-ish domain,
+ * a course code in the subject, or a STRONG cue in subject+preview — a bare
+ * uwaterloo.ca address alone no longer qualifies. With the onlyCourseCoop
+ * preset only course/co-op/Learn/allow-listed/campus senders count.
  * Bulk senders without a gated reason never get bodies.
  * @param {any} msg  list-row Msg ({fromEmail, from, subject, preview, key})
  * @param {{settings?: Record<string, any>, kwRe?: RegExp}} [opts]
@@ -544,10 +605,10 @@ export function needsBody(msg, { settings = {}, kwRe } = {}) {
   if (settings.onlyCourseCoop) {
     return listed || coop || learn || uw || subjectHasCode;
   }
-  if (listed || coop || learn || uw) return true;
+  if (listed || coop || learn) return true;
   if (ATS_RE.test(email)) return true;
   if (subjectHasCode) return true;
   const text = `${msg.subject || ""}\n${msg.preview || ""}`;
-  return (kwRe || bodyCueRe(settings.keywords)).test(text);
+  return (kwRe || bodyCueRe(settings.keywords)).test(text) || OA_KW.test(text);
 }
 

@@ -23,6 +23,7 @@ import {
   DEADLINE_CUE_RE,
   EXPLICIT_DATE_RE,
   GCAL_INVITE_RE,
+  isBroadcast,
   isBulk,
   isCoopSender,
   keywordOf,
@@ -31,6 +32,7 @@ import {
   MEET_LINK,
   NEGATIVE_RE,
   normCardWhen,
+  PLEASANTRY_RE,
   QUOTE_CUT_RE,
   REPLY_RE,
   senderGate,
@@ -199,6 +201,7 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const when = ref.toISOString();
   const subject = String(msg.subject || "");
   const body = String(msg.body || "");
+  const email = String(msg.fromEmail || "").toLowerCase();
   const scope = `email:${provider}:${msg.key}`;
   const seen = (id) => [
     { source: provider, key: id.replace(new RegExp(`^${provider}:`), ""), scope, at: at || when },
@@ -209,8 +212,16 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
 
   // Sender filters run before anything is produced: a blocked sender is
   // fully silent; under the course/co-op preset only gated senders count.
+  // Learn/D2L notification mail produces nothing — the Learn source is
+  // authoritative for it.
   const gate = senderGate(msg, { courses, settings, applications });
-  if (gate.blocked || (settings.onlyCourseCoop && !gate.ok)) return [];
+  if (
+    gate.blocked ||
+    /learn|d2l/i.test(email) ||
+    (settings.onlyCourseCoop && !gate.ok)
+  ) {
+    return [];
+  }
 
   /* ---- 1. invites -> exact items ---- */
   // An invite card the client rendered above the message wins over the
@@ -249,8 +260,11 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
       const eastern = !invite.tz || EASTERN_TZ.test(invite.tz);
       const cancelled = /^(canceled|cancelled)\b/i.test(subject);
       const coopSender = isCoopSender(msg);
+      // An interview invite needs the word itself — a co-op sender alone
+      // doesn't make every meeting invite an interview.
       const interview =
-        /interview/i.test(subject) || /interview/i.test(body.slice(0, 1000)) || coopSender;
+        INTERVIEW_WORD_RE.test(subject) || INTERVIEW_WORD_RE.test(invite.title || "") ||
+        INTERVIEW_WORD_RE.test(body.slice(0, 1000));
       const title = (invite.title || cleanSubject(subject)).slice(0, 100);
       // Same meeting seen through many mails (Invitation, update, reminder,
       // forward, Canceled event) collapses to one id; a cancellation lands as
@@ -295,10 +309,12 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
 
   /* ---- 2. important mail -> Review items ---- */
   const kwRe = keywordRe(settings.keywords);
-  // A non-bulk human sender qualifies on its own. Ungated bulk passes ONLY
-  // through the narrow exception below (event noun or confirmation phrase
-  // in the same sentence as an explicit calendar date, at most 2 items).
-  const ungatedBulk = !gate.ok && isBulk(msg);
+  // A non-bulk human sender qualifies on its own. Ungated bulk AND
+  // broadcast mail (list-tagged, big recipient sets, not addressed to me)
+  // pass ONLY through the narrow exception below (event noun or
+  // confirmation phrase in the same sentence as an explicit calendar date,
+  // at most 2 items).
+  const ungatedBulk = !gate.ok && (isBulk(msg) || isBroadcast(msg));
 
   // Quoted history ("On … wrote:", "From: … Sent:") is never date-worthy —
   // previews carry it inline, bodies carry it as header lines.
@@ -358,12 +374,17 @@ export function itemsFromMessage(msg, { provider = "gmail", now, termCode, textD
   const items = [];
   for (const { h, sentence, kw } of good) {
     const rule = mailType(sentence);
-    // A meeting from a co-op/employer sender, or about an interview/screen,
-    // is an interview.
+    // A meeting typed by an interview/screen word in the SAME sentence is
+    // an interview — a co-op sender or the subject alone doesn't promote.
     const type =
-      rule.type === "meeting" && (gate.coop || /interview|screen/i.test(subject))
+      rule.type === "meeting" && INTERVIEW_WORD_RE.test(sentence)
         ? "interview"
         : rule.type;
+    // A meeting needs a clock time or an explicit meeting/call/chat noun in
+    // the sentence — a bare all-day range ("Sep 22–26", a window, a schedule
+    // banner) that only matched "availability"/"reschedule" is never one. A
+    // timed hit carries its own clock time.
+    if (type === "meeting" && h.allDay && !MEETING_PROOF_RE.test(sentence)) continue;
     const isDeadline = DEADLINE_TYPES.has(type);
     const iso = isDeadline ? (h.allDay ? dueEndOfDay(h.startAt) : h.startAt) : h.startAt;
     const id = `${provider}:mail:${msg.key}:${iso}`;
@@ -471,19 +492,25 @@ const RSVP_WORD_RE =
 const DOC_ASK_RE = /\bplease (?:submit|upload|sign|complete and return|return)\b/i;
 const DOC_NOUN_RE =
   /\b(?:form|document|transcript|r[eé]sum[eé]s?|\bcv\b|contract|waiver|agreement|timesheet|paperwork|certificate)\b/i;
-/** Fees/tuition/payment-due wording — Waterloo senders only. */
-const FEE_RE =
-  /\b(?:tuition|fees?|amount due|payment due|balance due|invoices?|statement of account|account balance|pay your)\b/i;
+/** An explicit pay ask — Waterloo senders only. "Fees due" notices count;
+ * mere fee/tuition vocabulary does not. */
+const PAY_ASK_RE =
+  /\bpay (?:your |the )?(?:fees?|tuition|balance)\b|\b(?:fees?|tuition|payment|balance)\s+(?:is|are)\s+(?:now\s+)?due\b|\bamount (?:due|owing)\b|\bbalance owing\b|\boutstanding balance\b/i;
+/** Money flowing the other way is never a pay to-do. */
+const PAY_EXCLUDE_RE =
+  /\brefund(?:s|ed|able|ing)?\b|\bcredits?\b|applied to your (?:student )?account|\bbursar(?:y|ies)\b|\bscholarships?\b|\bawards?\b/i;
 /** Receipts are never to-dos. */
 const RECEIPT_RE =
-  /\b(?:payment (?:received|processed|confirmed|successful)|receipt|order (?:confirmed|shipped|number)|refund (?:issued|processed)|paid in full)\b/i;
-/** Ranking windows ("rank your matches by …") from co-op senders. */
-const RANK_RE = /\brank(?:ing|ings)?\b/i;
-const DUE_CUE_RE = /\b(?:by|before|no later than|deadline|due|clos(?:e|es|ing))\b/i;
-/** "apply by …", "applications close …", "submit your application". */
-const APPLY_ASK_RE =
-  /\bapply\b[^.!?\n]{0,30}\b(?:by|before|no later than|deadline)\b|\bapplications?\b[^.!?\n]{0,25}\b(?:due|clos(?:e|es|ing)|deadline)\b|\bsubmit (?:your |an |the )?application\b/i;
+  /\b(?:payment (?:received|processed|confirmed|successful)|receipt|order (?:confirmed|shipped|number)|paid in full)\b/i;
 const UW_DOMAIN_RE = /@(?:[a-z0-9-]+\.)*uwaterloo\.ca$/i;
+/** An interview word in the sentence promotes a meeting to an interview. */
+const INTERVIEW_WORD_RE = /\binterviews?\b|\bscreens?\b|\bscreenings?\b|\bhirevue\b/i;
+/** A meeting needs a clock time or a real meeting/call/chat noun — a bare
+ * date range or a "window/period" banner is never a meeting. */
+const MEETING_PROOF_RE =
+  /\b\d{1,2}\s*:\s*\d{2}\b|\b\d{1,2}\s*(?:a\.?\s?m\.?|p\.?\s?m\.?)\b|\b(?:noon|midday|midnight)\b|\b(?:meetings?|calls?|chats?|catch ?ups?|syncs?|appointments?|coffee chats?|phone calls?|one[- ]on[- ]ones?|1:1s?)\b/i;
+/** Sender addresses the task machinery can't meaningfully reply to. */
+const NO_REPLY_LOCAL_RE = /^(no-?reply|do-?not-?reply|donotreply)@/i;
 
 /**
  * A hard due inside one sentence: a textdates hit preceded by
@@ -511,7 +538,10 @@ function askOf(m, { now, termCode, td }) {
   const ref = m.receivedAt ? new Date(m.receivedAt) : now;
   const text = unquoted(`${m.subject || ""}\n${m.body || m.preview || ""}`);
   for (const s of sentencesOf(text)) {
-    if (!REPLY_RE.test(s) && !(s.endsWith("?") && /\byou(r)?\b/i.test(s))) continue;
+    // Explicit ask phrases only — a bare "?"-sentence addressed to "you" is
+    // newsletter rhetoric, not a to-do. Politeness boilerplate in the same
+    // sentence ("let me know if you have any questions") voids an ask.
+    if (!REPLY_RE.test(s) || PLEASANTRY_RE.test(s)) continue;
     /** @type {string|undefined} */
     let dueAt;
     for (const h of td(s, { now: ref, termCode })) {
@@ -573,16 +603,45 @@ export function taskItems(prod, frame, prev, opts) {
       invited,
       gate: senderGate(p.m, { courses, settings, applications }),
       bulk: isBulk(p.m),
+      broadcast: isBroadcast(p.m),
     };
   });
-  /** My own mail, invite-producing mail, blocked senders, preset-excluded
-   * senders and ungated bulk can't make tasks. */
+  /** My own mail, invite-producing mail, Learn/D2L notification senders,
+   * blocked senders and preset-excluded senders can't make tasks — the
+   * baseline every action shares. */
   const canTask = (r) =>
     !r.m.fromMe &&
     !r.invited &&
     !r.gate.blocked &&
     !(settings.onlyCourseCoop && !r.gate.ok) &&
-    (r.gate.ok || !r.bulk);
+    !/learn|d2l/i.test(String(r.m.fromEmail || "").toLowerCase());
+  /** To-dos are fresh asks only: received within the last 7 days. A row
+   * without a receivedAt can't be proven stale — same "unknown" stance as
+   * the broadcast flag. */
+  const FRESH_MS = 7 * 24 * 3600e3;
+  const fresh = (r) => {
+    const t = Date.parse(r.m.receivedAt || "") || 0;
+    return t <= 0 || now.getTime() - t <= FRESH_MS;
+  };
+  /** A to-do is never minted with a due already in the past. */
+  const dueOk = (dueAt) => !(dueAt && Date.parse(dueAt) < now.getTime());
+  const mail = (r) => String(r.m.fromEmail || "").toLowerCase();
+  // Reply-needed: a person wrote to me with an explicit ask — never bulk,
+  // never broadcast, never a no-reply address.
+  const replyOk = (r) =>
+    canTask(r) && fresh(r) && !r.bulk && !r.broadcast && !NO_REPLY_LOCAL_RE.test(mail(r));
+  // Offer/form/document/rsvp to-dos need the real sender gate plus a
+  // non-bulk, non-broadcast message — co-op senders keep the broadcast
+  // exception (CECA/WaterlooWorks notices are mailed to a list).
+  const derivedOk = (r) =>
+    canTask(r) &&
+    fresh(r) &&
+    !r.bulk &&
+    r.gate.ok &&
+    (!r.broadcast || r.gate.coop || isCoopSender(r.m));
+  // Pay: Waterloo finance notices are legitimately broadcast — only bulk
+  // disqualifies. The explicit ask is checked where the task is minted.
+  const payOk = (r) => canTask(r) && fresh(r) && !r.bulk && UW_DOMAIN_RE.test(mail(r));
   const rev = (r) => (r.gate.ok ? "auto" : "pending");
   /** Derived to-dos minted this pass: message key -> action set (cap 2). */
   const minted = new Map();
@@ -643,9 +702,18 @@ export function taskItems(prod, frame, prev, opts) {
     },
     seenIn: seenEntry(rec.id, key),
   });
+  /** A display name for titles: never an email address. */
+  const displayFrom = (m) => {
+    const n = String(m.from || "")
+      .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, " ")
+      .replace(/[<>()"']/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    return n || "the sender";
+  };
   /** @param {Msg} m */
   const replyTitle = (m) =>
-    `Reply to ${m.from || "the sender"}: ${cleanSubject(m.subject)}`.slice(0, 100);
+    `Reply to ${displayFrom(m)}: ${cleanSubject(m.subject)}`.slice(0, 100);
 
   /* ---- thread views: the ask, then whether an answer came after ----
    * Backfill threads carry per-message `parts`, expanded into rows by the
@@ -669,7 +737,7 @@ export function taskItems(prod, frame, prev, opts) {
       let ask = null;
       for (let i = 0; i < rs.length; i++) {
         const r = rs[i];
-        if (!canTask(r)) continue;
+        if (!replyOk(r)) continue;
         const a = askOf(r.m, { now, termCode, td });
         if (a) {
           askI = i;
@@ -680,6 +748,10 @@ export function taskItems(prod, frame, prev, opts) {
       if (ask && askRow) {
         const askedAt = askRow.m.receivedAt || at;
         const dueAt = ask.dueAt || taskDue(askedAt);
+        // A STATED due already past is not a to-do. An undated ask keeps its
+        // synthetic +2d due even when it's slipped — the ask is still open
+        // (freshness already bounds how old the ask can be).
+        if (ask.dueAt && !dueOk(ask.dueAt) && !replies[key]) continue;
         // A from-me message after the ask (by receivedAt when both have one,
         // else by DOM order) completes the reply.
         /** @type {string|undefined} */
@@ -782,37 +854,39 @@ export function taskItems(prod, frame, prev, opts) {
   /* ---- book-a-call: wording or a booking link on an eligible message ---- */
   if (frame.allowed) {
     for (const r of rows) {
-      if (!canTask(r)) continue;
+      if (!canTask(r) || !fresh(r)) continue;
       const trig = bookingOf(r.m);
       if (!trig) continue;
       const key = String(r.m.key);
       const existing = bookings[key];
       if (existing && existing.status === "done") continue; // never reopen
+      const email = mail(r);
+      // book-interview is for co-op/WaterlooWorks senders, the
+      // application-employer gate, ATS senders, or slot/interview wording —
+      // the wording path additionally needs a non-broadcast message (a
+      // "book a meeting through your dashboard" line in a newsletter is
+      // nothing). A generic "book a call" is a to-do only from a person:
+      // non-broadcast and non-bulk.
+      const employerish =
+        r.gate.coop || r.gate.employer || isCoopSender(r.m) || ATS_RE.test(email);
+      const slotInterview =
+        trig.slot ||
+        INTERVIEW_WORD_RE.test(`${r.m.subject || ""}\n${trig.sentence || ""}`);
+      const interviewish = employerish || (!r.broadcast && slotInterview);
+      if (!interviewish && (r.broadcast || r.bulk)) continue;
       const bookRef = r.m.receivedAt ? new Date(r.m.receivedAt) : now;
       const bookDue = trig.sentence
         ? statedDue(trig.sentence, { now: bookRef, termCode, td })
         : undefined;
       const dueAt = bookDue || taskDue(r.m.receivedAt || at);
+      if (bookDue && !dueOk(bookDue)) continue; // a stated due in the past
       const employer = r.gate.employer || employerOf(r.m.fromEmail, r.m.from);
-      // Interview-flavoured bookings (co-op/employer senders, slot wording,
-      // interview vocabulary) are "book-interview"; any other booking link
-      // is a generic "other" to-do.
-      const email = String(r.m.fromEmail || "").toLowerCase();
-      const interviewish =
-        trig.slot ||
-        r.gate.coop ||
-        r.gate.employer ||
-        isCoopSender(r.m) ||
-        ATS_RE.test(email) ||
-        /\binterviews?|screens?|hirevue\b/i.test(
-          `${r.m.subject || ""}\n${trig.sentence || ""}`,
-        );
       const action = interviewish ? "book-interview" : "other";
       const rec = {
         id: `${provider}:book:${key}`,
         title: trig.slot
           ? `Select interview time slot${employer ? ` — ${employer}` : ""}`
-          : `Book a call with ${r.m.from || "the sender"}`,
+          : `Book a call with ${displayFrom(r.m)}`,
         dueAt,
         url: trig.link || r.m.url,
         senderHash: hashString(String(r.m.fromEmail || "").toLowerCase()),
@@ -856,22 +930,18 @@ export function taskItems(prod, frame, prev, opts) {
     }
   }
 
-  /* ---- derived to-dos: offer / form / document / pay / rankings / apply ----
+  /* ---- derived to-dos: offer / form / document / pay ----
    * Stricter than the reply gate: the sender must pass senderGate (or be
-   * allow-listed), and bulk/newsletter senders additionally need the strong
-   * gate (co-op, Learn or uwaterloo.ca). At most 2 to-dos per message across
-   * all actions, counting the reply/book tasks already minted. */
+   * allow-listed) and the message must be non-bulk and non-broadcast —
+   * except co-op senders for respond-offer/book-interview (their notices
+   * are list mail), and Waterloo finance senders for pay. At most 2 to-dos
+   * per message across all actions, counting reply/book tasks. */
   if (frame.allowed) {
     for (const r of rows) {
-      if (!canTask(r)) continue;
-      const email = String(r.m.fromEmail || "").toLowerCase();
-      const uw = UW_DOMAIN_RE.test(email);
-      const learn = /learn|d2l/i.test(email);
-      // New detections need the gate — uwaterloo.ca and Learn senders count
-      // as gated on their own (fees@, learn@ aren't otherwise gated).
-      if (!(r.gate.ok || uw || learn)) continue;
-      // Bulk/newsletter senders additionally need the strong gate.
-      if (r.bulk && !(r.gate.coop || learn || uw)) continue;
+      const email = mail(r);
+      const gated = derivedOk(r);
+      const payAble = payOk(r);
+      if (!gated && !payAble) continue;
       const key = String(r.m.key);
       const acted = mintedSet(key);
       if (acted.size >= 2) continue;
@@ -881,16 +951,16 @@ export function taskItems(prod, frame, prev, opts) {
       const employer = r.gate.employer || employerOf(r.m.fromEmail, r.m.from);
       const employerish = r.gate.coop || r.gate.employer || ATS_RE.test(email);
       const subj = cleanSubject(r.m.subject);
-      /** @type {{action: string, title: string, sentence: string, url?: string}[]} */
+      /** @type {{action: string, title: string, sentence: string, url?: string, pay?: boolean}[]} */
       const cands = [];
 
       // An offer from a co-op/employer sender.
-      if (employerish) {
+      if (gated && employerish) {
         const s = sentences.find((x) => OFFER_RE.test(x) || OFFER_ACCEPT_RE.test(x));
         if (s) {
           cands.push({
             action: "respond-offer",
-            title: `Respond to offer — ${employer || r.m.from || "the sender"}`,
+            title: `Respond to offer — ${employer || displayFrom(r.m)}`,
             sentence: s,
           });
         }
@@ -898,12 +968,14 @@ export function taskItems(prod, frame, prev, opts) {
 
       // A form link plus an ask. Calendly in interview/employer context
       // stays a book-interview task (the book block handles it).
-      const formLink = (r.m.links || []).find((l) => FORM_LINK_RE.test(l));
+      const formLink = gated
+        ? (r.m.links || []).find((l) => FORM_LINK_RE.test(l))
+        : undefined;
       const calendlyBook =
         !!formLink &&
         CALENDLY_RE.test(formLink) &&
         (employerish ||
-          /\binterviews?|screens?|hirevue\b/i.test(text) ||
+          INTERVIEW_WORD_RE.test(text) ||
           sentences.some((x) => SLOT_RE.test(x)));
       if (formLink && !calendlyBook) {
         const ask = sentences.find((x) => FORM_ASK_RE.test(x));
@@ -920,30 +992,19 @@ export function taskItems(prod, frame, prev, opts) {
 
       // "please submit / upload / sign / complete and return" + a document
       // noun, without a form link to do it in.
-      if (!formLink) {
+      if (gated && !formLink) {
         const s = sentences.find((x) => DOC_ASK_RE.test(x));
         if (s && DOC_NOUN_RE.test(text)) {
           cands.push({ action: "submit-document", title: `Submit document: ${subj}`, sentence: s });
         }
       }
 
-      // Fees/tuition — Waterloo accounts only, and never a receipt.
-      if (uw && !RECEIPT_RE.test(text)) {
-        const s = sentences.find((x) => FEE_RE.test(x));
-        if (s) cands.push({ action: "pay", title: `Pay: ${subj}`, sentence: s });
+      // Fees/tuition — Waterloo accounts only, an explicit pay ask, and
+      // never a receipt or money coming the other way.
+      if (payAble && !RECEIPT_RE.test(text) && !PAY_EXCLUDE_RE.test(text)) {
+        const s = sentences.find((x) => PAY_ASK_RE.test(x));
+        if (s) cands.push({ action: "pay", title: `Pay: ${subj}`, sentence: s, pay: true });
       }
-
-      // Ranking windows from co-op/Waterloo senders.
-      if (employerish || uw) {
-        const s = sentences.find((x) => RANK_RE.test(x) && DUE_CUE_RE.test(x));
-        if (s) {
-          cands.push({ action: "submit-rankings", title: `Submit rankings: ${subj}`, sentence: s });
-        }
-      }
-
-      // Application asks ("apply by …", "submit your application").
-      const ap = sentences.find((x) => APPLY_ASK_RE.test(x));
-      if (ap) cands.push({ action: "apply", title: `Apply: ${subj}`, sentence: ap });
 
       // A stated due anywhere in the message supplies the due (the offer is
       // in one sentence, its "accept by <date>" often in the next).
@@ -953,11 +1014,15 @@ export function taskItems(prod, frame, prev, opts) {
       for (const c of cands) {
         if (acted.size >= 2) break; // two to-dos per message, ever
         if (acted.has(c.action)) continue;
-        acted.add(c.action);
+        if (c.pay ? !payAble : !gated) continue;
         const due =
           statedDue(c.sentence, { now: ref, termCode, td }) || anyDue;
+        // A stated due in the past → no to-do. An undated ask keeps the
+        // synthetic +2d due (meta.undated marks it as not a real deadline).
         const dueAt = due || taskDue(r.m.receivedAt || at);
-        const auto = r.gate.coop || r.gate.course || learn || uw;
+        if (due && !dueOk(due)) continue;
+        acted.add(c.action);
+        const auto = r.gate.coop || r.gate.course || UW_DOMAIN_RE.test(email);
         const id = `${provider}:task:${c.action}:${key}`;
         items.push(/** @type {Item} */ ({
           id,

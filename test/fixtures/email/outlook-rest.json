@@ -11,6 +11,7 @@
       "Subject": "Interview: Firmware Co-op",
       "BodyPreview": "You have been selected for an interview. Select your time slot by Friday.",
       "WebLink": "https://outlook.office365.com/owa/?ItemID=AAMkFakeItemIdOneAAA%3D&exvsurl=1&viewmodel=ReadMessageItem",
+      "ToRecipients": [{ "EmailAddress": { "Name": "Me", "Address": "me@uwaterloo.ca" } }],
       "From": { "EmailAddress": { "Name": "Talent Team", "Address": "recruiting@acme.example.com" } }
     },
     {
@@ -19,8 +20,10 @@
       "ReceivedDateTime": "2026-09-29T18:00:00Z",
       "IsRead": true,
       "Subject": "Lab sections",
-      "BodyPreview": "Can everyone make the lab meeting this week?",
+      "BodyPreview": "Can everyone make the lab meeting Thursday?",
       "WebLink": "https://outlook.office365.com/owa/?ItemID=AAMkFakeItemIdTwoAAA%3D&exvsurl=1&viewmodel=ReadMessageItem",
+      "ToRecipients": [{ "EmailAddress": { "Name": "Me", "Address": "me@uwaterloo.ca" } }],
+      "CcRecipients": [],
       "From": { "EmailAddress": { "Name": "Jane Smith", "Address": "jsmith@uwaterloo.ca" } }
     }
   ]
