@@ -263,6 +263,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* --------------------------------- shots ----------------------------------- */
 
 async function shots() {
+  // WA1_ONLY=<shot name> restricts the run to one shot for a quick re-take.
+  const list = SHOTS.filter((s) => !process.env.WA1_ONLY || s.name === process.env.WA1_ONLY);
+  if (!list.length) {
+    console.error(`no shot named "${process.env.WA1_ONLY}" in the ${SHOT_DIR} set`);
+    process.exit(2);
+  }
   await mkdir(OUT, { recursive: true });
   const server = serve();
   await new Promise((r) => server.listen(PORT, HOST, r));
@@ -295,7 +301,7 @@ async function shots() {
     await cdp.send("Runtime.enable");
     await cdp.send("Log.enable");
 
-    for (const s of SHOTS) {
+    for (const s of list) {
       const [w, h] = s.size;
       await cdp.send("Emulation.setDeviceMetricsOverride", {
         width: w,
@@ -358,7 +364,7 @@ async function shots() {
     }
     await writeFile(
       path.join(OUT, "manifest.json"),
-      JSON.stringify({ takenAt: new Date().toISOString(), shots: SHOTS }, null, 2)
+      JSON.stringify({ takenAt: new Date().toISOString(), shots: list }, null, 2)
     );
     cdp.close();
     // Politely shut the whole headless browser down — msedge.exe is a stub
