@@ -7,6 +7,7 @@ import { useState } from "preact/hooks";
 import { checklistFor } from "../../../sources/probes.js";
 import { adapterForSource, stageForAdapter } from "../../../core/registry.js";
 import { fmtAgo } from "../../model/agenda.js";
+import { lastGoodRead } from "../../model/onboarding.js";
 import { IS_PREVIEW, send } from "../../data.js";
 import { UI } from "../../../core/messages.js";
 import { inventoryReport } from "../../../sources/discord/index.js";
@@ -27,20 +28,6 @@ import {
 const DAY_MS = 86400000;
 const RECENT_READS = 8;
 
-/**
- * Probe page keys that differ from row.id — mirrors PAGE_ALIAS in
- * sources/probes.js (W1's canonical map lives there).
- * @type {Record<string, Record<string, string>>}
- */
-const PROBE_PAGE = {
-  waterlooworks: { "application-detail": "applications" },
-  discord: {
-    timestamp: "channel",
-    events: "events-modal",
-    "event-detail": "events-modal",
-  },
-};
-
 /** Item sources that also count for the Outlook segment. */
 const EMAIL_SOURCES = ["outlook", "gmail"];
 
@@ -53,33 +40,29 @@ const sourceIdsFor = (sourceId) =>
   sourceId === "outlook" ? EMAIL_SOURCES : [sourceId];
 
 /**
- * A checklist row's last good read: the probe `at` for probe rows, else the
- * scope's scopeOkAt entry in sourceState.
- * @param {string} sourceId @param {any} row @param {any} probes @param {any} st
+ * A checklist row's last good read — W1's shared chain (probe ok at →
+ * stat.scope → row.id → "sync", over scopeOkAt AND scopeReadAt). The meta id
+ * drives the probe lookup while `st` is the segment adapter's sourceState
+ * (gmail rows share the outlook adapter's scope maps).
+ * @param {any} state @param {string} sourceId @param {any} row @param {any} st
  */
-function rowLastOkAt(sourceId, row, probes, st) {
-  const pageKey =
-    row.page || (PROBE_PAGE[sourceId] && PROBE_PAGE[sourceId][row.id]) || row.id;
-  const probeAt =
-    probes[sourceId] && probes[sourceId][pageKey] && probes[sourceId][pageKey].at;
-  if (probeAt) return probeAt;
-  const scopeOkAt = (st && st.scopeOkAt) || {};
-  if (row.stat && row.stat.scope && scopeOkAt[row.stat.scope]) {
-    return scopeOkAt[row.stat.scope];
-  }
-  if (scopeOkAt[row.id]) return scopeOkAt[row.id];
-  return row.stat && row.stat.kind === "sync" ? scopeOkAt["sync"] || null : null;
+function rowLastOkAt(state, sourceId, row, st) {
+  return lastGoodRead(
+    { ...state, sourceState: { [sourceId]: st } },
+    sourceId,
+    row
+  );
 }
 
 /**
  * A checklist row's "last checked N days ago" warning: only when refreshDays
  * is set and the last good read is older than that.
- * @param {string} sourceId @param {any} row @param {any} probes @param {any} st
+ * @param {any} state @param {string} sourceId @param {any} row @param {any} st
  * @param {Date} now
  */
-function rowStaleText(sourceId, row, probes, st, now) {
+function rowStaleText(state, sourceId, row, st, now) {
   if (!row.refreshDays) return null;
-  const at = rowLastOkAt(sourceId, row, probes, st);
+  const at = rowLastOkAt(state, sourceId, row, st);
   if (!at) return null;
   const atMs = Date.parse(at);
   if (Number.isNaN(atMs)) return null;
@@ -112,7 +95,7 @@ export function Check({ sourceId, state, actions, now }) {
   const rowExtra = (metaId) => (r) => {
     const row = r && r.row;
     if (!row) return null;
-    const stale = rowStaleText(metaId, row, probes, st, now);
+    const stale = rowStaleText(state, metaId, row, st, now);
     if (!row.url && !stale) return null;
     return (
       <>

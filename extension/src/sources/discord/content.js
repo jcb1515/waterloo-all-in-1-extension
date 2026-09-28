@@ -24,6 +24,13 @@ import { hashString } from "../../capture/redact.js";
   // /login, etc. and navigates client-side. The observer stays up and
   // tick() bails whenever readLocation sees a non-/channels/ URL.
   const THROTTLE_MS = 3000;
+  /** A read counts as "settled" once the document finished loading and at
+   * least 3 s have passed since navigation start — React's first paint has
+   * landed by then, so a settled extract reflects the real channel/events
+   * state rather than a half-rendered frame. */
+  const SETTLE_MS = 3000;
+  const settled = () =>
+    document.readyState === "complete" && performance.now() >= SETTLE_MS;
   const SEEN_CAP = 2000;
   /** @type {string|null} */
   let lastInventoryHash = null;
@@ -62,7 +69,13 @@ import { hashString } from "../../capture/redact.js";
       // "Event Info" tab). TODO(events): markup is best-guess, see dom.js.
       const ev = eventsModalExtract(document, location.href);
       if (ev) {
-        const evHash = hashString(JSON.stringify(ev.cards));
+        ev.settled = settled();
+        // settled flips the hash once (false -> true), re-sending the same
+        // extract so the adapter can mark the read complete; dedupe then
+        // suppresses further repeats.
+        const evHash = hashString(
+          JSON.stringify([ev.cards, ev.settled])
+        );
         if (evHash !== lastEventsHash) {
           lastEventsHash = evHash;
           send(ev);
@@ -77,7 +90,10 @@ import { hashString } from "../../capture/redact.js";
 
       // Guild page: inventory (guild rail + channel sidebar) when changed.
       const inv = inventoryExtract(document, location.href);
-      const invHash = hashString(JSON.stringify([inv.guilds, inv.channels]));
+      inv.settled = settled();
+      const invHash = hashString(
+        JSON.stringify([inv.guilds, inv.channels, inv.settled])
+      );
       if (invHash !== lastInventoryHash) {
         lastInventoryHash = invHash;
         send(inv);

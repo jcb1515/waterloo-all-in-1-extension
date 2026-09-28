@@ -8,6 +8,7 @@ import {
   defaultChecklist,
   checklistFor,
   appLastAt,
+  coopEvents,
 } from "../../extension/src/panel/model/coop.js";
 
 const NOW = new Date("2026-10-05T16:00:00.000Z");
@@ -170,6 +171,54 @@ test("checklistFor prefers saved subtasks and normalises string lists", () => {
     { text: "x", done: true },
   ]);
   assert.equal(checklistFor(item, {}).length, 3);
+});
+
+test("coopEvents splits pending vs registered, hides dismissed/cancelled/past", () => {
+  const ev = (id, over = {}) => ({
+    id,
+    type: "event",
+    title: `Event ${id}`,
+    status: "open",
+    review: "pending",
+    source: "waterlooworks",
+    startAt: "2026-10-06T15:00:00Z",
+    meta: {},
+    ...over,
+  });
+  const items = {
+    pending: ev("pending"),
+    registeredBadge: ev("registeredBadge", {
+      review: "auto",
+      meta: { registered: true },
+      startAt: "2026-10-07T15:00:00Z",
+    }),
+    waitlisted: ev("waitlisted", {
+      meta: { registered: false, waitlisted: true },
+      startAt: "2026-10-08T15:00:00Z",
+    }),
+    cancelled: ev("cancelled", { status: "cancelled" }),
+    past: ev("past", { startAt: "2026-10-01T15:00:00Z" }),
+    otherSource: { ...ev("otherSource"), source: "gcal" },
+    notEvent: { ...ev("notEvent"), type: "interview" },
+  };
+  const userState = {
+    accepted: { review: "accepted" },
+    dismissed: { review: "dismissed" },
+  };
+  items.accepted = ev("accepted", { startAt: "2026-10-09T15:00:00Z" });
+  items.dismissed = ev("dismissed");
+
+  const { pending, registered } = coopEvents(items, userState, NOW);
+  assert.deepEqual(
+    pending.map((i) => i.id),
+    ["pending", "waitlisted"],
+    "pending + waitlisted stay actionable"
+  );
+  assert.deepEqual(
+    registered.map((i) => i.id),
+    ["registeredBadge", "accepted"],
+    "registered badge + user-accepted sort by start"
+  );
 });
 
 test("appLastAt reads the last history entry", () => {

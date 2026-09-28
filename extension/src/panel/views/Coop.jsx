@@ -9,6 +9,7 @@ import {
   prepOf,
   checklistFor,
   appLastAt,
+  coopEvents,
   GROUP_TONE,
 } from "../model/coop.js";
 import { STATUS_LABEL } from "../../sources/waterlooworks/status.js";
@@ -106,6 +107,47 @@ function PrepCard({ item, state, actions, now, open, onToggle }) {
   );
 }
 
+/* --------------------------------- events --------------------------------- */
+
+/** A WaterlooWorks dashboard event — pending rows take the Review verdicts. */
+function EventRow({ item, state, actions, pending }) {
+  return (
+    <div class="event-row">
+      <div class="event-main">
+        <strong>{item.title}</strong>
+        <span class="event-sub tabular">
+          {item.startAt ? fmtDay(item.startAt) : ""}
+          {item.endAt ? ` · ${fmtRange(item.startAt, item.endAt)}` : ""}
+          {item.location ? ` · ${item.location}` : ""}
+        </span>
+      </div>
+      {item.org ? (
+        <span class="chip chip-org" style={orgStyle(item.org, state.projects)}>{item.org}</span>
+      ) : null}
+      {pending ? (
+        <span class="event-acts">
+          <button
+            type="button"
+            class="btn btn-sm"
+            onClick={() => actions.setUserState(item.id, { review: "accepted" })}
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            onClick={() => actions.setUserState(item.id, { review: "dismissed" })}
+          >
+            Dismiss
+          </button>
+        </span>
+      ) : (
+        <span class="badge badge-ok">Registered</span>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------ applications ------------------------------ */
 
 function AppCard({ app, state, actions, now }) {
@@ -186,6 +228,10 @@ export function Coop({ state, actions, now }) {
     [state.items, state.userState, state.settings, now]
   );
   const interviews = soon.filter((it) => it.type === "interview");
+  const events = useMemo(
+    () => coopEvents(state.items, state.userState, now),
+    [state.items, state.userState, now]
+  );
   const groups = useMemo(() => groupApplications(state.applications), [state.applications]);
   const shown = (groups.find((g) => g.key === group) || groups[0]).apps;
 
@@ -229,6 +275,32 @@ export function Coop({ state, actions, now }) {
               onToggle={() => setOpenPrep((cur) => (cur === it.id ? null : it.id))}
             />
           ))}
+        </section>
+      ) : null}
+
+      {events.pending.length || events.registered.length ? (
+        <section class="agenda-group">
+          <h3 class="coop-h">Events</h3>
+          <div class="card row-card" role="list">
+            {events.pending.map((it) => (
+              <EventRow
+                key={it.id}
+                item={it}
+                state={state}
+                actions={actions}
+                pending={true}
+              />
+            ))}
+            {events.registered.map((it) => (
+              <EventRow
+                key={it.id}
+                item={it}
+                state={state}
+                actions={actions}
+                pending={false}
+              />
+            ))}
+          </div>
         </section>
       ) : null}
 

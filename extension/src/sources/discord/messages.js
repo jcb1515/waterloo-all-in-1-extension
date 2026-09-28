@@ -48,8 +48,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const TITLE_MAX = 100;
 const SNIPPET_MAX = 300;
 const MIN_CONFIDENCE = 0.6;
-/** Task without a date -> follow up a week later. */
-const UNDATED_TASK_MS = 7 * DAY_MS;
+/** Assigned task without a date -> follow up 2 days later at 17:00 Toronto. */
+const UNDATED_TASK_DAYS = 2;
+const UNDATED_TASK_HOUR = 17;
+/**
+ * Hand-in cue + document noun on an assigned task -> "submit-document";
+ * every other assigned task is "other".
+ */
+const HAND_IN_RE = /\b(submit|upload|hand\s*in|turn\s*in|send)\b/i;
+const DOC_NOUN_RE =
+  /\b(reports?|docs?|documents?|slides?|decks?|files?|pdfs?|write-?ups?|resumes?|posters?)\b/i;
 /** Message types we read: 0 default, 19 reply. */
 const READABLE_TYPES = new Set([0, 19]);
 
@@ -276,7 +284,7 @@ export function domMessageToRest(dom, channelId) {
 
 /**
  * Message -> candidate Items. One item per message, anchored on its first
- * usable date hit; undated assigned tasks get a +7d follow-up.
+ * usable date hit; undated assigned tasks get a +2d 17:00 Toronto follow-up.
  * @param {any} msg  normalised REST message (or domMessageToRest output)
  * @param {object} o
  * @param {(text: string, opts: {now: Date, termCode?: number, tz?: string}) => any[]} o.extractDates
@@ -386,11 +394,16 @@ export function candidatesForMessage(msg, o) {
   const messageId = String(msg?.id || "");
   if (!channelId || !messageId) return [];
 
-  // Undated task: one follow-up item a week out.
+  // Undated task: one follow-up item, message day + 2 at 17:00 Toronto.
   const undated = !hit;
   if (undated && kind !== "task") return [];
   const anchorIso = undated
-    ? new Date(msgDate.getTime() + UNDATED_TASK_MS).toISOString()
+    ? (() => {
+        const p = zonedParts(
+          new Date(msgDate.getTime() + UNDATED_TASK_DAYS * DAY_MS)
+        );
+        return zonedIso(p.y, p.m, p.d, UNDATED_TASK_HOUR, 0);
+      })()
     : hit.startAt;
   const key = `${channelId}:${messageId}:${undated ? "undated" : anchorIso}`;
 
@@ -458,6 +471,14 @@ export function candidatesForMessage(msg, o) {
       messageId,
       assignedToMe,
       trigger,
+      // Shared task seam: assigned tasks get an action; deadlines/meetings/
+      // events never do (an unassigned announcement is just a date).
+      action:
+        kind === "task"
+          ? HAND_IN_RE.test(text) && DOC_NOUN_RE.test(text)
+            ? "submit-document"
+            : "other"
+          : undefined,
       via: o.via === "dom" ? "dom" : "rest",
       undated: undated || undefined,
       weekdayMismatch: hit?.weekdayMismatch || undefined,
@@ -473,14 +494,15 @@ export function candidatesForMessage(msg, o) {
         ["Channel", o.channelName ? `#${o.channelName}` : undefined],
         ["Assigned to you", assignedToMe ? "Yes" : undefined],
         undated
-          ? ["Due", "No date given (follow-up in 7 days)"]
+          ? ["Due", "No date given (follow-up in 2 days)"]
           : undefined,
       ]),
     },
   };
   if (undated) {
     item.dueAt = anchorIso;
-    item.details = "No due date in the message; default follow-up in 7 days.";
+    item.details =
+      "No due date in the message; default follow-up 2 days later at 5 PM.";
   } else if (hit.allDay && !timed) {
     item.startAt = hit.startAt;
     item.allDay = true;
@@ -592,6 +614,7 @@ export function replyCandidate(msg, o) {
     evidence: { snippet, url, method: "text" },
     details: snippet || undefined,
     meta: {
+      action: "reply",
       reply: { channelId, messageId, askedAt },
       guildId,
       channelId,

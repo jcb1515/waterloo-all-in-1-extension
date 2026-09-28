@@ -136,6 +136,42 @@ export function groupApplications(applications) {
   }));
 }
 
+/* ------------------------------ WW events --------------------------------- */
+
+/**
+ * WaterlooWorks dashboard events for the Events section: pending ones the
+ * user can Add (accept) or Dismiss, then confirmed (registered or
+ * user-accepted) ones. Cancelled, dismissed and past events stay out;
+ * within each bucket events sort by start.
+ * @param {Record<string, any>} items
+ * @param {Record<string, any>} userState
+ * @param {Date} now
+ * @returns {{pending: any[], registered: any[]}}
+ */
+export function coopEvents(items, userState = {}, now = new Date()) {
+  const pending = [];
+  const registered = [];
+  const floor = now.getTime() - DAY; // today still counts
+  for (const raw of Object.values(items || {})) {
+    if (!raw || raw.source !== "waterlooworks" || raw.type !== "event") continue;
+    if (raw.status === "cancelled") continue;
+    const us = (userState || {})[raw.id] || {};
+    if (us.review === "dismissed") continue;
+    const ms = Date.parse(raw.startAt || raw.dueAt || "");
+    if (Number.isNaN(ms) || ms < floor) continue;
+    if (us.review === "accepted" || raw.meta?.registered === true) {
+      registered.push(raw);
+    } else if (raw.review === "pending" && us.review !== "accepted") {
+      pending.push(raw);
+    }
+  }
+  const byStart = (a, b) =>
+    Date.parse(a.startAt || a.dueAt || "") - Date.parse(b.startAt || b.dueAt || "");
+  pending.sort(byStart);
+  registered.sort(byStart);
+  return { pending, registered };
+}
+
 /* ------------------------------ interview prep ------------------------------ */
 
 const VIDEO_RE = /video|virtual|remote|zoom|teams|webex|meet\b|online/i;

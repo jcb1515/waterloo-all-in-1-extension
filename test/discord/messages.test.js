@@ -85,7 +85,7 @@ test('"by <date>" alone counts as a deadline trigger; all-day hits use startAt',
   assert.equal(item.allDay, true);
 });
 
-test("assigned-to-me + task verb -> task; undated -> +7d follow-up", () => {
+test("assigned-to-me + task verb -> task; undated -> +2d 17:00 Toronto", () => {
   const [item] = candidatesForMessage(
     msg("can you route the new connector footprints", {
       mentions: [{ id: "42" }],
@@ -95,7 +95,8 @@ test("assigned-to-me + task verb -> task; undated -> +7d follow-up", () => {
   assert.equal(item.type, "task");
   assert.equal(item.meta.assignedToMe, true);
   assert.equal(item.meta.undated, true);
-  assert.equal(item.dueAt, "2026-10-08T20:00:00.000Z");
+  // Oct 1 4 PM EDT + 2d at 17:00 EDT = Oct 3 5 PM = 21:00Z.
+  assert.equal(item.dueAt, "2026-10-03T21:00:00.000Z");
   assert.match(item.details || "", /No due date/);
 });
 
@@ -112,7 +113,7 @@ test("items carry meta.facts (Server/Channel/Assigned/Due)", () => {
   assert.equal(f.Server, "Robotics Club");
   assert.equal(f.Channel, "#elec-general");
   assert.equal(f["Assigned to you"], "Yes");
-  assert.equal(f.Due, "No date given (follow-up in 7 days)");
+  assert.equal(f.Due, "No date given (follow-up in 2 days)");
   const [meeting] = candidatesForMessage(
     msg(`design review at <t:${TS_OCT8_6PM}>`),
     O()

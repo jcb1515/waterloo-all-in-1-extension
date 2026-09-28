@@ -218,7 +218,8 @@ export function probe(doc, href) {
  * `essential` marks the rows onboarding insists on; `refreshDays` is how
  * often the row should see a fresh read.
  * @type {{id: string, label: string, how: string, url?: string,
- *   essential?: boolean, refreshDays?: number}[]}
+ *   essential?: boolean, refreshDays?: number,
+ *   stat?: {kind: "observe", scope: string}}[]}
  */
 export const CHECKLIST = [
   {
@@ -228,6 +229,7 @@ export const CHECKLIST = [
     url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/applications.htm",
     essential: true,
     refreshDays: 7,
+    stat: { kind: "observe", scope: "waterlooworks:applications" },
   },
   {
     id: "application-detail",
@@ -241,6 +243,7 @@ export const CHECKLIST = [
     url: "https://waterlooworks.uwaterloo.ca/myAccount/co-op/full/interviews.htm",
     essential: true,
     refreshDays: 3,
+    stat: { kind: "observe", scope: "waterlooworks:interviews" },
   },
   {
     id: "interview-detail",
@@ -259,6 +262,7 @@ export const CHECKLIST = [
     url: "https://waterlooworks.uwaterloo.ca/myAccount/dashboard.htm",
     essential: true,
     refreshDays: 3,
+    stat: { kind: "observe", scope: "waterlooworks:dashboard" },
   },
   {
     id: "messages",
