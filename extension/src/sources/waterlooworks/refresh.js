@@ -231,7 +231,9 @@ function clickAllowed(el, step) {
  */
 async function refreshAllowed() {
   try {
-    const got = await chrome.storage.local.get(SETTINGS_KEY);
+    const got = /** @type {any} */ (
+      await chrome.storage.local.get(SETTINGS_KEY)
+    );
     const src = got?.[SETTINGS_KEY]?.sources?.waterlooworks;
     return !(
       src &&
