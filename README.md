@@ -42,7 +42,7 @@ passwords, no OAuth setup.
 - **Reminders** — per-type lead times, quiet hours, a morning briefing and
   a weekly digest notification.
 - **Google Calendar feed** — publish the agenda to a private iCal feed
-  (opt-in, self-hosted server — see below) and subscribe from Google
+  (opt-in; works out of the box via the shared server — see below) and subscribe from Google
   Calendar, Apple Calendar or Outlook. Or use the one-off .ics download in
   Settings → Calendar.
 - **Backup** — Settings → About exports/imports your settings, item edits,
@@ -124,15 +124,24 @@ Everything is processed locally in your browser.
 - **No passwords or tokens** are stored — the extension reuses the sessions
   in your browser rather than handling credentials.
 - Calendar sync is **opt-in** and sends only event data — titles, times,
-  locations — to the feed server you configure.
+  locations — to the shared feed server (or one you run yourself).
 
 See [PRIVACY.md](PRIVACY.md) for the full policy.
 
 ## Calendar feed
 
-The `server/` directory contains a Cloudflare Worker that hosts the iCal
-feed the extension publishes to. It is designed to be self-hosted — see
-[server/README.md](server/README.md) for setup.
+Calendar sync works out of the box: every build ships pointing at the
+shared Waterloo All-in-1 server
+(`waterloo-all-in-1-feed.jb-wat.workers.dev`, a Cloudflare Worker run by
+the maintainer). Turn on sync in Settings → Calendar, the panel's
+Calendar tab or the Welcome step — no URL to enter.
+
+The `server/` directory contains the same Worker so you can self-host —
+see [server/README.md](server/README.md) for setup, then point Settings
+→ Calendar → Feed server URL at it. To bake a different default into the
+bundle, build with `WA1_CALENDAR_SERVICE_URL=https://your.worker.dev`
+(or `WA1_CALENDAR_SERVICE_URL=` for no built-in server). A saved setting
+always wins over the built-in URL.
 
 Two settings worth knowing:
 

@@ -255,45 +255,6 @@ kbd {
 }
 
 /* calendar feed */
-.banner {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-2, 8px);
-  font-size: var(--fs-sm);
-}
-.banner-warn {
-  background: var(--gold-soft);
-  color: var(--gold-ink);
-}
-.feed-link {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-.feed-link-label {
-  flex: none;
-  width: 130px;
-  font-weight: var(--w-medium);
-  font-size: var(--fs-sm);
-}
-.feed-url {
-  flex: 1;
-  min-width: 180px;
-  font-size: var(--fs-xs);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: var(--sp-1) var(--sp-2);
-  word-break: break-all;
-}
-.feed-link-acts {
-  display: flex;
-  gap: var(--sp-1);
-  flex: none;
-}
 .linklike {
   background: none;
   border: 0;
@@ -307,17 +268,6 @@ kbd {
 .linklike.danger {
   color: var(--danger, #b42318);
 }
-.help-details summary {
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-  cursor: pointer;
-}
-.skipped-list {
-  margin: 0;
-  padding-left: var(--sp-4);
-  font-size: var(--fs-xs);
-}
-
 /* ------------------------------- reminders -------------------------------- */
 
 .lead-table {
@@ -360,15 +310,6 @@ kbd {
 .time-input {
   width: 110px;
 }
-.inline-row .num-input {
-  flex: 0 0 auto;
-  min-width: 0;
-  width: 76px;
-}
-.class-weeks {
-  padding-left: var(--sp-3);
-}
-
 /* ------------------------- hidden & snoozed items -------------------------- */
 
 .hidden-row {

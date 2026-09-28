@@ -7,6 +7,9 @@ import { Card, OpenPanelButton } from "../bits.jsx";
 import { CheckIcon } from "../../ui/icons.jsx";
 import { AllowSourceButton, useAccessMap, useSourceAccess } from "../../ui/permissions.jsx";
 import { GROUP_LABELS, neededGroups } from "../../core/permissions.js";
+import { setSettings } from "../../core/store.js";
+import { send, IS_PREVIEW } from "../../panel/data.js";
+import { UI } from "../../core/messages.js";
 
 /** @param {{ok?: boolean, label: string, todo?: string}} p */
 function StatusChip({ ok, label, todo }) {
@@ -127,7 +130,22 @@ export function WelcomeSection({ settings, state }) {
             }
           >
             Publish your agenda to one private feed and subscribe to it from
-            Google Calendar — no duplicates.
+            Google Calendar — no duplicates. Uses the shared Waterloo All-in-1
+            server; nothing to configure.{" "}
+            {!cal.enabled ? (
+              <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                onClick={() => {
+                  if (IS_PREVIEW) return;
+                  setSettings({ calendar: { enabled: true } })
+                    .then(() => send({ type: UI.CALENDAR_PUBLISH }))
+                    .catch(() => {});
+                }}
+              >
+                Turn on
+              </button>
+            ) : null}
           </Step>
           <Step
             n={7}

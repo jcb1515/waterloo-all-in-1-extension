@@ -8,7 +8,8 @@ import { storeSyncSummary } from "./model/sources.js";
 import { visibleTabs } from "./model/tabs.js";
 import { ADAPTERS, stageForAdapter } from "../core/registry.js";
 import { BrandMark } from "../ui/brand.jsx";
-import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, ArrowLeftIcon, PlusIcon, ClipboardCheckIcon } from "../ui/icons.jsx";
+import { RefreshIcon, SettingsIcon, InboxIcon, BellIcon, BellOffIcon, ArrowLeftIcon, PlusIcon, ClipboardCheckIcon } from "../ui/icons.jsx";
+import { pauseEndMs } from "../core/pause.js";
 import { Agenda } from "./views/Agenda.jsx";
 import { Todo } from "./views/Todo.jsx";
 import { CalendarView } from "./views/Calendar.jsx";
@@ -87,6 +88,14 @@ export function App() {
   const updateCount = useMemo(
     () => unreadCount(state.updates, state.updatesSeenAt),
     [state.updates, state.updatesSeenAt]
+  );
+  const remindersPaused = useMemo(
+    () =>
+      pauseEndMs(
+        (state.settings && state.settings.reminders) || {},
+        now
+      ) != null,
+    [state.settings, now]
   );
 
   const actions = useMemo(
@@ -287,7 +296,7 @@ export function App() {
             title={`Updates (${updateCount})`}
             onClick={() => setOverlay(overlay === "updates" ? null : "updates")}
           >
-            <BellIcon size={17} />
+            {remindersPaused ? <BellOffIcon size={17} /> : <BellIcon size={17} />}
             {updateCount ? <span class="icon-badge">{updateCount}</span> : null}
           </button>
           <button
@@ -386,7 +395,13 @@ export function App() {
         ) : overlay === "checkreaders" ? (
           <CheckReaders state={state} actions={actions} now={now} />
         ) : tab === "agenda" ? (
-          <Agenda state={state} actions={actions} now={now} onGoSources={() => setOverlay("sources")} />
+          <Agenda
+            state={state}
+            actions={actions}
+            now={now}
+            onGoSources={() => setOverlay("sources")}
+            onGoCalendar={() => setTab("calendar")}
+          />
         ) : tab === "todo" ? (
           <Todo state={state} actions={actions} now={now} orgs={orgs} />
         ) : tab === "projects" ? (

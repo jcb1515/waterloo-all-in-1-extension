@@ -1,4 +1,7 @@
-// Small shared building blocks for the settings sections.
+// Small shared building blocks for the settings sections. Field and Toggle
+// live in ui/bits.jsx so the side panel uses the same switch markup.
+
+export { Field, Toggle } from "../ui/bits.jsx";
 
 import { useState } from "preact/hooks";
 
@@ -41,19 +44,6 @@ export function Card({ title, children, danger, id }) {
 }
 
 /**
- * @param {{label: string, help?: string, children: any}} p
- */
-export function Field({ label, help, children }) {
-  return (
-    <div class="field">
-      <span class="label">{label}</span>
-      {children}
-      {help ? <p class="help">{help}</p> : null}
-    </div>
-  );
-}
-
-/**
  * Segmented option row.
  * @param {{value: string, options: [string, string][], onChange: (v: string) => void, ariaLabel?: string}} p
  */
@@ -71,25 +61,6 @@ export function Segmented({ value, options, onChange, ariaLabel }) {
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * Toggle switch row.
- * @param {{checked: boolean, onChange: (v: boolean) => void, label: string, disabled?: boolean}} p
- */
-export function Toggle({ checked, onChange, label, disabled }) {
-  return (
-    <label class={`switch${disabled ? " disabled" : ""}`}>
-      <input
-        type="checkbox"
-        checked={!!checked}
-        disabled={!!disabled}
-        onChange={(e) => onChange(/** @type {any} */ (e.target).checked)}
-      />
-      <span class="track" aria-hidden="true" />
-      <span>{label}</span>
-    </label>
   );
 }
 

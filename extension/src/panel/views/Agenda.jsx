@@ -4,6 +4,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { buildAgenda } from "../model/agenda.js";
 import { fmtEstimate } from "../model/itemsheet.js";
+import { attentionSource } from "../model/sources.js";
 import { priorityOf } from "../../core/priority.js";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { ItemRow } from "../components/ItemRow.jsx";
@@ -22,9 +23,10 @@ const FILTERS = [
 ];
 
 /**
- * @param {{state: any, actions: any, now: Date, onGoSources: () => void}} props
+ * @param {{state: any, actions: any, now: Date, onGoSources: () => void,
+ *   onGoCalendar?: () => void}} props
  */
-export function Agenda({ state, actions, now, onGoSources }) {
+export function Agenda({ state, actions, now, onGoSources, onGoCalendar }) {
   const [filter, setFilter] = useState(query0("filter") || "all");
   const [org, setOrg] = useState(null);
   const [q, setQ] = useState("");
@@ -75,11 +77,7 @@ export function Agenda({ state, actions, now, onGoSources }) {
   // Error / stale strip: the first *actively synced* source that needs
   // attention. Passive sources (WaterlooWorks) stay silent — they read only
   // while you browse, so a stale/signed-out state is normal, not a nag.
-  const troubled = ADAPTERS.find((a) => {
-    if (stageForAdapter(a.id) !== "live" || !(a.intervalMinutes > 0)) return false;
-    const st = (state.sourceState || {})[a.id];
-    return st && (st.error || st.session === "signed-out");
-  });
+  const troubled = attentionSource(ADAPTERS, state.sourceState, stageForAdapter);
 
   // Calendar feed trouble gets its own strip — it isn't a "source", so the
   // adapter loop above can't see it.
@@ -95,17 +93,14 @@ export function Agenda({ state, actions, now, onGoSources }) {
   return (
     <div class="agenda">
       {calErr ? (
-        <button type="button" class="attention-strip" onClick={openCalendarSettings}>
+        <button type="button" class="attention-strip" onClick={onGoCalendar}>
           <AlertTriangleIcon size={14} /> Calendar: {calErr}
         </button>
       ) : null}
       {troubled ? (
         <button type="button" class="attention-strip" onClick={onGoSources}>
           <AlertTriangleIcon size={14} />
-          {troubled.label}:{" "}
-          {troubled.session === "signed-out" || (troubled.error && troubled.error.code) === "signed-out"
-            ? "signed out — open the site"
-            : (troubled.error && troubled.error.message) || "sync error"}
+          {troubled.adapter.label}: {troubled.text}
         </button>
       ) : null}
 
@@ -253,15 +248,6 @@ export function Agenda({ state, actions, now, onGoSources }) {
 /** Row priority — rows already carry effective fields. */
 function rowPriority(item, now) {
   return priorityOf(item, now);
-}
-
-/** Open the options page's calendar section. */
-function openCalendarSettings() {
-  try {
-    chrome.tabs.create({ url: chrome.runtime.getURL("src/options/options.html#calendar") });
-  } catch {
-    /* preview / no extension context */
-  }
 }
 
 function query0(name) {
