@@ -208,17 +208,6 @@ export function allowedClick(el, step) {
   }
 }
 
-/** Clicks only elements allowedClick accepts; returns whether it clicked. */
-function clickAllowed(el, step) {
-  if (!allowedClick(el, step)) return false;
-  try {
-    el.click();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // round orchestration
 
@@ -244,12 +233,32 @@ async function refreshAllowed() {
   }
 }
 
+/**
+ * WW serves a ~150-byte auto-submit stub before the real page, and the
+ * frame can also sit on about:blank between navigations. Both are
+ * transitions, never real pages: they must not satisfy a ready predicate
+ * nor be read as signed-out.
+ * @param {any} d
+ */
+const transitional = (d) => {
+  try {
+    if (!d || !d.documentElement) return true;
+    if (docText(d)) return false;
+    // No visible text but a form waiting to auto-submit — the WW
+    // interstitial, not a page we can read or a signed-out screen.
+    return qsa(d, "form").length > 0;
+  } catch {
+    return true;
+  }
+};
+
 const signedOut = (frame) => {
   try {
     const href = hrefOf(frame);
     if (/notLoggedIn\.htm/i.test(href)) return true;
     const d = docOf(frame);
-    return d ? isLoggedOut(d, href) : false;
+    if (!d || /^about:blank\b/i.test(href) || transitional(d)) return false;
+    return isLoggedOut(d, href);
   } catch {
     return false;
   }
@@ -284,7 +293,7 @@ async function pollReady(frame, ready, deadline) {
     if (signedOut(frame)) throw SIGNED_OUT;
     try {
       const d = docOf(frame);
-      if (d && ready(d)) return true;
+      if (d && !transitional(d) && ready(d)) return true;
     } catch {
       // document mid-navigation — keep polling
     }
@@ -293,23 +302,54 @@ async function pollReady(frame, ready, deadline) {
   }
 }
 
-/** src navigation: wait for the load event, then poll until ready. */
+/**
+ * src navigation: wait for the load event, then poll until ready. WW
+ * answers with an auto-submit stub first — it posts itself, the frame
+ * loads again, and the poll keeps running until the real document
+ * satisfies `ready` (the stub never can).
+ * @returns {Promise<"ok"|"timeout"|"not-ready"|"error">}
+ */
 async function navigate(frame, url, ready) {
   const deadline = Date.now() + STEP_TIMEOUT_MS;
   const loaded = waitForLoad(frame, STEP_TIMEOUT_MS);
   try {
     frame.src = url;
   } catch {
-    return false;
+    return "error";
   }
-  if (!(await loaded)) return false;
-  return pollReady(frame, ready, deadline);
+  if (!(await loaded)) return "timeout";
+  return (await pollReady(frame, ready, deadline)) ? "ok" : "not-ready";
 }
 
-/** Click navigation: poll until ready (grid steps may not raise a load). */
+/**
+ * Click navigation. A View/detail click submits a WW form that replaces
+ * the whole frame document — a load event follows, so wait for it before
+ * polling: a ready check that runs while the pre-click document is still
+ * present can pass on the page that is about to vanish, and the following
+ * steps then run against a dead document. Pagination clicks only rewrite
+ * the grid via WW's own page code and fire no load — for them the poll IS
+ * the wait.
+ * @returns {Promise<"ok"|"timeout"|"not-ready"|"not-allowed">}
+ */
 async function clickStep(el, step, frame, ready) {
-  if (!clickAllowed(el, step)) return false;
-  return pollReady(frame, ready, Date.now() + STEP_TIMEOUT_MS);
+  if (!allowedClick(el, step)) return "not-allowed";
+  const before = docOf(frame);
+  try {
+    el.click();
+  } catch {
+    return "not-allowed";
+  }
+  const deadline = Date.now() + STEP_TIMEOUT_MS;
+  if (step === "pagination") {
+    return (await pollReady(frame, ready, deadline)) ? "ok" : "not-ready";
+  }
+  // The document may already have changed by the time we look — a
+  // same-document response, or a load that fired before the listener
+  // could register. Then there is no load left to wait for.
+  if (docOf(frame) === before && !(await waitForLoad(frame, STEP_TIMEOUT_MS))) {
+    return "timeout";
+  }
+  return (await pollReady(frame, ready, deadline)) ? "ok" : "not-ready";
 }
 
 function sendFrame(frame) {
@@ -393,31 +433,42 @@ function interviewRows(d, done) {
   });
 }
 
-async function interviewViews(frame, send) {
+const viewStepName = (label) =>
+  label === INTERVIEW_LABELS.unscheduled
+    ? "interviews-unscheduled"
+    : "interviews-booked";
+
+async function interviewViews(frame, send, runStep) {
   const done = new Set();
   for (;;) {
-    if (!(await refreshAllowed())) return;
     const d = docOf(frame);
     if (!d) return;
     const row = interviewRows(d, done)[0];
     if (!row) return;
-    done.add(rowLabel(row));
+    const label = rowLabel(row);
+    done.add(label);
     const anchor = qsa(row, "a").find((a) => allowedClick(a, "interviews"));
     if (!anchor) continue;
-    if (!(await clickStep(anchor, "interviews", frame, readyInterviewView))) {
-      return;
-    }
-    if (signedOut(frame)) return;
-    send(frame);
+    const view = await runStep(viewStepName(label), async () => {
+      const r = await clickStep(anchor, "interviews", frame, readyInterviewView);
+      if (r !== "ok") return r;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      send(frame);
+      return "ok";
+    });
+    if (view !== "ok") return;
     // Back to the landing before the next view.
-    if (!(await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding))) {
-      return;
-    }
-    if (signedOut(frame)) return;
+    const back = await runStep("interviews-landing", async () => {
+      const nav = await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding);
+      if (nav !== "ok") return nav;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      return "ok";
+    });
+    if (back !== "ok") return;
   }
 }
 
-async function applicationsPages(frame, send) {
+async function applicationsPages(frame, send, runStep) {
   const d = docOf(frame);
   if (!d) return;
   const row = rows(d).find((r) => rowLabel(r) === "Total Submitted");
@@ -425,12 +476,16 @@ async function applicationsPages(frame, send) {
     ? qsa(row, "a").find((a) => allowedClick(a, "applications"))
     : null;
   if (!anchor) return;
-  if (!(await clickStep(anchor, "applications", frame, readyAppsGrid))) return;
-  if (signedOut(frame)) return;
-  send(frame);
+  const first = await runStep("apps-page-1", async () => {
+    const r = await clickStep(anchor, "applications", frame, readyAppsGrid);
+    if (r !== "ok") return r;
+    if (signedOut(frame)) throw SIGNED_OUT;
+    send(frame);
+    return "ok";
+  });
+  if (first !== "ok") return;
   let prevFirst = firstRowText(docOf(frame));
   for (let n = 2; n <= MAX_PAGE; n++) {
-    if (!(await refreshAllowed())) return;
     const doc = docOf(frame);
     if (!doc) return;
     const link = qsa(doc, ".pagination__link").find(
@@ -441,23 +496,64 @@ async function applicationsPages(frame, send) {
       const t = firstRowText(page);
       return Boolean(t) && t !== prevFirst;
     };
-    if (!(await clickStep(link, "pagination", frame, ready))) return;
-    if (signedOut(frame)) return;
-    send(frame);
+    const page = await runStep(`apps-page-${n}`, async () => {
+      const r = await clickStep(link, "pagination", frame, ready);
+      if (r !== "ok") return r;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      send(frame);
+      return "ok";
+    });
+    if (page !== "ok") return;
     prevFirst = firstRowText(docOf(frame));
   }
 }
 
+/** sessionStorage key for the privacy-safe per-round summary. */
+const LAST_KEY = "wa1:ww-refresh-last";
+
 /**
  * One refresh round: dashboard → interviews → applications in the hidden
  * iframe, each step bounded and sequential. A timed-out step is skipped;
- * a signed-out page aborts the round. The iframe is always removed.
- * @returns {Promise<{sent: number}>}
+ * a signed-out page aborts the round; the kill switch stops between steps.
+ * The iframe is always removed, and a privacy-safe per-step summary
+ * (names, durations, failure reasons — never URLs, tokens or page text)
+ * is written to sessionStorage["wa1:ww-refresh-last"] on every exit path.
+ * @returns {Promise<{sent: number, steps: any[]}>}
  */
 export async function runRefreshRound() {
   let sent = 0;
+  /** @type {{step: string, ok: boolean, ms: number, reason?: string}[]} */
+  const steps = [];
+  let killed = false;
   const send = (frame) => {
     if (sendFrame(frame)) sent += 1;
+  };
+  /** Run one named bounded step, record it, and honour the kill switch. */
+  const runStep = async (name, fn) => {
+    if (killed) return "killed";
+    const t = Date.now();
+    try {
+      if (!(await refreshAllowed())) {
+        killed = true;
+        steps.push({ step: name, ok: false, ms: Date.now() - t, reason: "killed" });
+        return "killed";
+      }
+      const out = await fn();
+      steps.push(
+        out === "ok"
+          ? { step: name, ok: true, ms: Date.now() - t }
+          : { step: name, ok: false, ms: Date.now() - t, reason: String(out) }
+      );
+      return out;
+    } catch (e) {
+      steps.push({
+        step: name,
+        ok: false,
+        ms: Date.now() - t,
+        reason: e === SIGNED_OUT ? "signed-out" : `error:${e?.name || "Error"}`,
+      });
+      throw e;
+    }
   };
   const frame = makeFrame(document);
   try {
@@ -467,36 +563,51 @@ export async function runRefreshRound() {
       // still works — an unattached iframe can navigate
     }
     // 1. Dashboard — skipped when the open page already is it.
-    if (!(await refreshAllowed())) return { sent };
     if (!/\/myAccount\/dashboard\.htm/i.test(String(location.href))) {
-      if (await navigate(frame, DASHBOARD_URL, readyDashboard)) {
-        if (signedOut(frame)) return { sent };
+      await runStep("dashboard", async () => {
+        const nav = await navigate(frame, DASHBOARD_URL, readyDashboard);
+        if (nav !== "ok") return nav;
+        if (signedOut(frame)) throw SIGNED_OUT;
         send(frame);
-      }
+        return "ok";
+      });
+    } else {
+      steps.push({ step: "dashboard", ok: true, ms: 0, reason: "skipped" });
     }
     // 2. Interviews landing, then each nonzero Booked/Unscheduled view.
-    if (!(await refreshAllowed())) return { sent };
-    if (await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding)) {
-      if (signedOut(frame)) return { sent };
-      await interviewViews(frame, send);
-      if (signedOut(frame)) return { sent };
-    }
+    const landing = await runStep("interviews-landing", async () => {
+      const nav = await navigate(frame, INTERVIEWS_URL, readyInterviewsLanding);
+      if (nav !== "ok") return nav;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      return "ok";
+    });
+    if (landing === "ok") await interviewViews(frame, send, runStep);
     // 3. Applications landing → Total view → paginate.
-    if (!(await refreshAllowed())) return { sent };
-    if (await navigate(frame, APPLICATIONS_URL, readyAppsLanding)) {
-      if (signedOut(frame)) return { sent };
-      await applicationsPages(frame, send);
-    }
-    return { sent };
+    const apps = await runStep("apps-landing", async () => {
+      const nav = await navigate(frame, APPLICATIONS_URL, readyAppsLanding);
+      if (nav !== "ok") return nav;
+      if (signedOut(frame)) throw SIGNED_OUT;
+      return "ok";
+    });
+    if (apps === "ok") await applicationsPages(frame, send, runStep);
+    return { sent, steps };
   } catch (e) {
-    if (e === SIGNED_OUT) return { sent };
-    throw e;
+    if (e !== SIGNED_OUT) throw e;
+    return { sent, steps };
   } finally {
     try {
       if (typeof frame.remove === "function") frame.remove();
       else frame.parentNode?.removeChild?.(frame);
     } catch {
       // a frame that never attached has nothing to remove
+    }
+    try {
+      window.sessionStorage?.setItem?.(
+        LAST_KEY,
+        JSON.stringify({ at: new Date().toISOString(), sent, steps })
+      );
+    } catch {
+      // summary is diagnostics only — never let it break the round
     }
   }
 }
@@ -506,7 +617,7 @@ let running = false;
 /**
  * Gate + start a refresh round, if due. Called by content.js after the
  * page's own settled snapshot. Fire-and-forget safe.
- * @returns {Promise<{sent: number}|undefined>|undefined}
+ * @returns {Promise<{sent: number, steps?: any[]}|undefined>|undefined}
  */
 export function maybeRefresh() {
   try {

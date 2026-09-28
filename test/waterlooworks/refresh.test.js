@@ -570,8 +570,179 @@ test("a full round walks dashboard, interviews and applications; every payload i
       2,
       "page 1 and page 2 of applications"
     );
+    const summary = JSON.parse(
+      globalThis.window.sessionStorage.getItem("wa1:ww-refresh-last")
+    );
+    assert.equal(summary.sent, 4);
+    const names = summary.steps.map((s) => s.step);
+    assert.deepEqual(names, [
+      "dashboard",
+      "interviews-landing",
+      "interviews-booked",
+      "interviews-landing",
+      "apps-landing",
+      "apps-page-1",
+      "apps-page-2",
+    ]);
+    for (const s of summary.steps) {
+      assert.equal(s.ok, true);
+      assert.equal(typeof s.ms, "number");
+    }
   } finally {
     world.restore();
+  }
+});
+
+test("a form click does not satisfy readiness on the pre-click document", async () => {
+  // The interviews landing fixture satisfies BOTH predicates (it has a
+  // "Booked Interviews" row AND an "Interview Date" th). If clickStep
+  // polled readiness before the click's navigation, the pre-click landing
+  // would pass readyInterviewView instantly and its snapshot — not the
+  // view's — would be sent.
+  const world = installWorld();
+  try {
+    const { runRefreshRound } = await import(MOD);
+    let frame;
+
+    const newViewDoc = mkDoc({
+      title: "Interviews View",
+      selectors: { th: [{ textContent: "Interview Date / Time" }] },
+    });
+    const anchor = {
+      tagName: "A",
+      textContent: "View",
+      getAttribute: (name) =>
+        name === "onclick"
+          ? `orbisAppSr.buildForm({'action':'${TOKEN}','numOfDays':'0','selectedFilter':'booked'}, '/x', '').submit();`
+          : null,
+      closest: (sel) => (sel === "tr" ? trWrap : null),
+      click: () => {
+        // A real form POST swaps the document when the navigation
+        // completes — deferred, never synchronous.
+        world.timers.push({
+          due: Date.now() + 50,
+          fn: () => {
+            frame.contentDocument = newViewDoc;
+            frame.fire("load");
+          },
+        });
+      },
+    };
+    const trCells = [
+      { textContent: "Booked Interviews" },
+      { textContent: "1" },
+      { textContent: "" },
+    ];
+    const trWrap = { cells: trCells, querySelector: () => trCells[0] };
+    const landingRow = {
+      cells: trCells,
+      querySelectorAll: (sel) => (sel === "a" ? [anchor] : []),
+      querySelector: () => trCells[0],
+    };
+    // The hazard doc: a landing that the view predicate would also pass.
+    const landingDoc = mkDoc({
+      title: "Interviews Landing",
+      text: "Booked Interviews",
+      selectors: {
+        tr: [landingRow],
+        th: [{ textContent: "Interview Date / Time" }],
+      },
+    });
+
+    const d = settle(runRefreshRound());
+    frame = world.frames[0];
+    frame.routes = {
+      "/myAccount/dashboard.htm": mkDoc({
+        title: "WaterlooWorks Dashboard",
+        selectors: { table: [{}] },
+      }),
+      "/myAccount/co-op/full/interviews.htm": landingDoc,
+      "/myAccount/co-op/full/applications.htm": mkDoc({
+        title: "Applications",
+      }),
+    };
+    await world.drain(d.done);
+    const res = await d.q;
+    // dashboard + the view — nothing more (the apps landing never readies).
+    assert.equal(res.sent, 2);
+    const viewSend = world.sent[1];
+    assert.ok(viewSend.payload.body.includes("Interviews View"));
+    assert.ok(
+      !world.sent.some((m) => m.payload.body.includes("Interviews Landing")),
+      "the pre-click document was never snapshotted as a view"
+    );
+    assert.equal(
+      res.steps.find((s) => s.step === "interviews-booked").ok,
+      true
+    );
+  } finally {
+    world.restore();
+  }
+});
+
+test("the round summary records reasons, not data", async () => {
+  // signed-out abort → reason "signed-out", no URLs/text/tokens anywhere.
+  const world = installWorld();
+  try {
+    const { runRefreshRound } = await import(MOD);
+    const d = settle(runRefreshRound());
+    const frame = world.frames[0];
+    frame.routes = {
+      "/myAccount/dashboard.htm": {
+        url: "/notLoggedIn.htm",
+        doc: mkDoc({ title: "Sign in" }),
+      },
+    };
+    await world.drain(d.done);
+    const res = await d.q;
+    const summary = JSON.parse(
+      globalThis.window.sessionStorage.getItem("wa1:ww-refresh-last")
+    );
+    assert.equal(summary.sent, 0);
+    assert.equal(summary.steps.length, 1);
+    assert.equal(summary.steps[0].step, "dashboard");
+    assert.equal(summary.steps[0].ok, false);
+    assert.equal(summary.steps[0].reason, "signed-out");
+    const raw = globalThis.window.sessionStorage.getItem(
+      "wa1:ww-refresh-last"
+    );
+    assert.ok(!raw.includes("http"), "summary leaked a URL");
+    assert.ok(!raw.includes(TOKEN), "summary leaked a token");
+    assert.ok(!raw.includes("notLoggedIn"), "summary leaked a path");
+  } finally {
+    world.restore();
+  }
+
+  // Mid-round kill → the pending step records "killed".
+  const w2 = installWorld();
+  try {
+    const { runRefreshRound } = await import(MOD);
+    let calls = 0;
+    w2.setSettingsFn(() => {
+      calls++;
+      return calls <= 1
+        ? undefined
+        : { sources: { waterlooworks: { autoRefresh: false } } };
+    });
+    const d = settle(runRefreshRound());
+    const frame = w2.frames[0];
+    frame.routes = {
+      "/myAccount/dashboard.htm": mkDoc({
+        title: "WaterlooWorks Dashboard",
+        selectors: { table: [{}] },
+      }),
+    };
+    await w2.drain(d.done);
+    await d.q;
+    const summary = JSON.parse(
+      globalThis.window.sessionStorage.getItem("wa1:ww-refresh-last")
+    );
+    assert.equal(summary.sent, 1);
+    assert.equal(summary.steps.at(-1).step, "interviews-landing");
+    assert.equal(summary.steps.at(-1).reason, "killed");
+    assert.equal(summary.steps.at(-1).ok, false);
+  } finally {
+    w2.restore();
   }
 });
 
