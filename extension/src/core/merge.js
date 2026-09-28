@@ -10,6 +10,7 @@
 
 import { normCourseCode } from "./contract.js";
 import { hashString } from "../capture/redact.js";
+import { zonedIso } from "../lib/textdates/tz.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MOVED_KEEP_MS = 7 * DAY_MS;
@@ -715,6 +716,71 @@ function update(kind, item, at, text) {
 /* applyResult — fold a SyncResult into a source's raw record          */
 /* ------------------------------------------------------------------ */
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const RANGE_SCOPE_RE = /^(.+):([^:]+)\.\.([^:]+)$/;
+const RANGE_SCOPE_YEAR_RE = /^(.+?):(\d{4}-.+?)\.\.(.+)$/;
+
+/**
+ * Split a `prefix:start..end` scope string. Bounds may contain colons
+ * (legacy ISO-datetime bounds like `2026-08-01T04:00:00.000Z`), so when the
+ * strict colon-free parse fails we anchor the start bound at the first
+ * `:` followed by a 4-digit year.
+ * @param {unknown} s
+ * @returns {{prefix: string, start: string, end: string} | null}
+ */
+function parseRangeScope(s) {
+  const str = String(s || "");
+  let m = RANGE_SCOPE_RE.exec(str) || RANGE_SCOPE_YEAR_RE.exec(str);
+  if (!m) return null;
+  return { prefix: m[1], start: m[2], end: m[3] };
+}
+
+/**
+ * Build the extra removal predicate for scope-mode applyResult when the
+ * incoming scope is a `prefix:start..end` range. A stored item seen under a
+ * range scope with the same prefix is dropped when (a) the stored scope's
+ * bound format differs from the incoming one's ("YYYY-MM-DD" vs anything
+ * else — a zombie from an older scope format), or (b) the item's anchor
+ * falls inside the incoming window [start 00:00 Toronto, end+1d 00:00
+ * Toronto). Same-format items outside the window and non-range scopes are
+ * untouched. Returns null for non-range incoming scopes.
+ * @param {string|undefined} scope
+ */
+function rangeReplacement(scope) {
+  const m = parseRangeScope(scope);
+  if (!m) return null;
+  const { prefix, start, end } = m;
+  const inDateOnly = DATE_ONLY_RE.test(start) && DATE_ONLY_RE.test(end);
+  /** @type {number|null} */
+  let winStart = null;
+  /** @type {number|null} */
+  let winEnd = null;
+  if (inDateOnly) {
+    const s = start.split("-").map(Number);
+    const e = end.split("-").map(Number);
+    winStart = Date.parse(zonedIso(s[0], s[1], s[2]));
+    const eNext = new Date(Date.UTC(e[0], e[1] - 1, e[2]) + DAY_MS);
+    winEnd = Date.parse(
+      zonedIso(eNext.getUTCFullYear(), eNext.getUTCMonth() + 1, eNext.getUTCDate()),
+    );
+  }
+  /** @param {any} p previous raw item */
+  return (p) => {
+    for (const se of p.seenIn || []) {
+      const r = parseRangeScope(se && se.scope);
+      if (!r || r.prefix !== prefix) continue;
+      const oldDateOnly = DATE_ONLY_RE.test(r.start) && DATE_ONLY_RE.test(r.end);
+      if (oldDateOnly !== inDateOnly) return true;
+      if (winStart != null && winEnd != null) {
+        const ms = Date.parse((p && (p.dueAt || p.startAt)) || "");
+        if (Number.isFinite(ms) && ms >= winStart && ms < winEnd) return true;
+      }
+    }
+    return false;
+  };
+}
+
 /**
  * @param {{items?: any[], applications?: any[], courses?: any[], terms?: any[], updatedAt?: string}|null} prevRaw
  * @param {any} result SyncResult
@@ -733,8 +799,14 @@ export function applyResult(prevRaw, result, opts = { mode: "sync" }) {
   if (mode === "scope") {
     // Observed/captured: replace only the items reported under this scope.
     const want = scopeKey(scope);
+    const replaced = rangeReplacement(scope);
     items = [
-      ...prevItems.filter((p) => !newIds.has(p.id) && !(p.seenIn || []).some((s) => scopeKey(s.scope) === want)),
+      ...prevItems.filter(
+        (p) =>
+          !newIds.has(p.id) &&
+          !(p.seenIn || []).some((s) => scopeKey(s.scope) === want) &&
+          !(replaced && replaced(p)),
+      ),
       ...newItems,
     ];
   } else if (result && result.complete) {
