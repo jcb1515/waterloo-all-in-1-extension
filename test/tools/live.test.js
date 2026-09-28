@@ -24,6 +24,7 @@ import {
   buildAllowlist,
   resolveTarget,
   canTouch,
+  extPageUrl,
 } from "../../tools/live/cdp.mjs";
 
 const TOOLS_LIVE = path.resolve(
@@ -259,6 +260,32 @@ test("resolveTarget: https only, on-list paths only", () => {
   assert.match(String(off.reason), /waterlooworks:applications/); // options listed
   assert.equal(resolve("https://example.com/").ok, false);
   assert.equal(resolve("portal").ok, false);
+});
+
+const MAIN_ID = "maihpiennplbbcopdcklaobaoipbejjb";
+
+test("extPageUrl builds chrome-extension urls for relative paths only", () => {
+  assert.equal(
+    extPageUrl(MAIN_ID, "src/panel/panel.html?more=1"),
+    `chrome-extension://${MAIN_ID}/src/panel/panel.html?more=1`,
+  );
+  assert.equal(
+    extPageUrl(MAIN_ID, "src/options/options.html"),
+    `chrome-extension://${MAIN_ID}/src/options/options.html`,
+  );
+  // a full absolute url, even on the same origin, is rejected
+  assert.equal(extPageUrl(MAIN_ID, `chrome-extension://${MAIN_ID}/src/x`), null);
+  assert.equal(extPageUrl(MAIN_ID, "https://example.com/"), null);
+  assert.equal(extPageUrl(MAIN_ID, "javascript:alert(1)"), null);
+  assert.equal(extPageUrl(MAIN_ID, "//example.com/x"), null);
+  // escapes and encodings
+  assert.equal(extPageUrl(MAIN_ID, "../manifest.json"), null);
+  assert.equal(extPageUrl(MAIN_ID, "a/../../x"), null);
+  assert.equal(extPageUrl(MAIN_ID, "%2e%2e/x"), null);
+  assert.equal(extPageUrl(MAIN_ID, "src\\..\\x"), null);
+  // bad inputs
+  assert.equal(extPageUrl("not-an-id", "src/x"), null);
+  assert.equal(extPageUrl(MAIN_ID, ""), null);
 });
 
 test("canTouch trusts only ids recorded in .opened.json", () => {
