@@ -34,6 +34,7 @@ export const CHECKLIST = [
     url: "https://mail.google.com/mail/u/0/#inbox",
     essential: true,
     refreshDays: 3,
+    stat: { kind: "observe", scope: "email:gmail:list", itemsMin: 0 },
   },
   {
     id: "gmail-invite",
@@ -55,6 +56,7 @@ export const CHECKLIST = [
     how: "Open Sent — used to mark reply to-dos done.",
     url: "https://mail.google.com/mail/u/0/#sent",
     refreshDays: 7,
+    stat: { kind: "observe", scope: "email:gmail:list", itemsMin: 0 },
   },
   {
     id: "outlook-inbox",
@@ -64,6 +66,7 @@ export const CHECKLIST = [
     url: "https://outlook.office.com/mail/inbox",
     essential: true,
     refreshDays: 3,
+    stat: { kind: "observe", scope: "email:outlook:list", itemsMin: 0 },
   },
   {
     id: "outlook-invite",

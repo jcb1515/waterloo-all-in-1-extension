@@ -39,7 +39,7 @@ export const PORTAL_OPEN_ROW = {
   url: "https://portal.uwaterloo.ca/",
   essential: true,
   refreshDays: 14,
-  stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+  stat: { kind: "observe", scope: "portal:schedule", itemsMin: 0 },
 };
 
 /**

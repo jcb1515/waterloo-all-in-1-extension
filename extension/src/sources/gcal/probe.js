@@ -36,6 +36,7 @@ export const CHECKLIST = [
     url: "https://calendar.google.com/calendar/u/0/r/week",
     essential: true,
     refreshDays: 14,
+    stat: { kind: "observe", scope: "gcal", itemsMin: 0 },
   },
   {
     id: "gcal-month",
@@ -43,6 +44,7 @@ export const CHECKLIST = [
     label: "Month view",
     how: "Switch to Month view.",
     url: "https://calendar.google.com/calendar/u/0/r/month",
+    stat: { kind: "observe", scope: "gcal", itemsMin: 0 },
   },
   {
     id: "gcal-schedule",
@@ -50,12 +52,14 @@ export const CHECKLIST = [
     label: "Schedule view",
     how: "Switch to Schedule view.",
     url: "https://calendar.google.com/calendar/u/0/r/agenda",
+    stat: { kind: "observe", scope: "gcal", itemsMin: 0 },
   },
   {
     id: "gcal-event",
     page: "gcal-week",
     label: "One open event",
     how: "Click an event so its details popup shows.",
+    stat: { kind: "observe", scope: "gcal", itemsMin: 0 },
   },
 ];
 
