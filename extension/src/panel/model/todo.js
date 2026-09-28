@@ -21,12 +21,27 @@ const anchorOf = (/** @type {any} */ i) => i.dueAt || i.startAt || null;
 
 const COURSE_CODE_RE = /^[A-Z]{2,8} ?\d{3}[A-Z]{0,2}$/;
 
+/** meta.action values that belong to the co-op pipeline. */
+const COOP_ACTIONS = new Set([
+  "book-interview",
+  "respond-offer",
+  "submit-rankings",
+  "apply",
+]);
+
 /** Row kind for the filter chips. */
 function kindOf(/** @type {any} */ item) {
   const meta = item.meta || {};
   if (meta.auto === "study") return "study";
   if (meta.auto === "offer" || meta.auto === "rank") return "coop";
   if (meta.auto === "project" || meta.projectId || item.source === "projects") return "project";
+  // Adapter action to-dos: replies are their own chip; co-op actions with an
+  // employer live under Co-op; anything else falls through to the old rules
+  // (a course-coded org still reads as a deadline).
+  if (typeof meta.action === "string" && meta.action) {
+    if (meta.action === "reply") return "reply";
+    if (COOP_ACTIONS.has(meta.action) && meta.employer) return "coop";
+  }
   if (item.category === "reply" || item.category === "book-call") return "reply";
   if (
     item.type === "application-deadline" ||
@@ -92,9 +107,28 @@ export function buildTodos({ items = {}, todos = {}, applications = {}, userStat
     if (m.parentId) suppressed.add(m.parentId);
   }
 
+  // One rankings to-do per work term: an emailed/other-source
+  // "submit-rankings" task within a week of a derived rank to-do's date is
+  // the same ask — the derived row carries it.
+  const rankDues = Object.values(todos)
+    .filter((t) => t && t.meta && t.meta.auto === "rank")
+    .map((t) => {
+      const a = anchorOf(t);
+      const ms = a ? Date.parse(a) : NaN;
+      return Number.isNaN(ms) ? null : ms;
+    })
+    .filter((ms) => ms != null);
+  const suppressedByRank = (/** @type {any} */ raw) => {
+    if (!raw.meta || raw.meta.action !== "submit-rankings") return false;
+    const a = anchorOf(raw);
+    const ms = a ? Date.parse(a) : NaN;
+    if (Number.isNaN(ms)) return false;
+    return rankDues.some((d) => Math.abs(/** @type {number} */ (d) - ms) <= 7 * DAY);
+  };
+
   const collect = (/** @type {any} */ raw, /** @type {boolean} */ isDerived) => {
     if (!raw || !raw.id) return;
-    if (!isDerived && suppressed.has(raw.id)) return;
+    if (!isDerived && (suppressed.has(raw.id) || suppressedByRank(raw))) return;
     const project = raw.meta && raw.meta.projectId ? projectById(projects, raw.meta.projectId) : null;
     if (project && project.status !== "active") return; // done/archived projects hide their items
     const us = userState[raw.id];
@@ -214,13 +248,18 @@ export function doneLine(row, now) {
 }
 
 /**
- * Due cell text for an open row: "Due Fri · 11:59 PM" or "2d late".
+ * Due cell text for an open row: "Due Fri · 11:59 PM" or "2d late". An
+ * item stamped meta.undated keeps its suggested-date bucket but the label
+ * says the date is a guess, not a deadline.
  * @param {any} row @param {Date} now
  */
 export function dueLabel(row, now) {
   const a = anchorOf(row.item);
   if (!a) return "No date";
   const ms = Date.parse(a);
+  if (row.item.meta && row.item.meta.undated) {
+    return `No due date · by ${fmtDay(ms)}`;
+  }
   if (ms < now.getTime()) {
     const d = Math.round((now.getTime() - ms) / DAY);
     return d >= 1 ? `${d}d late` : "Due today";

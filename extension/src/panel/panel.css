@@ -1330,6 +1330,18 @@ html[data-theme="dark"] .src-tile-icon {
   color: var(--danger);
 }
 
+/* Small inline action inside a to-do row's meta line (Snooze / Open). */
+.linklike.row-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  text-decoration: none;
+  color: var(--text-3);
+}
+.linklike.row-act:hover {
+  color: var(--text);
+}
+
 .review-past-acts {
   padding: 0 var(--sp-4) var(--sp-1);
 }

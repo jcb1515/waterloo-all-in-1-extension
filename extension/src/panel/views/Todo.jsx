@@ -9,7 +9,8 @@ import { stripProjectPrefix, projectByName } from "../../core/projects.js";
 import { GroupHeader } from "../components/GroupHeader.jsx";
 import { typeLabelFor } from "../components/ItemRow.jsx";
 import { orgStyle } from "../../ui/colors.js";
-import { CheckIcon, PlusIcon, SparklesIcon } from "../../ui/icons.jsx";
+import { CheckIcon, PlusIcon, SparklesIcon, ExternalLinkIcon, ClockIcon } from "../../ui/icons.jsx";
+import { SourceBadge } from "../../ui/SourceBadge.jsx";
 import { fmtDay, fmtTime } from "../model/agenda.js";
 
 const FILTERS = [
@@ -25,14 +26,30 @@ const FILTERS = [
 /** Timed types keep a startAt anchor; every other quick-add anchors on dueAt. */
 const TIMED_TYPES = new Set(["exam", "meeting", "interview", "event", "class", "tutorial"]);
 
-/** One to-do row: checkbox, title, org chip, auto badge, due/done line. */
+/** Tomorrow 08:00 local — the Snooze horizon. */
+function snoozeUntil(now) {
+  const d = new Date(now.getTime());
+  d.setDate(d.getDate() + 1);
+  d.setHours(8, 0, 0, 0);
+  return d.toISOString();
+}
+
+/** An http(s) url for the row's Open button, or null. */
+function openUrlOf(item) {
+  const u = (item.evidence && item.evidence.url) || item.url;
+  return typeof u === "string" && /^https?:\/\//i.test(u) ? u : null;
+}
+
+/** One to-do row: checkbox, title, org chip, source badge, auto badge,
+ *  snooze/open actions, due/done line. */
 function TodoRow({ row, now, actions, projects }) {
   const { item } = row;
   const style = orgStyle(item.org, projects) || {};
   const open = () => {
     if (actions.openItem) actions.openItem(item);
-    else if (item.url) actions.open(item.url);
+    else if (openUrlOf(item)) actions.open(openUrlOf(item));
   };
+  const openUrl = openUrlOf(item);
   return (
     <div
       class={`item-row${row.done ? " dimmed" : ""} linked`}
@@ -64,6 +81,7 @@ function TodoRow({ row, now, actions, projects }) {
         <span class="item-title">{item.title}</span>
         <span class="item-meta">
           {item.org ? <span class="chip chip-org">{item.org}</span> : null}
+          <SourceBadge item={item} />
           {item.meta && item.meta.projectId ? (
             <span class="item-type">{typeLabelFor(item)}</span>
           ) : null}
@@ -77,6 +95,33 @@ function TodoRow({ row, now, actions, projects }) {
           ) : null}
           {item.meta && item.meta.auto === "study" && item.meta.leadDays != null ? (
             <span class="item-type">{item.meta.leadDays}d head start</span>
+          ) : null}
+          {!row.done ? (
+            <>
+              <button
+                type="button"
+                class="linklike row-act"
+                title="Snooze until tomorrow 8 AM"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  actions.setUserState(item.id, { snoozedUntil: snoozeUntil(now) });
+                }}
+              >
+                <ClockIcon size={11} /> Snooze
+              </button>
+              {openUrl ? (
+                <button
+                  type="button"
+                  class="linklike row-act"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    actions.open(openUrl);
+                  }}
+                >
+                  <ExternalLinkIcon size={11} /> Open
+                </button>
+              ) : null}
+            </>
           ) : null}
         </span>
       </span>

@@ -362,3 +362,23 @@ test("publish guard: mixed pair across a Toronto date boundary stays two", () =>
   assert.equal(collapsed, 0);
   assert.equal(payload.events.length, 2);
 });
+
+test("meta.undated tasks never reach the feed, even with a suggested dueAt", () => {
+  const { payload, count } = build(
+    {
+      u: mk("gmail:u", {
+        source: "gmail",
+        type: "task",
+        title: "Reply to recruiter",
+        dueAt: iso(NOW.getTime() + 2 * DAY),
+        meta: { action: "reply", undated: true },
+      }),
+      m: mk("manual:m", { source: "manual", type: "task", dueAt: undefined, startAt: undefined }),
+      d: mk("learn:d", { dueAt: iso(NOW.getTime() + DAY) }),
+    },
+    {},
+    { ...CAL, include: { ...CAL.include, todos: true } }
+  );
+  assert.equal(count, 1, "the undated suggestion and the anchorless task stay off the feed");
+  assert.deepEqual(payload.events.map((e) => e.id), ["learn:d"]);
+});
