@@ -3,7 +3,6 @@
 
 import { Card, Field, Segmented, Toggle } from "../bits.jsx";
 import { hiddenSnoozed } from "../../panel/model/itemsheet.js";
-import { tabsFor, editTabs } from "../../panel/model/tabs.js";
 import { fmtDay, fmtTime } from "../../panel/model/agenda.js";
 import { send, IS_PREVIEW } from "../../panel/data.js";
 import { UI } from "../../core/messages.js";
@@ -106,14 +105,6 @@ export function GeneralSection({ settings, save, state, now }) {
         <TodoSettings settings={settings} save={save} />
       </Card>
 
-      <Card title="Panel tabs" id="panel-tabs">
-        <p class="help">
-          Reorder or hide panel tabs. Keys 1–7 switch tabs in the order below; Agenda is always
-          shown.
-        </p>
-        <TabEditor settings={settings} save={save} />
-      </Card>
-
       <Card title="Hidden and snoozed items">
         {tucked.length ? (
           tucked.map((e) => <HiddenRow key={e.item.id} entry={e} />)
@@ -200,61 +191,3 @@ function TodoSettings({ settings, save }) {
   );
 }
 
-/**
- * Panel tab order/visibility editor: checkbox to show, up/down to move.
- * @param {{settings: any, save: (patch: any) => void}} p
- */
-function TabEditor({ settings, save }) {
-  const tabs = tabsFor(settings);
-  const move = (id, dir) =>
-    editTabs(
-      settings,
-      (list) => {
-        const i = list.findIndex((t) => t.id === id);
-        const j = i + dir;
-        if (i < 0 || j < 0 || j >= list.length) return list;
-        const next = list.slice();
-        [next[i], next[j]] = [next[j], next[i]];
-        return next;
-      },
-      save
-    );
-  const show = (id, v) =>
-    editTabs(settings, (list) => list.map((t) => (t.id === id ? { ...t, visible: v } : t)), save);
-
-  return (
-    <div class="tab-edit">
-      {tabs.map((t, i) => (
-        <div key={t.id} class="tab-edit-row">
-          <span class="tab-edit-num tabular">{i + 1}</span>
-          <span class="tab-edit-label">{t.label}</span>
-          <span class="hidden-acts">
-            <button
-              type="button"
-              class="btn btn-sm"
-              disabled={i === 0}
-              aria-label={`Move ${t.label} up`}
-              onClick={() => move(t.id, -1)}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="btn btn-sm"
-              disabled={i === tabs.length - 1}
-              aria-label={`Move ${t.label} down`}
-              onClick={() => move(t.id, 1)}
-            >
-              ↓
-            </button>
-            {t.id === "agenda" ? (
-              <span class="help">always shown</span>
-            ) : (
-              <Toggle label="Shown" checked={t.visible} onChange={(v) => show(t.id, v)} />
-            )}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}

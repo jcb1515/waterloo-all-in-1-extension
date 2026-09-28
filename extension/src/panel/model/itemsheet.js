@@ -111,6 +111,34 @@ export function primaryLink(item) {
 }
 
 /**
+ * The outbound link for one seenIn entry: the item's own URL when this is the
+ * source that produced it, else that source's home page from the adapter
+ * registry. Null when neither exists.
+ * @param {any} item
+ * @param {{source?: string}} seen   one item.seenIn entry
+ * @param {{id: string, origins?: string[]}[]} adapters
+ * @returns {string | null}
+ */
+export function sourceOpenLink(item, seen, adapters) {
+  if (!item || !seen || !seen.source) return null;
+  if (seen.source === item.source) {
+    return (
+      item.url ||
+      (item.meta && item.meta.listUrl) ||
+      (item.evidence && item.evidence.url) ||
+      homeFor(seen.source, adapters)
+    );
+  }
+  return homeFor(seen.source, adapters);
+}
+
+/** @param {string} id @param {{id: string, origins?: string[]}[]} adapters */
+function homeFor(id, adapters) {
+  const a = (adapters || []).find((x) => x && x.id === id);
+  return a && a.origins && a.origins[0] ? `${a.origins[0]}/` : null;
+}
+
+/**
  * Items the user hid or snoozed into the future, for the Settings -> General
  * list. Sorted by title for a stable scan.
  * @param {Record<string, any>} items

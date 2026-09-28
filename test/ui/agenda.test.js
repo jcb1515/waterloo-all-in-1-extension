@@ -66,7 +66,7 @@ test("rows within a group sort by anchor (dueAt || startAt)", () => {
 const cls = (id, dOff, h) =>
   item(id, { type: "class", startAt: at(dOff, h), endAt: at(dOff, h + 1), org: "ECE 105" });
 
-test("showClasses=today: classes only in Today and Tomorrow", () => {
+test("showClasses=today: today's classes fold into Classes today, tomorrow stays put", () => {
   const items = { c0: cls("c0", 0, 13), c1: cls("c1", 1, 9), c4: cls("c4", 4, 9) };
   const ag = buildAgenda({
     items,
@@ -74,9 +74,20 @@ test("showClasses=today: classes only in Today and Tomorrow", () => {
     settings: { agenda: { showClasses: "today" } },
     now: NOW,
   });
-  assert.deepEqual(ids(group(ag, "today")), ["c0"]);
+  assert.deepEqual(ids(group(ag, "classes-today")), ["c0"]);
+  assert.equal(group(ag, "classes-today").collapsedByDefault, true);
+  assert.equal(group(ag, "classes-today").label, "Classes today");
   assert.deepEqual(ids(group(ag, "tomorrow")), ["c1"]);
   assert.equal(ag.groups.some((g) => g.rows.some((r) => r.id === "c4")), false);
+});
+
+test("classes-today emits right after the today group", () => {
+  const items = {
+    d: item("d", { dueAt: at(0, 23, 59) }),
+    c: cls("c", 0, 13),
+  };
+  const ag = buildAgenda({ items, userState: {}, settings: {}, now: NOW });
+  assert.deepEqual(groupIds(ag).slice(0, 2), ["today", "classes-today"]);
 });
 
 test("showClasses=all shows classes anywhere; none hides them", () => {
@@ -229,4 +240,37 @@ test("q filters rows on title/org/location, case-insensitive", () => {
   assert.deepEqual(ids(group(buildAgenda({ ...base, q: "engl" }), "today")), ["c"]);
   assert.deepEqual(ids(group(buildAgenda({ ...base, q: "E5 1234" }), "today")), ["b"]);
   assert.equal(buildAgenda({ ...base, q: "nothing matches" }).groups.length, 0);
+});
+
+/* ------------------------------- source filter --------------------------- */
+
+test("source filter: keeps only items from that source (source or seenIn)", () => {
+  const items = {
+    a: item("a", { dueAt: at(0, 12), source: "learn", seenIn: [{ source: "learn" }] }),
+    b: item("b", {
+      dueAt: at(0, 13),
+      source: "portal",
+      seenIn: [{ source: "portal" }, { source: "outline" }],
+    }),
+    c: item("c", { dueAt: at(0, 14), source: "waterlooworks", seenIn: [{ source: "waterlooworks" }] }),
+  };
+  const base = { items, userState: {}, settings: {}, now: NOW };
+  assert.deepEqual(ids(group(buildAgenda({ ...base, source: "learn" }), "today")), ["a"]);
+  assert.deepEqual(ids(group(buildAgenda({ ...base, source: "outline" }), "today")), ["b"], "seenIn match");
+  assert.deepEqual(ids(group(buildAgenda({ ...base, source: "portal" }), "today")), ["b"]);
+  assert.equal(buildAgenda({ ...base, source: "discord" }).groups.length, 0);
+});
+
+/* ----------------------------- full-date labels -------------------------- */
+
+test("day groups carry full-date labels; today/tomorrow keep their name + date", () => {
+  const items = {
+    a: item("a", { dueAt: at(0, 12) }),      // Wed Sep 23
+    b: item("b", { dueAt: at(1, 12) }),      // Thu Sep 24
+    c: item("c", { dueAt: at(3, 12) }),      // Sat Sep 26
+  };
+  const ag = buildAgenda({ items, userState: {}, settings: {}, now: NOW });
+  assert.equal(group(ag, "today").label, "Today — Wednesday, September 23");
+  assert.equal(group(ag, "tomorrow").label, "Tomorrow — Thursday, September 24");
+  assert.equal(group(ag, "day:Sat Sep 26 2026").label, "Saturday, September 26");
 });
