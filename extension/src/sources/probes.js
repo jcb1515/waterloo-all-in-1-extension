@@ -17,8 +17,12 @@ import { probe as gcalProbe, CHECKLIST as GCAL_CHECKLIST } from "./gcal/probe.js
  * @typedef {{page: string, counts: Record<string, number>, ok: boolean,
  *   hints: string[]}} ProbeResult
  * @typedef {{id: string, label: string, how: string, page?: string,
+ *   url?: string, essential?: boolean, refreshDays?: number,
  *   stat?: {kind: "observe"|"sync", scope?: string, itemsMin?: number,
  *   maxAgeMin?: number}}} CheckRow
+ *   - url        https page the "Open" button opens (deep stable link, no token)
+ *   - essential  row joins the first-run "Get set up" checklist (1–3 per source)
+ *   - refreshDays  last good read older than this earns a "Needs a visit" nudge
  * @typedef {{source: string, at: string, kind: "observe"|"sync",
  *   path?: string, scope?: string, items?: number, error?: string}} ReadStat
  */
@@ -36,6 +40,8 @@ export const CHECK_SOURCES = {
         id: "learn-home",
         label: "Learn home",
         how: "Open learn.uwaterloo.ca — deadlines and courses read on the next sync.",
+        url: "https://learn.uwaterloo.ca/d2l/home",
+        essential: true,
         stat: { kind: "sync", itemsMin: 1, maxAgeMin: 30 },
       },
       {
@@ -48,17 +54,25 @@ export const CHECK_SOURCES = {
   },
   portal: {
     probe: null,
+    // TODO(W1): when W2's any-open-page Portal fetch lands, replace these two
+    // rows with PORTAL_OPEN_ROW below.
     checklist: [
       {
         id: "portal-schedule",
         label: "Your class schedule",
         how: "Open Portal → your class schedule.",
+        url: "https://portal.uwaterloo.ca/",
+        essential: true,
+        refreshDays: 30,
         stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1, maxAgeMin: 30 },
       },
       {
         id: "portal-exams",
         label: "Your exam schedule",
         how: "Open Portal → your exam schedule.",
+        url: "https://portal.uwaterloo.ca/",
+        essential: true,
+        refreshDays: 14,
         stat: { kind: "observe", scope: "portal:exams", itemsMin: 1, maxAgeMin: 30 },
       },
     ],
@@ -90,6 +104,31 @@ const PAGE_ALIAS = {
     "event-detail": "events-modal",
   },
 };
+
+/**
+ * The row that replaces both Portal checklist rows once W2's "any open
+ * Portal page fetches everything" lands — kept ready here so the swap is a
+ * one-line change in CHECK_SOURCES.portal.checklist. Unused until then.
+ * @type {CheckRow}
+ */
+export const PORTAL_OPEN_ROW = {
+  id: "portal-open",
+  label: "Open Portal once",
+  how: "Open any Portal page — your schedule, exams and term dates are read while it's open.",
+  url: "https://portal.uwaterloo.ca/",
+  essential: true,
+  refreshDays: 14,
+  stat: { kind: "observe", scope: "portal:schedule", itemsMin: 1 },
+};
+
+/**
+ * The probe-page key a checklist row reads — row.page, then a PAGE_ALIAS
+ * entry, then row.id. Shared by the checklist and the onboarding model.
+ * @param {string} source @param {CheckRow} row
+ */
+export function checkRowPage(source, row) {
+  return row.page || (PAGE_ALIAS[source] && PAGE_ALIAS[source][row.id]) || row.id;
+}
 
 /** Extra count requirements for aliased rows (row must see this counter > 0). */
 const COUNT_REQ = {
@@ -163,7 +202,7 @@ export function checklistRowStatus(row, probeByPage = {}, stats = [], now = new 
       (st.items || 0) > 0 &&
       nowMs - Date.parse(st.at || "") <= RECENT_STAT_MS
   );
-  const pageKey = row.page || (PAGE_ALIAS[source] && PAGE_ALIAS[source][row.id]) || row.id;
+  const pageKey = checkRowPage(source, row);
   const hit = probeByPage && probeByPage[pageKey];
 
   if (hit) {

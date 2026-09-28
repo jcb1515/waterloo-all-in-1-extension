@@ -12,8 +12,9 @@
 //   tabs                          list page targets (id, host, path)
 //   dump <urlSub> [--name x]      save document HTML to captures/live/
 //   probe <urlSub>                dump + run the source's probe/parser
-//   storage [key] [--source id]   read chrome.storage.local from the SW
-//   watch [--source id] [--secs]  poll storage, print changes
+//   storage [key] [--source id] [--ext id]  read chrome.storage.local (SW)
+//   watch [--source id] [--secs] [--ext id] poll storage, print changes
+//   (WA1_EXT_ID selects a copy too — two unpacked dists can be loaded)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -27,8 +28,10 @@ const EXT_NAME = "Waterloo All-in-1";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LIVE_DIR = path.join(ROOT, "captures", "live");
 const SETUP_HINT =
-  "Launch Edge with remote debugging (see tools/live/README.md): " +
-  'close Edge fully, then start msedge.exe --remote-debugging-port=9222';
+  "Launch the dedicated debug profile (see tools/live/README.md): " +
+  '& "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" ' +
+  '--remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\\wa1-edge-debug" ' +
+  "— Edge ignores the port flag on the default profile since Chromium 136.";
 
 /* ------------------------------- pure parts ------------------------------ */
 
@@ -122,6 +125,30 @@ export function serviceWorkerTargets(targets) {
       typeof t.url === "string" &&
       t.url.startsWith("chrome-extension://"),
   );
+}
+
+/** The extension id a service-worker target belongs to ("" if malformed). */
+export function swExtId(target) {
+  try {
+    return new URL(String(target && target.url)).host;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Narrow service-worker candidates by an extension-id selector
+ * (--ext <id> / WA1_EXT_ID). No selector keeps them all; a selector must
+ * match at least one or the caller reports the miss.
+ * @returns {{candidates: any[]} | {error: string}}
+ */
+export function pickServiceWorker(targets, extId) {
+  const sws = Array.isArray(targets) ? targets : [];
+  if (!extId) return { candidates: sws };
+  const hit = sws.filter((sw) => swExtId(sw) === extId);
+  return hit.length
+    ? { candidates: hit }
+    : { error: `no service worker with extension id "${extId}"` };
 }
 
 /* ------------------------------- CDP client ------------------------------ */
@@ -267,30 +294,52 @@ async function dumpTab(sub, name) {
   }
 }
 
-/** Locate the extension's service worker and eval a storage.get(key). */
-async function storageGet(key) {
+/**
+ * Locate the extension's service worker and eval a storage.get(key).
+ * The worker is identified by asking it — Node can't fetch
+ * chrome-extension:// URLs, so manifest.json can't be fetched. Two unpacked
+ * copies may be loaded (main + W2's); --ext/WA1_EXT_ID picks one.
+ * @param {string|null} key @param {string|null} [extId]
+ */
+async function storageGet(key, extId) {
   const targets = await listTargets();
-  const sws = serviceWorkerTargets(targets);
-  for (const sw of sws) {
-    // Confirm it's OUR extension before touching it: fetch the manifest.
-    try {
-      const mf = await (await fetch(new URL("manifest.json", sw.url))).json();
-      if (mf.name !== EXT_NAME) continue;
-    } catch {
-      continue;
-    }
+  const wanted = extId || process.env.WA1_EXT_ID || null;
+  const pick = pickServiceWorker(serviceWorkerTargets(targets), wanted);
+  if ("error" in pick) die(`${pick.error} (from --ext/WA1_EXT_ID).`);
+
+  /** @type {{sw: any, cdp: Cdp}[]} */
+  const matches = [];
+  for (const sw of pick.candidates) {
     const cdp = new Cdp(sw.webSocketDebuggerUrl);
-    await cdp.open();
     try {
-      const expr = key
-        ? `chrome.storage.local.get(${JSON.stringify(String(key))})`
-        : "chrome.storage.local.get(null)";
-      return await cdp.eval(expr, { awaitPromise: true });
-    } finally {
+      await cdp.open();
+      const name = await cdp.eval("chrome.runtime.getManifest().name");
+      if (name === EXT_NAME) matches.push({ sw, cdp });
+      else cdp.close();
+    } catch {
       cdp.close();
     }
   }
-  die(`No "${EXT_NAME}" service worker found — is the extension loaded in that Edge?`);
+  if (!matches.length) {
+    die(`No "${EXT_NAME}" service worker found — is the extension loaded in that Edge?`);
+  }
+  if (matches.length > 1) {
+    const list = matches.map((m) => `  ${swExtId(m.sw)}\t${m.sw.url}`).join("\n");
+    for (const m of matches) m.cdp.close();
+    die(
+      `More than one "${EXT_NAME}" copy is loaded. Pick one with --ext <id> or WA1_EXT_ID:\n${list}`,
+      3,
+    );
+  }
+  const cdp = matches[0].cdp;
+  try {
+    const expr = key
+      ? `chrome.storage.local.get(${JSON.stringify(String(key))})`
+      : "chrome.storage.local.get(null)";
+    return await cdp.eval(expr, { awaitPromise: true });
+  } finally {
+    cdp.close();
+  }
 }
 
 /* ------------------------------ probe recipes ---------------------------- */
@@ -448,8 +497,8 @@ async function cmdProbe(sub) {
   for (const it of items.slice(0, 5)) console.log(`  ${fmtRow(it)}`);
 }
 
-async function cmdStorage(key, sourceId) {
-  const all = await storageGet(key || null);
+async function cmdStorage(key, sourceId, extId) {
+  const all = await storageGet(key || null, extId);
   const snap = key ? { [key]: all && all[key] } : all || {};
   if (key && snap[key] === undefined) {
     console.log(`storage key "${key}" is not set.`);
@@ -484,7 +533,7 @@ async function cmdStorage(key, sourceId) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function cmdWatch(sourceId, secs) {
+async function cmdWatch(sourceId, secs, extId) {
   const until = Date.now() + secs * 1000;
   /** @type {string|null} */
   let lastState = null;
@@ -492,7 +541,7 @@ async function cmdWatch(sourceId, secs) {
   console.log(`watching storage every 2s for ${secs}s${sourceId ? ` (source ${sourceId})` : ""} …`);
   while (Date.now() < until) {
     try {
-      const snap = await storageGet(null);
+      const snap = await storageGet(null, extId);
       const states = (snap && snap.sourceState) || {};
       const view = {};
       for (const [id, st] of Object.entries(states)) {
@@ -543,6 +592,9 @@ async function main() {
   storage [key] [--source id]     read chrome.storage.local (SW target)
   watch [--source id] [--secs n]  poll storage every 2s, print changes
 
+  Both storage commands accept --ext <id> (or the WA1_EXT_ID env var) to pick
+  one extension copy when more than one unpacked dist/ is loaded.
+
 READ-ONLY: no Input.*, no navigate, no clicks, no closing tabs.`);
     return;
   }
@@ -557,9 +609,17 @@ READ-ONLY: no Input.*, no navigate, no clicks, no closing tabs.`);
       if (!rest[0]) die("usage: probe <urlSubstring>");
       return cmdProbe(rest[0]);
     case "storage":
-      return cmdStorage(rest[0] && !rest[0].startsWith("--") ? rest[0] : null, argValue(rest, "--source"));
+      return cmdStorage(
+        rest[0] && !rest[0].startsWith("--") ? rest[0] : null,
+        argValue(rest, "--source"),
+        argValue(rest, "--ext"),
+      );
     case "watch":
-      return cmdWatch(argValue(rest, "--source"), Number(argValue(rest, "--secs")) || 120);
+      return cmdWatch(
+        argValue(rest, "--source"),
+        Number(argValue(rest, "--secs")) || 120,
+        argValue(rest, "--ext"),
+      );
     default:
       die(`unknown command "${cmd}" — try: tabs, dump, probe, storage, watch`);
   }

@@ -170,6 +170,14 @@ const SHOTS_V2_POLISH = [
   { name: "item-sheet-light-360", url: "/src/panel/panel.html?preview=1&item=waterlooworks%3Aint-acme", size: [360, 900] },
 ];
 
+const SHOTS_V2_ONBOARDING = [
+  { name: "upcoming-light-360", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [360, 900] },
+  { name: "upcoming-dark-400", url: "/src/panel/panel.html?preview=1&tab=upcoming", size: [400, 900], dark: true },
+  { name: "portal-card-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=picked", size: [360, 900] },
+  { name: "portal-check-light-360", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=check", size: [360, 900] },
+  { name: "portal-check-dark-400", url: "/src/panel/panel.html?preview=1&tab=sources&source=portal&seg=check", size: [400, 900], dark: true },
+];
+
 const SHOTS_FINAL = [
   { name: "options-sources-gcal-light", url: "/src/options/options.html?preview=1#sources", size: [1280, 900], scroll: "#src-gcal" },
   { name: "panel-check-readers-light", url: "/src/panel/panel.html?preview=1&view=checkreaders&saw=gcal:gcal-week", size: [400, 900] },
@@ -178,6 +186,7 @@ const SHOTS_FINAL = [
 ];
 
 const SHOTS =
+  process.env.WA1_SHOT_DIR === "v2-onboarding" ? SHOTS_V2_ONBOARDING :
   process.env.WA1_SHOT_DIR === "v2-polish" ? SHOTS_V2_POLISH :
   process.env.WA1_SHOT_DIR === "v2" ? SHOTS_V2 :
   process.env.WA1_SHOT_DIR === "final" ? SHOTS_FINAL :

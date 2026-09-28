@@ -7,6 +7,8 @@ import { useMemo, useState } from "preact/hooks";
 import { ADAPTERS, stageForAdapter } from "../../core/registry.js";
 import { sourceStatus } from "../model/sources.js";
 import { fmtAgo } from "../model/agenda.js";
+import { onboardingRows, nudges as visitNudges } from "../model/onboarding.js";
+import { OnboardingCard, NudgeCard } from "../../ui/Onboarding.jsx";
 import { IS_PREVIEW, send } from "../data.js";
 import { UI } from "../../core/messages.js";
 import {
@@ -36,6 +38,19 @@ import {
 } from "../../ui/icons.jsx";
 
 const TONE_BADGE = { ok: "badge-ok", warn: "badge-warn", danger: "badge-danger", muted: "badge-muted" };
+
+/** Open an external page in a new tab — click handlers only. */
+function openExternal(url) {
+  if (IS_PREVIEW) {
+    window.open(url, "_blank");
+    return;
+  }
+  try {
+    chrome.tabs.create({ url });
+  } catch {
+    window.open(url, "_blank");
+  }
+}
 
 const SEGMENTS = [
   ["picked", "Picked up"],
@@ -180,6 +195,20 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
   const enabled = adapter.id === "gcal" ? src.enabled === true : src.enabled !== false;
   const [denied, setDenied] = useState(false);
 
+  // This source's slice of the setup checklist and its stale-read nudges.
+  const onboard = useMemo(
+    () => onboardingRows(state, now).filter((r) => r.source === adapter.id),
+    [state.probes, state.sourceState, state.settings, state.userState, now, adapter.id]
+  );
+  const onboardHidden =
+    !onboard.length ||
+    onboard.every((r) => r.done) ||
+    !!(state.userState && state.userState.onboardingDismissedAt);
+  const visits = useMemo(
+    () => visitNudges(state, now).filter((n) => n.source === adapter.id),
+    [state.probes, state.sourceState, state.settings, state.userState, now, adapter.id]
+  );
+
   const needed = neededGroups(adapter.id, src);
   const access = useAccessMap(needed);
   const missing = needed.filter((g) => access[g] === false);
@@ -244,6 +273,10 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
         <AllowSourceButton key={g} sourceId={g} label={`Allow ${GROUP_LABELS[g] || g}`} />
       ))}
 
+      {onboardHidden ? null : (
+        <OnboardingCard rows={onboard} onOpen={openExternal} onDismiss={actions.dismissOnboarding} />
+      )}
+
       <Segmented options={SEGMENTS} value={segment} onChange={setSegment} ariaLabel={`${adapter.label} sections`} />
 
       {segment === "picked" ? (
@@ -261,7 +294,10 @@ function SourcePage({ card, state, actions, now, segment, setSegment, onBack, on
           </EmptyState>
         )
       ) : (
-        <Check sourceId={adapter.id} state={state} actions={actions} now={now} />
+        <>
+          <NudgeCard nudges={visits} onOpen={openExternal} onSnooze={actions.snoozeNudge} />
+          <Check sourceId={adapter.id} state={state} actions={actions} now={now} />
+        </>
       )}
 
       {enabled ? (
