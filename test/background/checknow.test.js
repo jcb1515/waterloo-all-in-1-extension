@@ -401,7 +401,7 @@ test("sweepCheckRuns closes tabIds a dead run recorded", async () => {
     gmail: {
       runId: "check:gmail:1",
       status: "running",
-      startedAt: new Date(T0 - 120000).toISOString(),
+      startedAt: new Date(T0 - CHECK_TIMEOUT_MS - 1000).toISOString(),
       tabIds: [901, 902],
     },
   };

@@ -117,7 +117,9 @@ pages — `sendMessage` can only reach the service worker from a page, never
 from the worker itself. With no live extension page it opens
 `src/panel/panel.html` in a tool-created tab and closes it afterwards. The
 command polls `checkRuns[source]` (through the same page) until the run
-leaves `running` or 100 s pass, then prints status/reason/checked/newItems.
+leaves `running` or ~330 s pass (the run deadline is 5 min — an Outlook
+check reads ~100 messages in-page), then prints
+status/reason/checked/newItems.
 Any tab the orchestrator itself opens (an inactive site tab for a source
 with none open) is created and closed by the extension, not the tool.
 
