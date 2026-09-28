@@ -110,28 +110,6 @@ html[data-theme="dark"] .opt-nav-links a.active {
   margin-left: var(--sp-1);
 }
 
-/* sources section */
-.src-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-}
-.src-main {
-  min-width: 0;
-}
-.src-name {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.src-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
 .discord-advanced > summary {
   cursor: pointer;
   margin-bottom: var(--sp-2);

@@ -1,10 +1,25 @@
 // Courses view: one card per course, and a detail page with the assessments
 // table, grading-scheme selector, the grade calculator, this week's topics
-// and the course's upcoming items.
+// and the course's upcoming items. The list also carries outline setup: an
+// "Add outline" card, the imported-files list and waiting-to-sync rows.
 
 import { useMemo, useState } from "preact/hooks";
 import { courseCards, courseItems, gradeSummary, weekTopics } from "../model/courses.js";
 import { fmtDay, fmtTime } from "../model/agenda.js";
+import { normCourseCode } from "../../core/contract.js";
+import {
+  groupPatch,
+  outlineUrlPatch,
+  sectionsPatch,
+  termLabel,
+} from "../model/setup.js";
+import {
+  AddOutlineCard,
+  OutlineFileList,
+  OutlineLinkEditor,
+  saveOutlineUrls,
+  useOutlineFiles,
+} from "../components/OutlineSetup.jsx";
 import { orgStyle } from "../../ui/colors.js";
 import { ItemRow } from "../components/ItemRow.jsx";
 import {
@@ -12,6 +27,8 @@ import {
   ChevronRightIcon,
   ExternalLinkIcon,
   GraduationCapIcon,
+  PlusIcon,
+  TrashIcon,
 } from "../../ui/icons.jsx";
 
 const pct = (n) => (n == null ? "—" : `${Math.round(n * 10) / 10}%`);
@@ -32,6 +49,13 @@ function CourseDetail({ card, state, actions, now, onBack }) {
   const schemes = Array.isArray(course.gradingSchemes) ? course.gradingSchemes : [];
   const [schemeIdx, setSchemeIdx] = useState(0);
   const [target, setTarget] = useState(80);
+  const { addFiles } = useOutlineFiles(state, actions);
+  const profile = (state.settings && state.settings.profile) || {};
+  const sectionsText = (Array.isArray(profile.sections && profile.sections[code])
+    ? profile.sections[code]
+    : []
+  ).join(", ");
+  const groupText = (profile.groups && profile.groups[code]) || "";
   const scheme = schemes.length ? schemes[Math.min(schemeIdx, schemes.length - 1)] : null;
   const summary = useMemo(
     () => gradeSummary(course, { scheme, target }),
@@ -92,6 +116,56 @@ function CourseDetail({ card, state, actions, now, onBack }) {
           {card.sections.join(" · ")}
           {card.group ? ` · Group ${card.group}` : ""}
         </p>
+      </div>
+
+      <div class="card setup-card">
+        <h3>Setup</h3>
+        <div class="setup-row">
+          <span class="label">Outline</span>
+          <OutlineLinkEditor
+            state={state}
+            actions={actions}
+            code={code}
+            discoveredUrl={card.outlineUrl}
+            addFiles={addFiles}
+          />
+        </div>
+        <div class="setup-row">
+          <span class="label">My sections</span>
+          <input
+            class="input"
+            defaultValue={sectionsText}
+            placeholder="LEC 002, TUT 104"
+            onBlur={(e) => {
+              const v = /** @type {any} */ (e.target).value;
+              if (v !== sectionsText) {
+                actions.saveSettings({
+                  profile: { sections: sectionsPatch(state.settings, code, v) },
+                });
+              }
+            }}
+          />
+          <p class="help">
+            Portal fills this in automatically; your entry is used for any
+            section type Portal doesn't list.
+          </p>
+        </div>
+        <div class="setup-row">
+          <span class="label">Group</span>
+          <input
+            class="input group-input"
+            defaultValue={groupText}
+            placeholder="e.g. 5"
+            onBlur={(e) => {
+              const v = /** @type {any} */ (e.target).value;
+              if (v !== groupText) {
+                actions.saveSettings({
+                  profile: { groups: groupPatch(state.settings, code, v) },
+                });
+              }
+            }}
+          />
+        </div>
       </div>
 
       {schemes.length > 1 ? (
@@ -252,6 +326,9 @@ export function Courses({ state, actions, now }) {
     [state.courses, state.items, state.userState, now]
   );
   const [selCode, setSelCode] = useState(() => query0("course"));
+  // ?add=1 opens the Add outline card straight away (deep link/screenshots).
+  const [adding, setAdding] = useState(() => query0("add") === "1");
+  const outlineLib = useOutlineFiles(state, actions);
   const sel = selCode ? cards.find((c) => c.code === selCode) : null;
 
   if (sel) {
@@ -266,14 +343,75 @@ export function Courses({ state, actions, now }) {
     );
   }
 
+  // Outline URLs configured for courses the sync hasn't produced yet.
+  const urls =
+    (state.settings &&
+      state.settings.sources &&
+      state.settings.sources.outline &&
+      state.settings.sources.outline.urls) ||
+    {};
+  const known = new Set(Object.keys(state.courses || {}).map(normCourseCode));
+  const waiting = Object.keys(urls)
+    .filter((c) => !known.has(normCourseCode(c)))
+    .sort();
+
   return (
     <div class="courses">
+      <div class="courses-head">
+        <span class="courses-term tabular">
+          {termLabel((state.settings && state.settings.termCode) || 1269)}
+        </span>
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={() => setAdding((a) => !a)}
+        >
+          <PlusIcon size={13} /> Add outline
+        </button>
+      </div>
       {!cards.length ? (
         <div class="card empty-card">
           <GraduationCapIcon size={20} />
           <h3>No courses yet</h3>
           <p class="help">
-            Courses appear once Learn or an outline syncs. Check Sources if it's been a while.
+            Courses appear once Learn or an outline syncs — add an outline to start.
+          </p>
+        </div>
+      ) : null}
+      {adding || !cards.length ? (
+        <AddOutlineCard
+          state={state}
+          actions={actions}
+          addFiles={outlineLib.addFiles}
+          fileError={outlineLib.error}
+        />
+      ) : null}
+      <OutlineFileList files={outlineLib.files} write={outlineLib.write} />
+      {waiting.length ? (
+        <div class="card">
+          <h3>Waiting to sync</h3>
+          {waiting.map((c) => (
+            <div class="waiting-row" key={c}>
+              <span class="chip chip-org" style={orgStyle(c, state.projects)}>{c}</span>
+              <span class="waiting-url" title={urls[c]}>{urls[c]}</span>
+              <button
+                type="button"
+                class="btn-icon"
+                aria-label={`Remove ${c}`}
+                onClick={() =>
+                  saveOutlineUrls(
+                    state,
+                    actions,
+                    outlineUrlPatch(state.settings, c, null)
+                  )
+                }
+              >
+                <TrashIcon size={14} />
+              </button>
+            </div>
+          ))}
+          <p class="help">
+            Saved outline links the next outline sync picks up.
           </p>
         </div>
       ) : null}

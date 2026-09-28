@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS = {
     discord: {
       enabled: true,
       watched: {},
+      channelTargets: {},
     },
   },
   agenda: { showClasses: "today" },
@@ -167,7 +168,7 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
  * value replaces the inherited one outright, so deleting a row in the UI
  * doesn't resurrect the default/dev-profile row.
  */
-const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched"]);
+const REPLACE_KEYS = new Set(["sections", "groups", "urls", "watched", "channelTargets"]);
 
 /** Recursive merge for plain-object values; arrays and scalars overwrite. */
 export function deepMerge(base, patch) {
@@ -180,6 +181,17 @@ export function deepMerge(base, patch) {
     }
   }
   return out;
+}
+
+/**
+ * Merge one patch into settings — the same rules `setSettings` applies to
+ * stored settings. Exported so preview UIs can update their in-memory copy
+ * identically (REPLACE_KEYS tables swap wholesale; everything else merges).
+ * @param {any} current resolved settings
+ * @param {Record<string, any>} patch
+ */
+export function applySettingsPatch(current, patch) {
+  return deepMerge(current, patch);
 }
 
 /* --------------------------- settings --------------------------- */
@@ -221,7 +233,7 @@ export async function setSettings(patchOrFn) {
     const next =
       typeof patchOrFn === "function"
         ? patchOrFn(structuredClone(current)) || current
-        : deepMerge(current, patchOrFn);
+        : applySettingsPatch(current, patchOrFn);
     await chrome.storage.local.set({ [SETTINGS_KEY]: next });
     return next;
   });

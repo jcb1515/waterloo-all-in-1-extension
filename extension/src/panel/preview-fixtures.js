@@ -809,8 +809,42 @@ export function previewState(nowD = new Date(), variants = {}) {
       itemCount: 3,
       state: {
         guilds: {
-          "9102": { name: "WATonomous", unread: 0, mentions: 0, channels: {} },
-          "8804": { name: "ECE 2027", unread: 1, mentions: 0, channels: {} },
+          "9102": {
+            name: "WATonomous",
+            unread: 0,
+            mentions: 0,
+            lastInventoryAt: iso(now - 3 * HOUR),
+            channels: {
+              "9910": { name: "announcements", type: "text", category: "INFO", order: 0 },
+              "9917": { name: "deadlines", type: "text", category: "INFO", order: 1 },
+              "9915": { name: "general", type: "text", category: "GENERAL", order: 0, unread: true },
+              "9913": { name: "meetings", type: "text", category: "GENERAL", order: 1 },
+              "9912": { name: "electrical", type: "text", category: "ELECTRICAL", order: 1 },
+              "9918": { name: "firmware", type: "text", category: "ELECTRICAL", order: 2 },
+              "9919": { name: "memes", type: "text", category: "CHILL", order: 0 },
+              "9920": { name: "voice-lounge", type: "voice", category: "VOICE", order: 0 },
+            },
+          },
+          "8804": {
+            name: "ECE 2027",
+            unread: 1,
+            mentions: 0,
+            lastInventoryAt: iso(now - 6 * HOUR),
+            channels: {
+              "9814": { name: "announcements", type: "text", category: "INFO", order: 0 },
+              "9817": { name: "deadlines", type: "text", category: "INFO", order: 1 },
+              "9815": { name: "general", type: "text", category: "GENERAL", order: 0 },
+              "9818": { name: "exams", type: "text", category: "COURSE", order: 0 },
+              "9819": { name: "help", type: "text", category: "COURSE", order: 1 },
+              "9816": { name: "labs", type: "text", category: "COURSE", order: 2, unread: true, mentions: 1 },
+              "9820": { name: "memes", type: "text", category: "CHILL", order: 0 },
+              "9821": { name: "seminar-voice", type: "voice", category: "VOICE", order: 0 },
+            },
+          },
+        },
+        watch: {
+          "9102": { channelIds: ["9912", "9918", "9910", "9917", "9913"], from: "suggested" },
+          "8804": { channelIds: ["9814", "9816"], from: "settings" },
         },
         sweep: { startedAt: iso(now - 2 * DAY), done: { "9911": iso(now - DAY) } },
         sweepQueue: [
@@ -1082,12 +1116,27 @@ export function previewState(nowD = new Date(), variants = {}) {
     theme: "system",
     density: "comfortable",
     termCode: 1269,
+    profile: {
+      sections: { "MATH 117": ["LEC 002", "TUT 104"], "ECE 105": ["LEC 001", "LAB 211"] },
+      groups: { "ECE 150": "3" },
+    },
     agenda: { showClasses: "today" },
     sources: {
       gcal: { enabled: true },
+      outline: {
+        enabled: true,
+        urls: {
+          "MATH 117": "https://outline.uwaterloo.ca/viewer/npch7t",
+          // No PHIL 110 course yet — shows as a "Waiting to sync" row.
+          "PHIL 110": "https://outline.uwaterloo.ca/viewer/view/ph9k2",
+        },
+      },
       discord: {
         enabled: true,
         watched: { WATonomous: { focus: ["electrical"], channels: [] }, "ECE 2027": { focus: [], channels: [] } },
+        // ECE 2027 runs in custom mode (only its two targeted channels are
+        // watched); WATonomous stays on automatic suggestions.
+        channelTargets: { "ECE 2027": ["9814", "9816"] },
         userId: "416820311045488640",
         roleIds: ["8804112233", "9102445566"],
         keywords: ["standup", "retro"],
