@@ -3,7 +3,7 @@
 // SourceBadge and a DateBlock — rows under a day header may show just a time.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { buildAgenda } from "../model/agenda.js";
+import { buildAgenda, foundNotAdded } from "../model/agenda.js";
 import { fmtEstimate } from "../model/itemsheet.js";
 import { attentionSource } from "../model/sources.js";
 import { onboardingRows, nudges as visitNudges } from "../model/onboarding.js";
@@ -48,6 +48,7 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
   const [source, setSource] = useState(() => query0("src") || null);
   const [q, setQ] = useState("");
   const [collapsed, setCollapsed] = useState(() => ({}));
+  const [foundAll, setFoundAll] = useState(false);
   const [filterOpen, setFilterOpen] = useState(() => query0("fsheet") === "1");
 
   const orgs = useMemo(() => {
@@ -98,6 +99,20 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
         projects: state.projects,
       }),
     [state.items, state.userState, state.settings, state.projects, filter, org, source, q]
+  );
+
+  // Pending finds with no verdict or to-do pin — the "Found, not added yet"
+  // section ([] while review.showPending lists them in the normal groups).
+  const found = useMemo(
+    () =>
+      foundNotAdded({
+        items: state.items,
+        userState: state.userState,
+        settings: state.settings,
+        now,
+        projects: state.projects,
+      }),
+    [state.items, state.userState, state.settings, state.projects]
   );
 
   if (!state.ready) {
@@ -176,6 +191,41 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
         </button>
       ) : null}
       <NudgeCard nudges={visits} limit={2} onOpen={openUrl} onSnooze={actions.snoozeNudge} />
+
+      {found.length ? (
+        <section class="agenda-group" aria-label="Found, not added yet">
+          <GroupHeader
+            label="Found, not added yet"
+            count={found.length}
+            collapsed={collapsed.found ?? false}
+            onToggle={() =>
+              setCollapsed((c) => ({ ...c, found: !(c.found ?? false) }))
+            }
+          />
+          {(collapsed.found ?? false) ? null : (
+            <div class="card row-card" role="list">
+              {(foundAll ? found : found.slice(0, 5)).map((item) => (
+                <FoundRow
+                  key={item.id}
+                  item={item}
+                  state={state}
+                  actions={actions}
+                  now={now}
+                />
+              ))}
+              {found.length > 5 && !foundAll ? (
+                <button
+                  type="button"
+                  class="linklike"
+                  onClick={() => setFoundAll(true)}
+                >
+                  Show all {found.length}
+                </button>
+              ) : null}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <section class="card summary-card" aria-label="Today">
         <h2 class="summary-date">{s.dateLabel}</h2>
@@ -402,6 +452,63 @@ export function Upcoming({ state, actions, now, onGoSources, onGoCalendar }) {
 /** Row priority — rows already carry effective fields. */
 function rowPriority(item, now) {
   return priorityOf(item, now);
+}
+
+/**
+ * One "Found, not added yet" row: the ItemRow opens the item sheet; the
+ * pill + verdict buttons sit under it. Every button stops propagation so
+ * the click can't reach the row's open handler.
+ * @param {{item: any, state: any, actions: any, now: Date}} p
+ */
+function FoundRow({ item, state, actions, now }) {
+  const dismiss = (e) => {
+    e.stopPropagation();
+    actions.setUserState(item.id, { review: "dismissed" });
+    actions.toast(`${item.title} dismissed`, {
+      label: "Undo",
+      run: () => actions.setUserState(item.id, { review: null }),
+    });
+  };
+  return (
+    <div>
+      <ItemRow
+        item={item}
+        now={now}
+        actions={actions}
+        projects={state.projects}
+      />
+      <p class="help">
+        <span class="badge badge-warn">Not added</span>{" "}
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.setUserState(item.id, { review: "accepted" });
+          }}
+        >
+          Add to calendar
+        </button>{" "}
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.setUserState(item.id, { todo: true });
+          }}
+        >
+          Add to To-do
+        </button>{" "}
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost"
+          onClick={dismiss}
+        >
+          Dismiss
+        </button>
+      </p>
+    </div>
+  );
 }
 
 function query0(name) {

@@ -449,3 +449,60 @@ export function buildAgenda({ items = {}, userState = {}, settings = {}, now, fi
     groups,
   };
 }
+
+/* ---------------------------- found, not added ------------------------------ */
+
+/**
+ * Upcoming's "Found, not added yet" section: pending finds the user hasn't
+ * acted on — raw review "pending", no accepted/dismissed verdict and no
+ * to-do pin in userState, not hidden, cancelled, a term date or in an
+ * archived project, anchored in [now, now + days]. When
+ * settings.review.showPending is on those items already list in the normal
+ * groups, so this returns [] rather than duplicating them.
+ * @param {Object} p
+ * @param {Record<string, any>} p.items       merged items map
+ * @param {Record<string, any>} p.userState
+ * @param {any} p.settings                    wa1Settings (review.showPending)
+ * @param {Date|number} p.now
+ * @param {any[]} [p.projects]
+ * @param {number} [p.days]
+ * @returns {any[]} effective items sorted by anchor ascending
+ */
+export function foundNotAdded({
+  items = {},
+  userState = {},
+  settings = {},
+  now,
+  projects = [],
+  days = 21,
+}) {
+  if (settings && settings.review && settings.review.showPending) return [];
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  const end = t + days * DAY;
+  /** @type {any[]} */
+  const out = [];
+  for (const it of Object.values(items || {})) {
+    if (!it || it.review !== "pending") continue;
+    const us = userState[it.id];
+    if (
+      us &&
+      (us.review === "accepted" || us.review === "dismissed" || us.todo === true)
+    ) {
+      continue;
+    }
+    // Overrides apply (an override may move the anchor or the type), but
+    // pending stays pending — no acceptPending here.
+    const eff = effectiveItem(it, us);
+    if (eff.hidden || eff.status === "cancelled" || eff.type === "term-date") {
+      continue;
+    }
+    if (archivedProjectItem(eff, projects)) continue;
+    const aMs = Date.parse(anchor(eff) || "");
+    if (Number.isNaN(aMs) || aMs < t || aMs > end) continue;
+    out.push(eff);
+  }
+  out.sort(
+    (x, y) => Date.parse(anchor(x) || "") - Date.parse(anchor(y) || "")
+  );
+  return out;
+}

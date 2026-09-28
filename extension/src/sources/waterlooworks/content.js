@@ -12,7 +12,7 @@ import {
   refreshGate,
 } from "./refresh.js";
 import { isLoggedOut } from "./parsers.js";
-import { guardInstance } from "./guard.js";
+import { guardInstance } from "../../capture/guard.js";
 
 const MY_ACCOUNT_RE =
   /^https:\/\/waterlooworks\.uwaterloo\.ca\/myAccount\//;

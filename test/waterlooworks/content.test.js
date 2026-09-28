@@ -126,7 +126,6 @@ function installPage(readyState = "loading") {
       delete globalThis.chrome;
       if (realCustomEvent === undefined) delete globalThis.CustomEvent;
       else globalThis.CustomEvent = realCustomEvent;
-      delete /** @type {any} */ (globalThis).__wa1WwContent;
     },
   };
 }
