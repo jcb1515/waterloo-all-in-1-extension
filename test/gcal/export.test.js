@@ -302,13 +302,78 @@ const sctx = (over) => ({
   ...over,
 });
 
-test("sync: disabled short-circuits; status 0 is unreachable", async () => {
+/** Run `fn` with chrome.permissions.contains stubbed to `granted`. */
+const withChromePermission = async (granted, fn) => {
+  const prev = /** @type {any} */ (globalThis).chrome;
+  /** @type {any} */ (globalThis).chrome = { permissions: { contains: async () => granted } };
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete /** @type {any} */ (globalThis).chrome;
+    else /** @type {any} */ (globalThis).chrome = prev;
+  }
+};
+
+test("sync: disabled short-circuits; status 0 with the API absent is signed-out", async () => {
   let r = await adapter.sync(sctx({ settings: { enabled: false } }));
   assert.equal(r.session, "no-tab");
   assert.equal(r.complete, false);
+  // No chrome.permissions API in tests -> treated as granted -> a status-0
+  // fetch means the request was blocked (sign-in redirect / cookies).
   r = await adapter.sync(sctx({ fetch: async () => ({ status: 0 }) }));
+  assert.equal(r.session, "signed-out");
+  assert.equal(r.error && r.error.code, "signed-out");
+});
+
+test("sync: status 0 + permission granted reports signed-out", async () => {
+  const r = await withChromePermission(true, () =>
+    adapter.sync(sctx({ fetch: async () => ({ status: 0, error: "Failed to fetch" }) })),
+  );
+  assert.equal(r.session, "signed-out");
+  assert.equal(r.error && r.error.code, "signed-out");
+  assert.match(String(r.error && r.error.message), /calendar\.google\.com/);
+});
+
+test("sync: status 0 + permission missing reports no-permission", async () => {
+  const r = await withChromePermission(false, () =>
+    adapter.sync(sctx({ fetch: async () => ({ status: 0, error: "Failed to fetch" }) })),
+  );
+  assert.equal(r.session, undefined);
+  assert.equal(r.error && r.error.code, "no-permission");
+  assert.match(String(r.error && r.error.message), /Sources → Setup/);
+});
+
+test("sync: status 0 timeout stays unreachable", async () => {
+  const r = await adapter.sync(sctx({ fetch: async () => ({ status: 0, error: "timeout" }) }));
   assert.equal(r.error && r.error.code, "unreachable");
   assert.equal(r.session, undefined);
+  assert.match(String(r.error && r.error.message), /answer in time/);
+});
+
+test("sync: status 0 still runs the iCal fallback", async () => {
+  const fetched = [];
+  const r = await withChromePermission(false, () =>
+    adapter.sync(
+      sctx({
+        settings: {
+          enabled: true,
+          icalUrls: ["https://calendar.google.com/calendar/ical/u/private-k/basic.ics"],
+        },
+        fetch: async (url) => {
+          fetched.push(url);
+          if (url.includes("exporticalzip")) return { status: 0, error: "Failed to fetch" };
+          return {
+            status: 200,
+            text: icsOf(vevent("UID:fb\r\nSUMMARY:fallback\r\nDTSTART:20261020T150000Z\r\n")),
+          };
+        },
+      }),
+    ),
+  );
+  assert.equal(r.complete, true);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.state.events.map((e) => e.title), ["fallback"]);
+  assert.equal(fetched.length, 2);
 });
 
 test("sync: login redirect / html / non-zip all look signed-out", async () => {

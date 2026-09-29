@@ -14,6 +14,7 @@
 import { dedupeEvents, WA1_TITLE_RE } from "./dom.js";
 import { readZip } from "./zip.js";
 import { parseIcs } from "./ics.js";
+import { hasSourceAccess } from "../../core/permissions.js";
 
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
@@ -134,10 +135,17 @@ const adapter = {
 
     /** @type {any[]} parsed calendars kept */
     const calendars = [];
-    /** @type {"unreachable"|"signed-out"|null} */
+    /** @type {"unreachable"|"signed-out"|"no-permission"|null} */
     let fail = null;
     if (!res || res.status === 0) {
-      fail = "unreachable";
+      if (res && res.error === "timeout") {
+        fail = "unreachable";
+      } else {
+        // status 0 = the fetch threw: the redirect to Google's sign-in page,
+        // blocked cookies, or the calendar.google.com host permission never
+        // granted — "unreachable" only for an actual timeout.
+        fail = (await hasSourceAccess("gcal")) ? "signed-out" : "no-permission";
+      }
     } else {
       const raw = res.base64 ? b64Bytes(res.base64) : null;
       const isZip =
@@ -182,11 +190,35 @@ const adapter = {
         return {
           items: [],
           complete: false,
-          error: { code: "unreachable", message: "calendar export unreachable" },
+          error: {
+            code: "unreachable",
+            message: "Google Calendar didn't answer in time — try again",
+          },
           state: prev,
         };
       }
-      return { items: [], complete: false, session: /** @type {const} */ ("signed-out"), state: prev };
+      if (fail === "no-permission") {
+        return {
+          items: [],
+          complete: false,
+          error: {
+            code: "no-permission",
+            message: "Allow calendar.google.com: Sources → Setup → Google Calendar",
+          },
+          state: prev,
+        };
+      }
+      return {
+        items: [],
+        complete: false,
+        session: /** @type {const} */ ("signed-out"),
+        error: {
+          code: "signed-out",
+          message:
+            "Sign in to Google Calendar in this browser (open calendar.google.com), then Check now",
+        },
+        state: prev,
+      };
     }
 
     const own = calendars.flatMap((c) => c.events).map(validEvent).filter(Boolean);
