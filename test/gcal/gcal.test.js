@@ -382,8 +382,9 @@ test("gcal adapter shape", async () => {
 
 test("gcal sources contain no forbidden APIs", () => {
   const SRC = path.resolve(DIR, "..", "..", "..", "extension", "src", "sources", "gcal");
+  const FETCH_RE = /\bfetch\s*\(/;
   const FORBIDDEN = [
-    /\bfetch\s*\(/,
+    FETCH_RE,
     /XMLHttpRequest/,
     /\bWebSocket\b/,
     /localStorage/,
@@ -406,7 +407,11 @@ test("gcal sources contain no forbidden APIs", () => {
     "ics.js",
   ]) {
     const src = fs.readFileSync(path.join(SRC, file), "utf8");
-    for (const re of FORBIDDEN) {
+    // content.js fetches only inside its RELAY_FETCH handler (GET only,
+    // allowlisted paths, same-origin credentials) — the no-requests rule
+    // for every other file, and for everything else in content.js, stands.
+    const rules = file === "content.js" ? FORBIDDEN.filter((re) => re !== FETCH_RE) : FORBIDDEN;
+    for (const re of rules) {
       assert.equal(re.test(src), false, `${file} contains ${re}`);
     }
   }
@@ -420,7 +425,7 @@ test("gcal adapter only fetches the export URL or validated iCal URLs, GET only"
     assert.equal(re.test(src), false, `index.js contains ${re}`);
   }
   // Every fetch goes through ctx.fetch — two call sites: the export and
-  // the validated icalUrls loop.
+  // the validated icalUrls loop — with ctx.relay as the in-tab fallback.
   const bare = src.replace(/ctx\.fetch\s*\(/g, "");
   assert.equal(/\bfetch\s*\(/.test(bare), false, "index.js has a non-ctx fetch");
   const calls = [...src.matchAll(/ctx\.fetch\s*\(\s*([^,)]+)/g)].map((m) => m[1].trim());
@@ -428,6 +433,13 @@ test("gcal adapter only fetches the export URL or validated iCal URLs, GET only"
   assert.ok(/EXPORT_URL/.test(calls[0]), `first fetch must be the export URL, got ${calls[0]}`);
   // The fallback call's argument comes from the ICAL_URL_RE-filtered list.
   assert.ok(/ICAL_URL_RE\.test/.test(src), "icalUrls are validated before fetch");
+  // The relay only ever targets calendar.google.com itself.
+  const relayCalls = [...src.matchAll(/ctx\.relay\s*\(\s*([^,)]+)/g)].map((m) => m[1].trim());
+  assert.equal(relayCalls.length, 2);
+  assert.ok(
+    relayCalls.every((c) => /GCAL_ORIGIN/.test(c)),
+    `relay calls must target GCAL_ORIGIN, got ${relayCalls}`,
+  );
   // GET only: no init may set a method.
   assert.equal(/method\s*:/.test(src), false, "index.js sets a request method");
 });

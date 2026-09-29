@@ -2,8 +2,10 @@
 /*
   Google Calendar adapter — duplicate suppression only (no Items). T1 reads
   the account's exporticalzip (a zip of the user's OWN calendars) through
-  ctx.fetch in the service worker — the same URL is 403 from a page tab —
-  expands its VEVENTs/RRULEs into the rolling event window, and merges the
+  ctx.fetch in the service worker — falling back to the same read relayed
+  through an open Calendar tab (T2, same-origin cookies) when the profile
+  blocks the worker fetch — expands its VEVENTs/RRULEs into the rolling
+  event window, and merges the
   passive DOM extract (content.js → observe.parse), which is where
   subscribed calendars live. Secret iCal fallback URLs are used only when
   the export fails, are validated before fetch and never logged or stored.
@@ -23,7 +25,9 @@ const KINDS = ["own", "wa1", "subscribed", "unknown"];
 const EVENT_CAP = 3000;
 const PAST_MS = 7 * 24 * 60 * 60 * 1000;
 const FUTURE_MS = 120 * 24 * 60 * 60 * 1000;
-const EXPORT_URL = (account) => `https://calendar.google.com/calendar/u/${account}/exporticalzip`;
+const GCAL_ORIGIN = "https://calendar.google.com";
+const EXPORT_PATH = (account) => `/calendar/u/${account}/exporticalzip`;
+const EXPORT_URL = (account) => `${GCAL_ORIGIN}${EXPORT_PATH(account)}`;
 const ICAL_URL_RE = /^https:\/\/calendar\.google\.com\/calendar\/ical\//;
 const SKIP_ENTRY_RE = /@import\.calendar\.google\.com|@group\.v\.calendar\.google\.com/i;
 // Our own feed's host (the build-time calendar service URL): an iCal
@@ -57,6 +61,35 @@ const b64Bytes = (b64) => {
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
   return out;
 };
+
+/**
+ * A zip FetchResult -> parsed calendars, or null when the read didn't yield
+ * the export zip (blocked, login redirect, html page, non-zip, corrupt).
+ * Shared by the direct worker read and the open-tab relay read.
+ * @param {any} res @param {Date} now
+ * @returns {Promise<any[] | null>}
+ */
+async function exportCalendars(res, now) {
+  const raw = res && res.base64 ? b64Bytes(res.base64) : null;
+  const isZip =
+    !!raw && raw.length >= 4 && raw[0] === 0x50 && raw[1] === 0x4b && raw[2] === 3 && raw[3] === 4;
+  if (!res || res.loginRedirect || /html/i.test(String(res.contentType || "")) || !isZip) {
+    return null;
+  }
+  try {
+    const dec = new TextDecoder();
+    /** @type {any[]} */
+    const cals = [];
+    for (const e of await readZip(raw)) {
+      if (SKIP_ENTRY_RE.test(e.name)) continue;
+      const cal = parseIcs(dec.decode(e.bytes), { now });
+      if (cal && !cal.wa1) cals.push(cal);
+    }
+    return cals.length ? cals : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Strict per-event validation; invalid events are dropped silently. */
 function validEvent(e) {
@@ -137,33 +170,43 @@ const adapter = {
     const calendars = [];
     /** @type {"unreachable"|"signed-out"|"no-permission"|null} */
     let fail = null;
-    if (!res || res.status === 0) {
-      if (res && res.error === "timeout") {
-        fail = "unreachable";
-      } else {
-        // status 0 = the fetch threw: the redirect to Google's sign-in page,
-        // blocked cookies, or the calendar.google.com host permission never
-        // granted — "unreachable" only for an actual timeout.
-        fail = (await hasSourceAccess("gcal")) ? "signed-out" : "no-permission";
-      }
+    /** Direct read produced no HTTP answer while the host permission is
+        granted — the relay's noTab answer then means "open a Calendar tab",
+        not "sign in". */
+    let directBlocked = false;
+    /** @type {any} the export relay answer, when one was tried */
+    let relayRes = null;
+    const exportCals = await exportCalendars(res, now);
+    if (exportCals) {
+      calendars.push(...exportCals);
     } else {
-      const raw = res.base64 ? b64Bytes(res.base64) : null;
-      const isZip =
-        !!raw && raw.length >= 4 && raw[0] === 0x50 && raw[1] === 0x4b && raw[2] === 3 && raw[3] === 4;
-      if (res.loginRedirect || /html/i.test(String(res.contentType || "")) || !isZip) {
-        fail = "signed-out";
-      } else {
-        try {
-          const dec = new TextDecoder();
-          for (const e of await readZip(raw)) {
-            if (SKIP_ENTRY_RE.test(e.name)) continue;
-            const cal = parseIcs(dec.decode(e.bytes), { now });
-            if (cal && !cal.wa1) calendars.push(cal);
+      if (!res || res.status === 0) {
+        if (res && res.error === "timeout") {
+          fail = "unreachable";
+        } else {
+          // status 0 = the fetch threw: the redirect to Google's sign-in
+          // page, blocked cookies, the host permission never granted, or a
+          // profile where the worker's CORS bypass doesn't reach Calendar.
+          if (await hasSourceAccess("gcal")) {
+            fail = "signed-out";
+            directBlocked = true;
+          } else {
+            fail = "no-permission";
           }
-        } catch {
-          fail = "signed-out";
         }
-        if (!calendars.length && !fail) fail = "signed-out";
+      } else {
+        fail = "signed-out"; // answered, but not a zip we can use
+      }
+      // The same read inside an open Calendar tab: same-origin session
+      // cookies, no worker CORS bypass involved.
+      if (typeof ctx.relay === "function") {
+        try {
+          relayRes = await ctx.relay(GCAL_ORIGIN, EXPORT_PATH(account), { binary: true });
+        } catch {
+          relayRes = null;
+        }
+        const relayCals = await exportCalendars(relayRes, now);
+        if (relayCals) calendars.push(...relayCals);
       }
     }
 
@@ -175,7 +218,14 @@ const adapter = {
         .slice(0, MAX_ICAL_URLS);
       for (const u of urls) {
         try {
-          const r = await ctx.fetch(u);
+          let r = await ctx.fetch(u);
+          if ((!r || r.status === 0) && typeof ctx.relay === "function") {
+            try {
+              r = await ctx.relay(GCAL_ORIGIN, new URL(u).pathname);
+            } catch {
+              /* keep the failed direct result */
+            }
+          }
           if (!r || r.status < 200 || r.status >= 300 || !r.text) continue;
           const cal = parseIcs(r.text, { now });
           if (cal && !cal.wa1) calendars.push(cal);
@@ -208,15 +258,18 @@ const adapter = {
           state: prev,
         };
       }
+      // fail === "signed-out". The relay's answer sharpens the advice: no
+      // Calendar tab at all -> open one; a tab that answered with a login
+      // bounce, html or 403 -> sign in.
+      const message =
+        directBlocked && relayRes && relayRes.noTab
+          ? "Open Google Calendar in a tab (calendar.google.com), then Check now"
+          : "Sign in to Google Calendar in this browser (open calendar.google.com), then Check now";
       return {
         items: [],
         complete: false,
         session: /** @type {const} */ ("signed-out"),
-        error: {
-          code: "signed-out",
-          message:
-            "Sign in to Google Calendar in this browser (open calendar.google.com), then Check now",
-        },
+        error: { code: "signed-out", message },
         state: prev,
       };
     }

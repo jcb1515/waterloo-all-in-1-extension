@@ -449,3 +449,113 @@ test("sync: export failure falls back to validated icalUrls only", async () => {
   // The secret never lands in state.
   assert.ok(!JSON.stringify(r.state).includes("secretkey"));
 });
+
+/* ------------------------- tab relay fallback ------------------------- */
+
+test("sync: direct status 0 + relay zip -> complete with parsed events", async () => {
+  /** @type {any[]} */
+  const relayed = [];
+  const r = await adapter.sync(
+    sctx({
+      fetch: async () => ({ status: 0, error: "Failed to fetch" }),
+      relay: async (/** @type {any} */ origin, /** @type {any} */ path, /** @type {any} */ init) => {
+        relayed.push([origin, path, init]);
+        return { status: 200, contentType: "application/zip", base64: calZip };
+      },
+    }),
+  );
+  assert.equal(r.complete, true);
+  assert.equal(r.error, undefined);
+  assert.equal(r.session, undefined);
+  assert.deepEqual(r.state.events.map((/** @type {any} */ e) => e.title).sort(), ["gym", "side"]);
+  assert.deepEqual(relayed, [
+    ["https://calendar.google.com", "/calendar/u/0/exporticalzip", { binary: true }],
+  ]);
+});
+
+test("sync: relay export uses the configured account path", async () => {
+  /** @type {any[]} */
+  const relayed = [];
+  await adapter.sync(
+    sctx({
+      settings: { enabled: true, account: 2 },
+      fetch: async () => ({ status: 0, error: "Failed to fetch" }),
+      relay: async (/** @type {any} */ _o, /** @type {any} */ path) => {
+        relayed.push(path);
+        return { status: 0, error: "Failed to fetch" };
+      },
+    }),
+  );
+  assert.deepEqual(relayed, ["/calendar/u/2/exporticalzip"]);
+});
+
+test("sync: direct status 0 + relay noTab -> open-a-tab message", async () => {
+  const r = await adapter.sync(
+    sctx({
+      fetch: async () => ({ status: 0, error: "Failed to fetch" }),
+      relay: async () => ({ status: 0, noTab: true }),
+    }),
+  );
+  assert.equal(r.session, "signed-out");
+  assert.equal(r.error && r.error.code, "signed-out");
+  assert.match(String(r.error && r.error.message), /Open Google Calendar in a tab/);
+});
+
+test("sync: direct status 0 + relay html/403/login-redirect -> sign-in message", async () => {
+  for (const relayRes of [
+    { status: 200, contentType: "text/html", text: "<html></html>" },
+    { status: 403, contentType: "text/html" },
+    { status: 200, loginRedirect: true },
+  ]) {
+    const r = await adapter.sync(
+      sctx({
+        fetch: async () => ({ status: 0, error: "Failed to fetch" }),
+        relay: async () => relayRes,
+      }),
+    );
+    assert.equal(r.session, "signed-out");
+    assert.equal(r.error && r.error.code, "signed-out");
+    assert.match(String(r.error && r.error.message), /Sign in to Google Calendar/);
+  }
+});
+
+test("sync: timeout stays unreachable even with a relay", async () => {
+  const r = await adapter.sync(
+    sctx({
+      fetch: async () => ({ status: 0, error: "timeout" }),
+      relay: async () => ({ status: 0, noTab: true }),
+    }),
+  );
+  assert.equal(r.error && r.error.code, "unreachable");
+  assert.equal(r.session, undefined);
+});
+
+test("sync: iCal fallback relays through the tab when the direct read is blocked", async () => {
+  /** @type {any[]} */
+  const relayed = [];
+  const r = await adapter.sync(
+    sctx({
+      settings: {
+        enabled: true,
+        icalUrls: ["https://calendar.google.com/calendar/ical/u/private-k/basic.ics"],
+      },
+      // Both direct reads are blocked the way the broken profile blocks them.
+      fetch: async () => ({ status: 0, error: "Failed to fetch" }),
+      relay: async (/** @type {any} */ _o, /** @type {any} */ path) => {
+        relayed.push(path);
+        if (path.includes("exporticalzip")) return { status: 0, error: "Failed to fetch" };
+        return {
+          status: 200,
+          text: icsOf(vevent("UID:fb\r\nSUMMARY:relayed\r\nDTSTART:20261020T150000Z\r\n")),
+        };
+      },
+    }),
+  );
+  assert.equal(r.complete, true);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.state.events.map((/** @type {any} */ e) => e.title), ["relayed"]);
+  assert.deepEqual(relayed, [
+    "/calendar/u/0/exporticalzip",
+    "/calendar/ical/u/private-k/basic.ics",
+  ]);
+});
