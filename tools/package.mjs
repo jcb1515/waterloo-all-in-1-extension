@@ -11,6 +11,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipFile } from "./zip.mjs";
+import { checkWrangler, readTrackedWrangler } from "./verify/wrangler.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(REPO, "dist");
@@ -60,6 +61,30 @@ async function verifyDist(pkgVersion, expectedServiceUrl) {
   return { problems, baked };
 }
 
+/**
+ * server/wrangler.jsonc must never carry a real D1 database_id, a vars
+ * block or an account_id — checked on both the index copy (what a push
+ * would ship) and the working-tree file (what the developer has locally).
+ */
+async function verifyWrangler() {
+  /** @type {string[]} */
+  const problems = [];
+  try {
+    for (const p of checkWrangler(readTrackedWrangler(REPO))) {
+      problems.push(`tracked: ${p}`);
+    }
+  } catch (e) {
+    problems.push(`tracked: cannot read index copy — ${String((e && e.message) || e)}`);
+  }
+  try {
+    const wt = await readFile(path.join(REPO, "server", "wrangler.jsonc"), "utf8");
+    for (const p of checkWrangler(wt)) problems.push(`worktree: ${p}`);
+  } catch (e) {
+    problems.push(`worktree: cannot read file — ${String((e && e.message) || e)}`);
+  }
+  return problems;
+}
+
 async function main() {
   const pkg = JSON.parse(await readFile(path.join(REPO, "package.json"), "utf8"));
   const version = pkg.version;
@@ -78,6 +103,7 @@ async function main() {
   if (build.status !== 0) process.exit(build.status ?? 1);
 
   const { problems, baked } = await verifyDist(version, expectedServiceUrl);
+  problems.push(...(await verifyWrangler()));
   if (problems.length) {
     console.error("dist verification failed:");
     for (const p of problems) console.error(`  - ${p}`);

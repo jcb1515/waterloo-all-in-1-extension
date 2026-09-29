@@ -32,6 +32,7 @@ import emailDriver from "./verify/drivers/email.mjs";
 import waterlooworksDriver from "./verify/drivers/waterlooworks.mjs";
 import discordDriver from "./verify/drivers/discord.mjs";
 import gcalDriver from "./verify/drivers/gcal.mjs";
+import { checkWrangler, readTrackedWrangler } from "./verify/wrangler.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_DIR = path.join(ROOT, "test", "fixtures");
@@ -335,6 +336,18 @@ export async function runVerify(opts = {}) {
     for (const t of e.throws) throws.push({ source: e.source, ...t });
   }
 
+  // server/wrangler.jsonc must never carry a real database_id/vars/
+  // account_id on the tracked (index) copy.
+  /** @type {string[]} */
+  let wranglerProblems = [];
+  try {
+    wranglerProblems = checkWrangler(readTrackedWrangler(ROOT));
+  } catch (err) {
+    wranglerProblems = [
+      `cannot read server/wrangler.jsonc: ${String((err && err.message) || err)}`,
+    ];
+  }
+
   // Cross-source merges: canonical items seen in more than one source.
   const merged = [];
   for (const it of itemList) {
@@ -367,6 +380,7 @@ export async function runVerify(opts = {}) {
     invalidDates: invalidDates.length,
     throws: throws.length,
     todoTasksInFeed: todoTasksInFeed.length,
+    wrangler: wranglerProblems.length,
   };
   const summary = {
     now: now.toISOString(),
@@ -388,6 +402,7 @@ export async function runVerify(opts = {}) {
     invalidDates: invalidDates.length,
     throws: throws.length,
     todoTasksInFeed: todoTasksInFeed.length,
+    wrangler: wranglerProblems.length ? wranglerProblems : 0,
     todos: todos.status === "ok" ? todos.count : todos.status,
   };
 
@@ -494,6 +509,10 @@ export async function runVerify(opts = {}) {
   for (const t of throws) md.push(`- ${t.source} \`${t.fixture}\`: ${t.message}`);
 
   md.push("");
+  md.push(`## server/wrangler.jsonc — ${wranglerProblems.length ? "FAIL" : "ok"}`);
+  for (const p of wranglerProblems) md.push(`- ${p}`);
+
+  md.push("");
   md.push(`## Unmapped fixtures — ${unmapped.length}`);
   for (const f of unmapped) md.push(`- \`${f}\``);
   md.push("");
@@ -521,6 +540,6 @@ if (invoked) {
   }
   console.log(JSON.stringify(summary));
   const bad =
-    failures.duplicates + failures.invalidDates + failures.throws + failures.todoTasksInFeed;
+    failures.duplicates + failures.invalidDates + failures.throws + failures.todoTasksInFeed + failures.wrangler;
   process.exit(bad > 0 ? 1 : 0);
 }
