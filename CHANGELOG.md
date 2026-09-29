@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.3 — 2026-09-29
+
+### Google Calendar duplicate check
+
+- **Clearer errors.** When the calendar read is blocked, the Google Calendar
+  tile now says why instead of "calendar export unreachable": allow
+  calendar.google.com, sign in to Google Calendar in this browser (and make
+  sure extensions are allowed on calendar.google.com), or — only when Google
+  really doesn't answer — try again.
+
 ## 1.4.2 — 2026-09-29
 
 ### Learn

@@ -1,6 +1,6 @@
 {
   "name": "waterloo-all-in-1",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "private": true,
   "type": "module",
   "description": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
