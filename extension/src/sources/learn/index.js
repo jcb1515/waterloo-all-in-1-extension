@@ -1,9 +1,9 @@
 // @ts-check
 /*
-  Learn adapter on the shared contract. Wraps WATnow's LiveSource: the worker
+  Learn adapter on the shared contract. Wraps LiveSource: the worker
   fetch (T1, ctx.fetch) is injected as its transport and the tab relay (T2,
   ctx.relay) as its relay, so session detection and every read keep their
-  WATnow behaviour. On top of the deadline list it adds announcement text
+  original behaviour. On top of the deadline list it adds announcement text
   extraction (textdates), grade weights, the content TOC (outline/syllabus
   links), discussion-post and quiz-attempt checks.
 */
@@ -21,7 +21,7 @@ import { cleanEventTitle, LiveSource, liveBase } from "./live-source.js";
 /** Course plus the Learn extras the contract does not have yet (asked of W1). @see README */
 /** @typedef {import("../../core/contract.js").Course & {grades?: object[], syllabusUrls?: {title: string, url: string}[]}} LearnCourse */
 
-/** A short reason for a thrown WATnow error: its code, else its message. @param {unknown} e */
+/** A short reason for a thrown read error: its code, else its message. @param {unknown} e */
 const errReason = (e) => {
   const x = /** @type {{code?: unknown, message?: unknown} | null} */ (e);
   return String((x && (x.code || x.message)) || e);
@@ -154,7 +154,7 @@ const adapter = {
         if (!TOOL_SCOPES.every((scope) => okSet.has(scope))) complete = false;
         const termCode = course.term ?? termCodeFor(now);
 
-        // WATnow deadlines -> contract items.
+        // LiveSource deadline rows -> contract items.
         /** @type {{row: any, item: Item}[]} */
         const pairs = [];
         for (const row of rows) {

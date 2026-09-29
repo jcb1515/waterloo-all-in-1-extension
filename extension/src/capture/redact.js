@@ -4,10 +4,10 @@
   bodies and DOM landmarks into shapes safe to keep in a report: endpoints,
   key names and value types survive; personal values do not.
 
-  Adapted from WATnow's shapeOf/redactText in extension/src/data/live-source.js
-  (watnow @ 801a1b1, MIT, Eric Zou), extended here with URL normalisation,
-  date patterns and an HTML outline. No chrome APIs, so the same code runs in
-  the page world, the content script, the service worker and tests.
+  Values are reduced to their shapes (shapeOf) and text patterns are masked
+  (redactText), extended here with URL normalisation, date patterns and an
+  HTML outline. No chrome APIs, so the same code runs in the page world, the
+  content script, the service worker and tests.
 */
 
 const MAX_TEXT = 400;

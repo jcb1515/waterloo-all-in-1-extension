@@ -16,7 +16,7 @@ export const TRIGGER_RE =
 
 /**
  * @param {{title?: string, kind?: string, category?: string}} row
- *   kind/category are WATnow's (dropbox|quiz|discussion|content,
+ *   kind/category are the Learn reader's (dropbox|quiz|discussion|content,
  *   assignment|lab|quiz|discussion|content).
  * @returns {{type: string, category: string|undefined}}
  */

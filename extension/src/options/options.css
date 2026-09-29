@@ -157,9 +157,6 @@ html[data-theme="dark"] .opt-nav-links a.active {
   font-size: var(--fs-md);
   font-weight: var(--w-semibold);
 }
-.about-links {
-  margin-top: var(--sp-2);
-}
 
 /* ------------------------------- responsive --------------------------------- */
 

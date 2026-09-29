@@ -4,8 +4,7 @@ Cloudflare Worker + D1 that turns the extension's merged item list into private,
 subscribable `.ics` feeds. The extension publishes items (POST/PUT); Google
 Calendar, Apple Calendar, Outlook, etc. subscribe to the returned URLs (GET).
 
-Based on gurshh-rain/uwlearn_assignment_extension `calendar-service`
-(MIT, Gurshaan Gill). Legacy v1 assignment payloads and stored rows still work.
+Legacy v1 assignment payloads and stored rows still work.
 
 > **Operator note:** the extension's builds default to the maintainer's
 > deployment of this Worker (`package.json` → `config.calendarServiceUrl`).
@@ -96,7 +95,7 @@ state must also fit one D1 row (~1.9 MB serialized) — anything beyond gets 413
 
 ### Legacy v1
 
-A body with `assignments` and no `events` is converted from the gurshh shape
+A body with `assignments` and no `events` is converted from the legacy v1 shape
 `{id, courseId, name, courseName, dueDate, url}` to deadlines with
 `uid = <courseId>-<id>@learn.uwaterloo.ca`, preserving the UIDs old feeds
 already published. Stored v1 rows (a plain JSON array) render the same way.

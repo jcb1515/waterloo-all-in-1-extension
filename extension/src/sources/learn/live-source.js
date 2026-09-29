@@ -2,7 +2,7 @@
   LIVE mode: reads the student's own deadlines from Learn (D2L Brightspace).
 
   The requests use the Learn session the student already has in this browser.
-  WATnow never sees a password and never talks to a server of its own. Results
+  The extension never sees a password and never talks to a server of its own. Results
   are stored in chrome.storage.local on this computer.
 
   Nothing here has been run against UW's Learn yet. Items marked VERIFY need a

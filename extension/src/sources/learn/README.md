@@ -1,10 +1,10 @@
 # Learn adapter (`learn`)
 
 Reads Waterloo Learn (Brightspace/D2L) and returns a contract `SyncResult`. The
-adapter wraps `LiveSource` (`live-source.js`, WATnow code, MIT Eric Zou): the
+adapter wraps `LiveSource` (`live-source.js`): the
 contract's `ctx.fetch` (T1) is injected as its `transport` and `ctx.relay` (T2)
 as its `relay`, so session detection, rate limiting and every read keep their
-WATnow behaviour. `source.js` / `demo-source.js` / `fixtures.js` belong to the
+original behaviour. `source.js` / `demo-source.js` / `fixtures.js` belong to the
 older background and are untouched.
 
 ## Settings slice keys

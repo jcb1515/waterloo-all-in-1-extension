@@ -1,5 +1,3 @@
-// Based on gurshh-rain/uwlearn_assignment_extension calendar-service (MIT, Gurshaan Gill)
-//
 // Waterloo All-in-1 calendar feed. The extension publishes its merged item
 // list here (POST /v1/calendars, PUT /v1/calendars/<id>.ics); calendar clients
 // such as Google Calendar subscribe to the returned .ics URLs (GET), including
@@ -469,7 +467,7 @@ async function readPayload(request, maxEvents = DEFAULT_MAX_EVENTS) {
   if (body && typeof body === "object" && Object.hasOwn(body, "events")) {
     if (Array.isArray(body.events)) events = body.events;
   } else if (body && Array.isArray(body.assignments)) {
-    // legacy v1 payload from gurshh feeds
+    // legacy v1 payload from v1 feeds
     events = convertLegacyAssignments(body.assignments);
   }
   if (!events) return { ok: false, status: 400, error: "events must be an array." };
@@ -487,7 +485,7 @@ async function readPayload(request, maxEvents = DEFAULT_MAX_EVENTS) {
   };
 }
 
-// gurshh assignment {id, courseId, name, courseName, dueDate, url} -> FeedEvent.
+// legacy v1 assignment {id, courseId, name, courseName, dueDate, url} -> FeedEvent.
 // Keeps the `${courseId}-${id}@learn.uwaterloo.ca` UIDs v1 feeds already published.
 function convertLegacyAssignments(assignments) {
   return assignments.map((assignment) => {
@@ -607,7 +605,7 @@ function pruneTombstones(tombstones, now) {
 
 /**
  * Stored calendar_json -> feed state. Handles legacy v1 rows (a plain array of
- * gurshh assignments) so old feeds keep rendering with their original UIDs.
+ * legacy v1 assignments) so old feeds keep rendering with their original UIDs.
  */
 function stateFromStored(json, updatedAt) {
   const base = {

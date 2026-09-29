@@ -128,9 +128,9 @@ const DEV_PROFILE =
 
 /*
   Build-time calendar service URL: a released build can ship a hosted feed
-  server (set WA1_CALENDAR_SERVICE_URL in the environment when building), the
-  same way gurshh's calendar-service-config.js worked. It overrides the dev
-  profile's calendar.serviceUrl; the user's saved setting still wins.
+  server (set WA1_CALENDAR_SERVICE_URL in the environment when building).
+  It overrides the dev profile's calendar.serviceUrl; the user's saved
+  setting still wins.
 */
 const BUILD_SERVICE_URL =
   typeof __WA1_CALENDAR_SERVICE_URL__ === "undefined" ? "" : __WA1_CALENDAR_SERVICE_URL__;
@@ -348,8 +348,9 @@ export async function patchUserState(id, patch) {
 /* --------------------------- migration --------------------------- */
 
 /**
- * On install/update: drop WATnow's keys. The discovery recorder's keys
- * (discovery:*, discoverySettings) and every wa1:* key are kept.
+ * On install/update: drop the legacy Learn panel's storage keys. The
+ * discovery recorder's keys (discovery:*, discoverySettings) and every
+ * wa1:* key are kept.
  */
 export async function migrateStorage() {
   try {

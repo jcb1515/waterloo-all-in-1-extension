@@ -8,7 +8,7 @@
   @typedef {"pink"|"green"|"orange"|"blue"|"violet"|"mint"} CourseColor
 
   @typedef {Object} Course
-  @property {string} id           Stable id inside WATnow ("cs341", or the org unit id in LIVE mode)
+  @property {string} id           Stable course id ("cs341", or the org unit id in LIVE mode)
   @property {string} code         "CS 341"
   @property {string} name         "Algorithms"
   @property {number} orgUnitId    Brightspace org unit id for the course offering

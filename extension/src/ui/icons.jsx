@@ -1,5 +1,4 @@
 // Inline SVG icon set on a 24 grid, 1.75 stroke, round caps and joins.
-// Path data adapted from Lucide (ISC license — see licenses/LUCIDE-LICENSE).
 
 /**
  * @param {{size?: number, children: any, title?: string}} props

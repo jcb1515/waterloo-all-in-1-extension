@@ -1,4 +1,4 @@
-// About: version, open-source licenses link, privacy, backup & restore.
+// About: version, privacy, backup & restore.
 
 import { useRef, useState } from "preact/hooks";
 import { Card } from "../bits.jsx";
@@ -11,7 +11,6 @@ import {
   buildBackup,
   validateBackup,
 } from "../../core/backup.js";
-import { ExternalLinkIcon } from "../../ui/icons.jsx";
 
 /** Sample pending-import state for preview screenshots (?backup=import). */
 const PREVIEW_PENDING = {
@@ -205,11 +204,9 @@ function HealthCard() {
 
 export function AboutSection({ state }) {
   let version = "0.0.1";
-  let licensesUrl = "/licenses/THIRD_PARTY_NOTICES.txt";
   try {
     if (!IS_PREVIEW) {
       version = chrome.runtime.getManifest().version;
-      licensesUrl = chrome.runtime.getURL("licenses/THIRD_PARTY_NOTICES.txt");
     }
   } catch {
     /* preview */
@@ -311,11 +308,6 @@ export function AboutSection({ state }) {
         <p class="help">
           Every Waterloo deadline, class, interview and meeting in one side panel and one Google
           Calendar.
-        </p>
-        <p class="about-links">
-          <a href={licensesUrl} target="_blank" rel="noreferrer">
-            Open-source licenses <ExternalLinkIcon size={12} />
-          </a>
         </p>
       </Card>
 
