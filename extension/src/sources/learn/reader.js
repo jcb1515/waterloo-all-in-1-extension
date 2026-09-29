@@ -937,7 +937,9 @@ export class LearnReader {
           dueField: row.dueField,
           url:
             row.url ||
-            (row.exactId === false ? null : this._deepLink(row.kind, ou, row.sourceId, row.groupId) || this._listPage(row.kind, ou)),
+            (row.exactId === false
+              ? this._listPage(row.kind, ou)
+              : this._deepLink(row.kind, ou, row.sourceId, row.groupId) || this._listPage(row.kind, ou)),
           listUrl: this._listPage(row.kind, ou),
           groupFolder: !!row.groupFolder,
           status: row.completedAt ? "submitted" : "open",
@@ -1031,7 +1033,7 @@ export class LearnReader {
     /** @type {Map<string, any>} */
     const keptByEcho = new Map();
     /** @type {any[]} */
-    const out = [];
+    const kept = [];
     for (const it of sorted) {
       const echoKey = `${normTitle(stripLearnSuffix(it.title))}:${Math.round(Date.parse(it.dueAt) / 60000)}`;
       const prev = keptByEcho.get(echoKey);
@@ -1045,27 +1047,29 @@ export class LearnReader {
         continue;
       }
       keptByEcho.set(echoKey, it);
-      out.push({
-        id: it.id,
-        courseId: it.courseId,
-        kind: it.kind,
-        category: it.category,
-        title: it.title,
-        dueAt: it.dueAt,
-        dueField: it.dueField,
-        url: it.url,
-        listUrl: it.listUrl,
-        groupFolder: it.groupFolder,
-        status: it.status,
-        completedAt: it.completedAt,
-        opensAt: it.opensAt,
-        startAt: it.startAt,
-        endAt: it.endAt,
-        allDay: it.allDay,
-        forumId: it.forumId,
-        seenIn: [...it.seenLabels],
-      });
+      kept.push(it);
     }
+    // Emit after folding so merged seenIn/status fields are reflected.
+    const out = kept.map((it) => ({
+      id: it.id,
+      courseId: it.courseId,
+      kind: it.kind,
+      category: it.category,
+      title: it.title,
+      dueAt: it.dueAt,
+      dueField: it.dueField,
+      url: it.url,
+      listUrl: it.listUrl,
+      groupFolder: it.groupFolder,
+      status: it.status,
+      completedAt: it.completedAt,
+      opensAt: it.opensAt,
+      startAt: it.startAt,
+      endAt: it.endAt,
+      allDay: it.allDay,
+      forumId: it.forumId,
+      seenIn: [...it.seenLabels],
+    }));
     this.readOk.set(course.id, okScopes);
     return out;
   }
@@ -1133,7 +1137,7 @@ export class LearnReader {
       const text = plain || htmlToText(body.Html);
       out.push({
         id: String(n.Id),
-        title: String(n.Title || "").trim().slice(0, 200),
+        title: String(n.Title || "").slice(0, 200),
         text,
         at: isoOf(n.StartDate),
       });
