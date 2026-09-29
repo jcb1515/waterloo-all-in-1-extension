@@ -93,13 +93,6 @@ read those sites; everything else keeps working. Revoking a grant in the
 browser's extension details stops the reading; clearing the source in
 Settings → Sources removes its stored data.
 
-**Google Calendar** (`calendar.google.com`) is the duplicate check:
-when enabled, the extension reads event titles and times from your *own*
-calendars only — no descriptions, guests or locations, and never from
-subscribed calendars (including the extension's own published feed). What
-it reads is only ever compared against your items locally; it is never
-published or sent anywhere.
-
 **Google Calendar.** When you turn on the duplicate check, the extension
 downloads your own calendars' export from Google Calendar (the same file as
 Google Calendar's Settings → Export) every 6 hours, using your existing

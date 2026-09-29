@@ -13,7 +13,7 @@ Waterloo All-in-1 pulls the dated things in a UW student's life into one place:
 - **Agenda** — today, this week and what's next, merged from Learn, course outlines, Portal and WaterlooWorks, with a due-date search and per-day estimate totals.
 - **Calendar week and month** — classes, labs and deadlines on a real grid; clashes outlined, loaded days shaded, tentative dates dashed.
 - **Co-op** — WaterlooWorks applications by stage, interview prep cards with checklists, offer and ranking deadlines, and mail invites linked to the application they belong to.
-- **Email (Outlook + Gmail)** — calendar invites and dated mail (interviews, offers, course mail) read passively in mail tabs you open; each provider is a separate optional permission.
+- **Email (Outlook + Gmail)** — calendar invites and dated mail (interviews, offers, course mail) read automatically from the newest inbox messages — when a mail tab loads, every 30 minutes while it's open, and on Check now; each provider is a separate optional permission.
 - **Courses** — per-course assessment timelines, grading schemes, a needed-on-remaining calculator and office hours.
 - **Teams** — Discord design-team servers: meetings, assigned tasks, deadlines and watched channels (read-only, passive).
 - **One Google Calendar feed** — opt-in publishing to a single private subscription feed (shared server built in; self-host supported); or a one-off .ics download.
@@ -43,8 +43,8 @@ Required permissions:
 - `alarms` — schedules background syncs, reminder notifications, the daily briefing and weekly digest.
 - `notifications` — deadline reminders, the briefing and the digest.
 - `offscreen` — an offscreen document parses imported PDF outlines and page captures.
-- `tabs` — opening a source site focuses an existing tab instead of duplicating it; "Open site"/channel links use it.
-- `scripting` — registers content scripts dynamically for hosts the user grants as optional permissions (Discord, email).
+- `tabs` — opening a source site focuses an existing tab instead of duplicating it; "Open site"/channel links use it, and "Check now" reuses an open site tab or opens a background one that it closes afterwards.
+- `scripting` — registers content scripts dynamically for hosts the user grants as optional permissions (Discord, email, Google Calendar), and re-injects them into site tabs that were already open after an extension update.
 
 Required host permissions (University of Waterloo sites the extension reads):
 
@@ -57,9 +57,9 @@ Required host permissions (University of Waterloo sites the extension reads):
 Optional host permissions (requested only when the user enables the source):
 
 - `https://discord.com/*` — passive, read-only capture of dated messages and events in Discord servers the user watches. The extension never posts and never reads the account token.
-- `https://outlook.office.com/*`, `https://outlook.cloud.microsoft/*`, `https://outlook.live.com/*` — reads calendar invites and dated mail in Outlook web tabs the user opens (requested separately from Gmail).
-- `https://mail.google.com/*` — the same passive reading for Gmail tabs (requested separately from Outlook).
-- `https://calendar.google.com/*` — the optional "skip events already on my calendar" duplicate check. Reads event titles and times from the user's own calendars only — never subscribed calendars and never the extension's own published feed — purely to avoid publishing duplicates. Nothing read there is transmitted. Off by default; the browser prompt appears only when the user turns the feature on.
+- `https://outlook.office.com/*`, `https://outlook.cloud.microsoft/*`, `https://outlook.live.com/*` — reads calendar invites and dated mail from the newest inbox messages (50, 100 or 200) through Outlook's in-page mail API, when an Outlook tab loads, every 30 minutes while it's open, and on Check now. Read-only; requested separately from Gmail.
+- `https://mail.google.com/*` — reads the first page of the Gmail inbox the same way (tab load, every 30 minutes while open, Check now). Read-only; requested separately from Outlook.
+- `https://calendar.google.com/*` — the optional "skip events already on my calendar" duplicate check. Reads event titles and times from the user's own calendars (Google's calendar export) and from other calendars shown on screen in an open Google Calendar tab — never the extension's own published feed — purely to avoid publishing duplicates. Nothing read there is transmitted. Off by default; the browser prompt appears only when the user turns the feature on.
 
 ## Data-use disclosures
 
