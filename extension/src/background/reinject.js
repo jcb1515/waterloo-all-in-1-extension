@@ -71,15 +71,38 @@ function hostForSource(host, sourceId) {
 }
 
 /**
+ * Cap on one executeScript. A wedged tab can leave the promise unsettled
+ * forever, which would hang reinjectAll's loop and check-now's reinject
+ * step — a hung inject is a failure so the caller moves on (check-now then
+ * retries once and falls back to a fresh tab).
+ */
+const INJECT_TIMEOUT_MS = 10_000;
+
+/**
  * Re-run `entry`'s scripts in one tab.
- * @param {any} deps {scripting}
+ * @param {any} deps {scripting, injectTimeoutMs?}
+ * @returns {Promise<boolean>} false when the inject timed out or failed
  */
 async function injectInto(tabId, entry, deps) {
-  await deps.scripting.executeScript({
-    target: { tabId, allFrames: !!entry.allFrames },
-    files: entry.js,
-    world: entry.world === "MAIN" ? "MAIN" : "ISOLATED",
+  /** @type {any} */
+  let timer = null;
+  const timeout = new Promise((res) => {
+    timer = setTimeout(() => res(false), deps.injectTimeoutMs ?? INJECT_TIMEOUT_MS);
   });
+  try {
+    return await Promise.race([
+      deps.scripting
+        .executeScript({
+          target: { tabId, allFrames: !!entry.allFrames },
+          files: entry.js,
+          world: entry.world === "MAIN" ? "MAIN" : "ISOLATED",
+        })
+        .then(() => true, () => false),
+      timeout,
+    ]);
+  } finally {
+    if (timer != null) clearTimeout(timer);
+  }
 }
 
 /**
@@ -104,8 +127,7 @@ export async function reinjectAll(deps) {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.discarded || tab.status === "unloaded") continue;
       try {
-        await injectInto(tab.id, entry, deps);
-        done.add(tab.id);
+        if (await injectInto(tab.id, entry, deps)) done.add(tab.id);
       } catch {
         /* tab raced away, or a page scripting can't touch — skip it */
       }
@@ -146,8 +168,7 @@ export async function reinjectTab(tabId, sourceId, deps) {
     });
     if (!forSource) continue;
     try {
-      await injectInto(tabId, entry, deps);
-      injected++;
+      if (await injectInto(tabId, entry, deps)) injected++;
     } catch {
       /* keep going — partial injection still beats none */
     }

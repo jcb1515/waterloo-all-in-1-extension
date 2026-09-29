@@ -336,6 +336,19 @@ test("accepted:false with another reason fails with that reason", async () => {
   assert.equal(deps.calls.create.length, 0);
 });
 
+test("a frozen tab is skipped entirely — fresh tab opened, no send or reinject", async () => {
+  const deps = fakeDeps();
+  deps.tabs.query = async () => [portalTab(7, { frozen: true })];
+  deps.tabs.sendMessage = acceptingSend(deps.calls);
+  startCheck("portal", deps);
+  const run = await settle(deps, "portal");
+  assert.equal(run.status, "ok");
+  assert.deepEqual(deps.calls.create.map((c) => c.url), ["https://portal.uwaterloo.ca/"]);
+  assert.ok(deps.calls.send.every((s) => s.tabId !== 7), "frozen tab never messaged");
+  assert.equal(deps.calls.reinject.length, 0, "frozen tab never reinjected");
+  assert.deepEqual(deps.calls.remove, [901]);
+});
+
 test("unanswered pre-existing tab: re-inject once, then fresh tab fallback", async () => {
   const deps = fakeDeps();
   deps.tabs.query = async () => [portalTab(7)];

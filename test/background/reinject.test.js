@@ -124,6 +124,36 @@ test("reinjectTab skips discarded/missing tabs and wrong-source entries", async 
   assert.equal(await reinjectTab(2, "gmail", deps), 0);
 });
 
+test("a hung executeScript does not wedge reinjectTab", async () => {
+  const deps = fakeDeps();
+  deps.injectTimeoutMs = 25;
+  deps.tabsById[9] = { id: 9, url: "https://portal.uwaterloo.ca/", status: "complete" };
+  deps.scripting.executeScript = () => new Promise(() => {});
+  const start = Date.now();
+  const n = await reinjectTab(9, "portal", deps);
+  assert.equal(n, 0);
+  assert.ok(Date.now() - start < 5000);
+});
+
+test("a hung executeScript does not stall reinjectAll's loop", async () => {
+  const deps = fakeDeps({ manifest: {} });
+  deps.injectTimeoutMs = 25;
+  deps.scripting.getRegisteredContentScripts = async () => [
+    { id: "x", matches: ["https://portal.uwaterloo.ca/*"], js: ["p.js"] },
+    { id: "y", matches: ["https://mail.google.com/*"], js: ["g.js"] },
+  ];
+  deps.tabsByQuery[JSON.stringify(["https://portal.uwaterloo.ca/*"])] = [
+    { id: 1, status: "complete" },
+  ];
+  deps.tabsByQuery[JSON.stringify(["https://mail.google.com/*"])] = [
+    { id: 2, status: "complete" },
+  ];
+  deps.scripting.executeScript = (spec) =>
+    spec.target.tabId === 1 ? new Promise(() => {}) : Promise.resolve();
+  const done = await reinjectAll(deps);
+  assert.deepEqual(done, [2]);
+});
+
 test("reinjectAll with no manifest entries still covers registered scripts", async () => {
   const deps = fakeDeps({ manifest: {} });
   deps.scripting.getRegisteredContentScripts = async () => [

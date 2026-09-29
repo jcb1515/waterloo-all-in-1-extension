@@ -317,6 +317,9 @@ function pickTab(tabs, source) {
   let best = null;
   for (const t of tabs || []) {
     if (!t || t.id == null || t.discarded || typeof t.url !== "string") continue;
+    // A frozen (sleeping) tab can never answer, and scripting.executeScript
+    // on it may never settle — leave it alone and fall back to a fresh tab.
+    if (t.frozen === true) continue;
     if (sourceForTabUrl(t.url) !== source) continue;
     if (!best || (t.lastAccessed || 0) > (best.lastAccessed || 0)) best = t;
   }
