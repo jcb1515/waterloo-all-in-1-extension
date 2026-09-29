@@ -181,22 +181,6 @@ async function runCheck(source, run, deps) {
 }
 
 async function runSyncCheck(source, adapterId, run, deps) {
-  // gcal's export read can run through an open Calendar tab (its relay) —
-  // when none is open, give it one. run.ours makes runCheck close only a
-  // tab we opened ourselves.
-  if (source === "gcal") {
-    let tabs = [];
-    try {
-      tabs = await deps.tabs.query({});
-    } catch {
-      /* no tabs api — sync proceeds without a relay tab */
-    }
-    if (!pickTab(tabs || [], source)) {
-      const siteUrl = siteUrlFor(source);
-      const tab = siteUrl ? await openTab(deps, run, source, siteUrl) : null;
-      if (tab) await waitComplete(tab.id, run, deps);
-    }
-  }
   const res = await deps.runSync(adapterId, "manual");
   let minLastRun = run.startedAtMs;
   if (res && res.ok === false) {

@@ -106,8 +106,8 @@ import { guardInstance } from "./guard.js";
 
   // Runs fetches the background can't (same-origin session cookies). Only
   // site-relative GET/POST paths — no scheme, no "..", no redirects off host.
-  // On Learn and Calendar the site content script answers RELAY_FETCH itself
-  // (restricted allowlists); registering here too would race the fetch twice.
+  // On Learn the site content script answers RELAY_FETCH itself (restricted
+  // to GET /d2l/api/); registering here too would race the fetch twice.
   /** @param {any} msg */
   function onRelayFetch(msg, _sender, sendResponse) {
     if (!msg || msg.type !== MSG.RELAY_FETCH) return false;
@@ -136,7 +136,7 @@ import { guardInstance } from "./guard.js";
     })();
     return true;
   }
-  if (site !== "learn" && site !== "gcal") chrome.runtime.onMessage.addListener(onRelayFetch);
+  if (site !== "learn") chrome.runtime.onMessage.addListener(onRelayFetch);
 
   function applySettings(s) {
     enabled = !s || s.enabled !== false;

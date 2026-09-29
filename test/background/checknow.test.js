@@ -187,46 +187,6 @@ test("already-running sync: waits for the concurrent run's stamp", async () => {
   assert.equal(deps.calls.stamp.length, 1);
 });
 
-test("gcal check opens a background Calendar tab when none is open, then closes it", async () => {
-  const deps = fakeDeps({
-    runSync: async (/** @type {string} */ id) => {
-      assert.equal(id, "gcal");
-      deps.data.sourceState.gcal = {
-        lastRunAt: new Date(deps.now()).toISOString(),
-        session: "signed-in",
-      };
-      return { ok: true };
-    },
-  });
-  startCheck("gcal", deps);
-  const run = await settle(deps, "gcal");
-  assert.equal(run.status, "ok");
-  assert.equal(deps.calls.create.length, 1);
-  assert.equal(deps.calls.create[0].active, false);
-  assert.match(String(deps.calls.create[0].url), /^https:\/\/calendar\.google\.com\//);
-  assert.deepEqual(deps.calls.remove, [901], "only the tab we opened closes");
-});
-
-test("gcal check reuses an open Calendar tab and never closes it", async () => {
-  const deps = fakeDeps({
-    runSync: async () => {
-      deps.data.sourceState.gcal = {
-        lastRunAt: new Date(deps.now()).toISOString(),
-        session: "signed-in",
-      };
-      return { ok: true };
-    },
-  });
-  deps.tabs.query = async () => [
-    { id: 7, url: "https://calendar.google.com/calendar/u/0/r/week", discarded: false, lastAccessed: 5 },
-  ];
-  startCheck("gcal", deps);
-  const run = await settle(deps, "gcal");
-  assert.equal(run.status, "ok");
-  assert.equal(deps.calls.create.length, 0, "existing tab reused");
-  assert.equal(deps.calls.remove.length, 0, "user tab stays open");
-});
-
 test("already-running sync landing signed-out -> failed signed-out", async () => {
   const deps = fakeDeps({
     runSync: async () => ({ ok: false, reason: "already-running" }),
