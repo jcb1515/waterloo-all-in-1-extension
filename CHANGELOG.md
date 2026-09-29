@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.4.1 — 2026-09-29
+
+### Check now, even on sleeping tabs
+
+- **Check now works right after an extension update.** A tab that was open
+  before the update no longer ends a check in an error — the extension
+  reconnects to it and runs the check.
+- **Sleeping (frozen) tabs can't stall a check.** Edge/Chrome put unused
+  tabs to sleep; a check pointed at one used to spin forever. Sleeping
+  tabs are now skipped, and if reconnecting to a tab takes too long the
+  check opens a fresh background tab instead.
+- **Every check records a result.** A check that ends early — throttled,
+  interrupted or superseded — still writes its outcome, so the source tile
+  no longer sits on "Checking…" forever; it shows "last check didn't
+  finish" instead.
+
+### Email
+
+- **A reminder or forwarded copy of an email no longer shows as a second
+  item.** Messages whose subject only adds `RE:`/`FW:`/`REMINDER` (or a
+  `[tag]` prefix) and carry the same date merge into the original item.
+
+### Safety
+
+- The release build now refuses to package if the server config carries a
+  real database id or secret values instead of the placeholder.
+
 ## 1.4.0 — 2026-09-28
 
 ### Check now that actually checks
