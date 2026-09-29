@@ -575,18 +575,3 @@ Not affiliated with or endorsed by the University of Waterloo. The
 extension reads only pages you can already see in your own browser — it
 is your responsibility to use it in line with each site's terms of use.
 Use at your own risk.
-
-## Credits
-
-Built on two MIT-licensed projects:
-
-- [gurshh-rain/uwlearn_assignment_extension](https://github.com/gurshh-rain/uwlearn_assignment_extension)
-  (Gurshaan Gill) — the original Learn-scraper idea and the Cloudflare
-  Worker calendar feed in `server/`.
-- [WATnow](https://github.com/EricJujianZou/watnow) by Eric Zou — the
-  Learn side panel, reminders and live Learn reader foundations.
-
-Icons are adapted from [Lucide](https://lucide.dev) (ISC).
-
-Upstream licenses are in `licenses/`. This project is MIT-licensed —
-see [LICENSE](LICENSE).
