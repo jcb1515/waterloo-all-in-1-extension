@@ -1,16 +1,17 @@
 # Learn adapter (`learn`)
 
 Reads Waterloo Learn (Brightspace/D2L) and returns a contract `SyncResult`. The
-adapter wraps `LiveSource` (`live-source.js`): the
+adapter wraps `LearnReader` (`reader.js`): the
 contract's `ctx.fetch` (T1) is injected as its `transport` and `ctx.relay` (T2)
-as its `relay`, so session detection, rate limiting and every read keep their
-original behaviour. `source.js` / `demo-source.js` / `fixtures.js` belong to the
-older background and are untouched.
+as its `relay`, so session detection, rate limiting and every read happen
+inside `reader.js`. `content.js` is the tab-side relay that answers
+`MSG.RELAY_FETCH` for GETs under `/d2l/api/`.
 
 ## Settings slice keys
 
-- `liveBaseOverride` — alternate Learn origin (the local test harness uses it;
-  see `liveBase()` in live-source.js). Default `https://learn.uwaterloo.ca`.
+- `liveBaseOverride` — alternate Learn origin for local API mocks (only
+  `localhost`/`127.0.0.1` hosts are honoured; see `learnOrigin()` in
+  reader.js). Default `https://learn.uwaterloo.ca`.
 
 ## Reads and scopes
 

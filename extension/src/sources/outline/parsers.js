@@ -6,7 +6,7 @@
 */
 
 import { normCourseCode } from "../../core/contract.js";
-import { termFromText } from "../learn/live-source.js";
+import { termFromText } from "../learn/reader.js";
 import { inferYear } from "../../lib/textdates/index.js";
 
 /** Line-breaking tags for prose extraction (tables are skipped or handled as grids). */

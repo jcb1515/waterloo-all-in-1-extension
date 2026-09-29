@@ -6,7 +6,7 @@
 */
 
 import { extractDates, zonedIso, zonedParts } from "../../lib/textdates/index.js";
-import { termFromText } from "../learn/live-source.js";
+import { termFromText } from "../learn/reader.js";
 import { titleSimilarity } from "../../core/merge.js";
 import { classify, factsOf } from "../learn/classify.js";
 import { addDays, clockOf, dNum, dow, fromNum, inRanges, pad, slug, torontoDate } from "./expand.js";
@@ -386,7 +386,7 @@ export function parseSyllabusText(text, opts = {}) {
   const course = {
     code,
     name: title || undefined,
-    term: term ?? undefined,
+    term: /** @type {number} */ (term ?? undefined),
     weights,
     assessments,
   };

@@ -1,6 +1,6 @@
 // @ts-check
 /*
-  Learn adapter on the shared contract. Wraps LiveSource: the worker
+  Learn adapter on the shared contract. Wraps LearnReader: the worker
   fetch (T1, ctx.fetch) is injected as its transport and the tab relay (T2,
   ctx.relay) as its relay, so session detection and every read keep their
   original behaviour. On top of the deadline list it adds announcement text
@@ -11,7 +11,7 @@
 import { itemId, normCourseCode } from "../../core/contract.js";
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
 import { classify, factsOf, isDueish, sentenceOf, TRIGGER_RE } from "./classify.js";
-import { cleanEventTitle, LiveSource, liveBase } from "./live-source.js";
+import { LearnReader, learnOrigin, stripLearnSuffix } from "./reader.js";
 
 /** @typedef {import("../../core/contract.js").FetchResult} FetchResult */
 /** @typedef {import("../../core/contract.js").Item} Item */
@@ -39,7 +39,7 @@ const TOOL_SCOPES = ["dropbox", "quizzes", "discussions", "feed", "calendar"];
 const SUBMISSION = { dropbox: "Dropbox", quiz: "Quiz", discussion: "Discussion" };
 
 /**
- * A contract FetchResult -> LiveSource's fetch result shape.
+ * A contract FetchResult -> LearnReader's fetch result shape.
  * @param {FetchResult | undefined | null} r
  */
 function toLive(r) {
@@ -66,7 +66,7 @@ function toLive(r) {
 
 /** A normalised title for grade matching: case/spacing-insensitive, Learn decorations off. */
 function normName(title) {
-  return cleanEventTitle(String(title || "")).toLowerCase().replace(/\s+/g, " ").trim();
+  return stripLearnSuffix(String(title || "")).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 /** @param {import("../../core/contract.js").Adapter} adapter */
@@ -85,12 +85,12 @@ const adapter = {
     const now = ctx.now instanceof Date ? ctx.now : new Date();
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
-    const base = liveBase(ctx.settings || {});
+    const base = learnOrigin(ctx.settings || {});
     const textDates = ctx.textDates || extractDates;
     const headers = { Accept: "application/json" };
     const transport = async (path) => toLive(await ctx.fetch(base + path, { headers }));
     const relay = async (_base, path) => toLive(await ctx.relay(base, path, { headers }));
-    const src = new LiveSource(ctx.settings || {}, { transport, relay, now });
+    const src = new LearnReader(ctx.settings || {}, { transport, relay, now });
     if (ctx.state && ctx.state.versions) src.versions = ctx.state.versions;
 
     /** @type {Item[]} */
@@ -154,7 +154,7 @@ const adapter = {
         if (!TOOL_SCOPES.every((scope) => okSet.has(scope))) complete = false;
         const termCode = course.term ?? termCodeFor(now);
 
-        // LiveSource deadline rows -> contract items.
+        // LearnReader deadline rows -> contract items.
         /** @type {{row: any, item: Item}[]} */
         const pairs = [];
         for (const row of rows) {

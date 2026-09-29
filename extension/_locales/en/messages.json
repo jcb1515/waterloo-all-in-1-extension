@@ -1,14 +1,14 @@
 {
   "appName": {
     "message": "Waterloo All-in-1",
-    "description": "Working product name. Change it here and it updates the manifest, the side panel, the settings page and notifications."
+    "description": "The extension's display name, used in the manifest, the side panel, the settings page and notifications."
   },
   "appDescription": {
     "message": "Every Waterloo deadline, class, interview and meeting in one side panel and one Google Calendar.",
-    "description": "Chrome Web Store and chrome://extensions description. 132 characters max, no dashes."
+    "description": "Shown on the store listing and the extensions page. Keep it under 132 characters and avoid dashes."
   },
   "actionTitle": {
     "message": "Open Waterloo All-in-1",
-    "description": "Tooltip on the toolbar icon."
+    "description": "The tooltip shown when hovering over the toolbar button."
   }
 }
