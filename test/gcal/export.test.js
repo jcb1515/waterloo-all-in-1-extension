@@ -332,6 +332,10 @@ test("sync: status 0 + permission granted reports signed-out", async () => {
   assert.equal(r.session, "signed-out");
   assert.equal(r.error && r.error.code, "signed-out");
   assert.match(String(r.error && r.error.message), /calendar\.google\.com/);
+  assert.match(
+    String(r.error && r.error.message),
+    /extensions are allowed on calendar\.google\.com/,
+  );
 });
 
 test("sync: status 0 + permission missing reports no-permission", async () => {

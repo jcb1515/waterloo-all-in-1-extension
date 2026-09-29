@@ -215,7 +215,7 @@ const adapter = {
         error: {
           code: "signed-out",
           message:
-            "Sign in to Google Calendar in this browser (open calendar.google.com), then Check now",
+            "Sign in to Google Calendar in this browser and make sure extensions are allowed on calendar.google.com (Extensions menu on that page), then Check now",
         },
         state: prev,
       };
