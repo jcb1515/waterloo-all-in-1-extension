@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.2 — 2026-09-29
+
+### Learn
+
+- **New Learn reader.** The code that reads Learn has been rewritten from
+  scratch. It reads the same courses, assignments, quizzes, discussions,
+  grades and announcements, and your saved items keep the same ids, so
+  nothing moves or duplicates after updating.
+- **Group assignments always open.** A group assignment whose group isn't
+  known yet now links to the course's assignment list instead of nowhere.
+
+### Housekeeping
+
+- Removed old unused code (demo mode and an unused reminders module) and
+  updated the license notices.
+
 ## 1.4.1 — 2026-09-29
 
 ### Check now, even on sleeping tabs
