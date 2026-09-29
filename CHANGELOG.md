@@ -23,8 +23,9 @@
 
 - **Add to calendar** from any item: open an event, email deadline,
   Discord event or WaterlooWorks info session and add it. It shows in
-  Upcoming and goes to your Google Calendar. **Remove from calendar** takes
-  it back off. Items already on your Google Calendar say so.
+  Upcoming and goes to your Google Calendar. **Remove from calendar**
+  takes an item you added back to **Found, not added yet** — it leaves
+  Upcoming and the feed. Items already on your Google Calendar say so.
 - **Edit & add**: fix the title or time before adding.
 - **Add to To-do / Remove from To-do** on any dated item — your pick wins
   over the automatic rules (a pinned item lists even while it's still

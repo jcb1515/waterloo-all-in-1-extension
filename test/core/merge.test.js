@@ -11,6 +11,8 @@ import {
   itemRank,
   titleKey,
 } from "../../extension/src/core/merge.js";
+import { effectiveItem } from "../../extension/src/core/effective.js";
+import { feedExclusion } from "../../extension/src/calendar/payload.js";
 
 const NOW = new Date("2025-09-15T16:00:00.000Z"); // a Monday noon EDT
 const nowIso = NOW.toISOString();
@@ -301,6 +303,45 @@ test("userState.review overrides; members' review otherwise decides", () => {
     now: NOW,
   });
   assert.equal(r2.items["discord:m1"].review, "accepted");
+});
+
+test("clearing userState.review re-derives item.review from members", () => {
+  // Remove-from-calendar on a user-added item writes {review: null}; the
+  // next recompute must un-bake "accepted" so the item returns to its
+  // source review (pending -> feedExclusion "pending" -> "Found, not
+  // added yet").
+  const t = raw("waterlooworks", "e1", {
+    title: "Info session",
+    type: "event",
+    startAt: "2025-09-20T22:00:00.000Z",
+    review: "pending",
+  });
+  const r1 = recompute({ raws: raws(["waterlooworks", [t]]), now: NOW });
+  assert.equal(r1.items["waterlooworks:e1"].review, "pending");
+
+  const r2 = recompute({
+    raws: raws(["waterlooworks", [t]]),
+    prevItems: r1.items,
+    links: r1.links,
+    uidMap: r1.uidMap,
+    userState: { "waterlooworks:e1": { review: "accepted" } },
+    now: NOW,
+  });
+  assert.equal(r2.items["waterlooworks:e1"].review, "accepted");
+
+  // The UI patch writes null; merge treats it the same as absent.
+  const cleared = recompute({
+    raws: raws(["waterlooworks", [t]]),
+    prevItems: r2.items,
+    links: r2.links,
+    uidMap: r2.uidMap,
+    userState: { "waterlooworks:e1": { review: null, calendar: null } },
+    now: NOW,
+  });
+  const it = cleared.items["waterlooworks:e1"];
+  assert.equal(it.review, "pending", "review falls back to the member's");
+  const eff = effectiveItem(it, { review: null, calendar: null }, {});
+  assert.equal(feedExclusion(eff, { review: null, calendar: null }, {}, NOW.getTime()), "pending");
 });
 
 test("status precedence: done > submitted > cancelled > open", () => {

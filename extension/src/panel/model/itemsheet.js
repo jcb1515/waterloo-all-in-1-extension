@@ -206,6 +206,21 @@ export function calendarState(raw, us, state, now) {
 }
 
 /**
+ * The userState patch for the sheet's "Remove from calendar". A
+ * user-accepted item (us.review === "accepted" — source reviews are only
+ * ever "auto"/"pending") was added *by* the user, so remove undoes both:
+ * clearing review sends it back to "Found, not added yet". Anything else
+ * is a source/auto item where remove is just the feed opt-out — it stays
+ * in Upcoming like any accepted find.
+ * @param {any} us  userState[item.id] (may be undefined)
+ * @returns {Record<string, any>}
+ */
+export function removeCalendarPatch(us) {
+  if (us && us.review === "accepted") return { review: null, calendar: null };
+  return { calendar: false };
+}
+
+/**
  * One-line explanation for an off-calendar item the user can't add from
  * here (the "Calendar" dd when there is no button).
  * @param {string|null} reason  feedExclusion reason

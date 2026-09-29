@@ -10,6 +10,7 @@ import {
   sourceLabel,
   calendarState,
   calendarReasonText,
+  removeCalendarPatch,
   todoState,
 } from "../../extension/src/panel/model/itemsheet.js";
 import { buildAgenda } from "../../extension/src/panel/model/agenda.js";
@@ -185,6 +186,27 @@ test("calendarState: pending / dismissed / removed are addable, others not", () 
     "hidden",
   );
   assert.equal(calendarState(null, {}, CAL_STATE, CAL_NOW).kind, "off");
+});
+
+test("removeCalendarPatch: a user-accepted item is fully un-added", () => {
+  // "accepted" only ever comes from userState, so removing from the
+  // calendar also clears the accept — the item returns to its source
+  // review (pending -> "Found, not added yet").
+  assert.deepEqual(removeCalendarPatch({ review: "accepted", calendar: null }), {
+    review: null,
+    calendar: null,
+  });
+  assert.deepEqual(removeCalendarPatch({ review: "accepted", todo: true }), {
+    review: null,
+    calendar: null,
+  });
+});
+
+test("removeCalendarPatch: auto/pending/absent user state is a feed opt-out", () => {
+  assert.deepEqual(removeCalendarPatch({}), { calendar: false });
+  assert.deepEqual(removeCalendarPatch({ review: "dismissed" }), { calendar: false });
+  assert.deepEqual(removeCalendarPatch(undefined), { calendar: false });
+  assert.deepEqual(removeCalendarPatch(null), { calendar: false });
 });
 
 test("calendarReasonText covers the non-addable reasons", () => {

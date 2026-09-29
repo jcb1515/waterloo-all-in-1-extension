@@ -14,6 +14,7 @@ import {
   sourceOpenLink,
   calendarState,
   calendarReasonText,
+  removeCalendarPatch,
   todoState,
 } from "../model/itemsheet.js";
 import { ADAPTERS } from "../../core/registry.js";
@@ -155,10 +156,15 @@ export function ItemSheet({ state, actions, now, itemId, onClose }) {
   };
 
   const removeFromCalendar = () => {
-    actions.setUserState(item.id, { calendar: false });
+    const prev = us;
+    actions.setUserState(item.id, removeCalendarPatch(us));
     actions.toast("Removed from your calendar", {
       label: "Undo",
-      run: () => actions.setUserState(item.id, { calendar: null }),
+      run: () =>
+        actions.setUserState(item.id, {
+          review: prev.review ?? null,
+          calendar: prev.calendar ?? null,
+        }),
     });
   };
 
