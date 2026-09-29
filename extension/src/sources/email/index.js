@@ -8,7 +8,194 @@
 */
 
 import { extractDates, termCodeFor } from "../../lib/textdates/index.js";
+import { CHECK_TIMEOUT_MS } from "../../core/messages.js";
 import { dedupeMailItems, itemsFromMessage, SENT_FOLDERS, taskItems } from "./extract.js";
+
+/* ---- REMINDER/FW subject-normalised merge ------------------------------- */
+
+/**
+ * A subject stripped of list tags and re/fw/reminder prefixes —
+ * "[List] REMINDER - FW: Foo" and "Foo" normalise equal.
+ * @param {any} s
+ */
+export const normMailSubject = (s) => {
+  let t = String(s || "");
+  for (;;) {
+    const u = t
+      .replace(/^\s*\[[^\]]*\]\s*/, "")
+      .replace(/^\s*(?:re|fw|fwd|reminder)\b\s*[-:]?\s*/i, "");
+    if (u === t) break;
+    t = u;
+  }
+  return t.replace(/\s+/g, " ").trim().toLowerCase();
+};
+
+const MAIL_ID_RE = /:mail:/;
+const mailInstant = (/** @type {any} */ i) => i.startAt || i.dueAt || null;
+
+/** Newest 500 subjectDup entries per provider (by message receivedAt). */
+const SUBJECT_DUP_CAP = 500;
+const capSubjectDup = (/** @type {Record<string, any>} */ map) => {
+  const ks = Object.keys(map);
+  if (ks.length <= SUBJECT_DUP_CAP) return map;
+  const recv = (k) => Date.parse(String((map[k] || {}).receivedAt || "")) || 0;
+  for (const k of ks.sort((a, b) => recv(b) - recv(a)).slice(SUBJECT_DUP_CAP)) {
+    delete map[k];
+  }
+  return map;
+};
+
+/**
+ * One pass of the subject-normalised merge over one parse's items, with
+ * the cross-payload `subjectDup` ledger. Two `:mail:` items merge only when
+ * provider + type + resolved instant (startAt or dueAt, exactly) +
+ * normalised source-message subject all agree; the earliest-received
+ * message's item keeps its id and the losers' message keys land in
+ * meta.mergedFrom. Returns {items, subjectDup, touched}.
+ * @param {any[]} items
+ * @param {Map<string, any>} msgByKey
+ * @param {string} provider
+ * @param {Record<string, {key: string, receivedAt?: string, type?: string, mergedFrom?: string[]}>} subjectDup
+ * @param {string} at
+ */
+function mergeSubjectDups(items, msgByKey, provider, subjectDup, at) {
+  /** @type {{entry: any, group: any[]|null}[]} */
+  const rows = [];
+  const groups = new Map();
+  for (const it of items) {
+    const mKey = String((it.meta && it.meta.messageKey) || "");
+    const m = mKey ? msgByKey.get(mKey) : null;
+    const inst = mailInstant(it);
+    const norm = m ? normMailSubject(m.subject) : "";
+    if (!it || !MAIL_ID_RE.test(String(it.id)) || !inst || !norm) {
+      rows.push({ entry: it, group: null });
+      continue;
+    }
+    const sig = `${it.type}|${norm}|${inst}`;
+    let g = groups.get(sig);
+    if (!g) groups.set(sig, (g = []));
+    const e = {
+      it,
+      mKey,
+      recv: Date.parse(String(m.receivedAt || "")) || Infinity,
+      norm,
+      inst,
+    };
+    g.push(e);
+    rows.push({ entry: e, group: g });
+  }
+  /** Emit one item per group: the earliest-received message's item wins,
+   * re-keyed under the ledger's canonical id when one already exists. */
+  const emitGroup = (/** @type {any[]} */ g) => {
+    const type = g[0].it.type;
+    const inst = g[0].inst;
+    const sigKey = `${g[0].norm}|${inst}`;
+    const rec = subjectDup[sigKey];
+    /** @type {string|null} */
+    let canonKey = null;
+    let canonRecv = Infinity;
+    if (rec && (!rec.type || rec.type === type)) {
+      canonKey = String(rec.key || "") || null;
+      canonRecv = Date.parse(String(rec.receivedAt || "")) || Infinity;
+    }
+    for (const e of g) {
+      if (e.recv < canonRecv) {
+        canonKey = e.mKey;
+        canonRecv = e.recv;
+      }
+    }
+    const survE =
+      g.find((e) => e.mKey === canonKey) ||
+      [...g].sort((a, b) => a.recv - b.recv)[0];
+    const surv = {
+      ...survE.it,
+      id: `${provider}:mail:${canonKey}:${inst}`,
+      meta: { ...(survE.it.meta || {}) },
+    };
+    // The source subject rides on meta so a merged item still tells you
+    // which message produced it.
+    const survMsg = msgByKey.get(survE.mKey);
+    if (survMsg && surv.meta.subject === undefined) {
+      surv.meta.subject = String(survMsg.subject || "");
+    }
+    // Union every copy's seenIn (rewritten to the canonical id) plus the
+    // canonical message's own scope, so a re-read of any one copy keeps
+    // the merged item alive.
+    const scopeSeen = new Set();
+    /** @type {any[]} */
+    const seen = [];
+    const idKey = surv.id.replace(new RegExp(`^${provider}:`), "");
+    for (const e of g) {
+      for (const s of e.it.seenIn || []) {
+        if (!s || !s.scope || scopeSeen.has(String(s.scope))) continue;
+        scopeSeen.add(String(s.scope));
+        seen.push({ ...s, key: idKey });
+      }
+    }
+    const canonScope = `email:${provider}:${canonKey}`;
+    if (!scopeSeen.has(canonScope)) {
+      seen.push({ source: provider, key: idKey, scope: canonScope, at });
+    }
+    if (seen.length) surv.seenIn = seen;
+    const mergedFrom = new Set(
+      /** @type {any[]} */ ((survE.it.meta && survE.it.meta.mergedFrom) || []),
+    );
+    // The ledger's mergedFrom survives a later solo re-read of the
+    // canonical message.
+    for (const k of (rec && rec.mergedFrom) || []) {
+      if (k !== canonKey) mergedFrom.add(k);
+    }
+    const threads = new Set([
+      ...((surv.meta && surv.meta.threads) || []),
+      surv.evidence && surv.evidence.url,
+    ].filter(Boolean));
+    for (const e of g) {
+      if (e.mKey !== canonKey) mergedFrom.add(e.mKey);
+      for (const k of (e.it.meta && e.it.meta.mergedFrom) || []) {
+        if (k !== canonKey) mergedFrom.add(k);
+      }
+      for (const t of (e.it.meta && e.it.meta.threads) || []) threads.add(t);
+      if (e.it.evidence && e.it.evidence.url) threads.add(e.it.evidence.url);
+    }
+    if (mergedFrom.size) surv.meta.mergedFrom = [...mergedFrom].sort();
+    if (threads.size) surv.meta.threads = [...threads];
+    const canonIso = Number.isFinite(canonRecv)
+      ? new Date(canonRecv).toISOString()
+      : undefined;
+    if (
+      canonKey &&
+      (!rec ||
+        rec.key !== canonKey ||
+        rec.type !== type ||
+        rec.receivedAt !== canonIso)
+    ) {
+      subjectDup[sigKey] = {
+        key: canonKey,
+        receivedAt: canonIso,
+        type,
+        ...(mergedFrom.size ? { mergedFrom: [...mergedFrom].sort() } : {}),
+      };
+      return { item: surv, touched: true };
+    }
+    return { item: surv, touched: false };
+  };
+  /** @type {any[]} */
+  const out = [];
+  const emitted = new Set();
+  let touched = false;
+  for (const r of rows) {
+    if (!r.group) {
+      out.push(r.entry);
+      continue;
+    }
+    if (emitted.has(r.group)) continue;
+    emitted.add(r.group);
+    const { item, touched: t } = emitGroup(r.group);
+    out.push(item);
+    touched = touched || t;
+  }
+  return { items: out, touched };
+}
 
 /** @typedef {import("../../core/contract.js").SyncContext} SyncContext */
 /** @typedef {import("../../core/contract.js").SyncResult} SyncResult */
@@ -142,10 +329,22 @@ const adapter = {
       );
       items.push(...tasks.items);
 
+      // A re-sent copy (REMINDER/FW/…) under a different message key is the
+      // same thing: merge same provider+type+exact instant+normalised
+      // subject, earliest-received message keeping the id. Runs before
+      // dedupeMailItems (its titleScore winner can pick the later copy).
+      // subjectDup[provider] carries the winner across payloads — a later
+      // batch's copy is re-emitted under the canonical id.
+      const msgByKey = new Map(msgs.map((m) => [String(m.key), m]));
+      const subjectDup = {
+        ...(((prev.subjectDup || {})[provider]) || {}),
+      };
+      const subj = mergeSubjectDups(items, msgByKey, provider, subjectDup, at);
+
       // One observation can see the same thing twice: an opened invite plus
       // a "meeting link sent" mail, or two threads about one deadline.
       const seenIds = new Set();
-      const deduped = dedupeMailItems(items).filter((i) => {
+      const deduped = dedupeMailItems(subj.items).filter((i) => {
         if (seenIds.has(i.id)) return false;
         seenIds.add(i.id);
         return true;
@@ -236,7 +435,19 @@ const adapter = {
       // marker stamps {at, checked, ok, reason?} — the content script's
       // 30-min gate and the Setup status line both read `at`.
       if (chk && !chk.replay) {
-        const cur = ((prev.check || {})[provider]) || {};
+        let cur = ((prev.check || {})[provider]) || {};
+        // A `running` from a DIFFERENT, older-than-timeout run never
+        // finished (stale tab, dead worker) — close it as a timeout
+        // before this run's marker lands, keeping the last real result.
+        const runSince = cur.running && String(cur.running.since || "");
+        if (
+          runSince &&
+          runSince !== String(chk.since || "") &&
+          now.getTime() - (Date.parse(runSince) || 0) > CHECK_TIMEOUT_MS
+        ) {
+          const { running: _running, ...rest } = cur;
+          cur = { ...rest, ok: false, reason: "timeout" };
+        }
         const next = chk.final
           ? {
               at,
@@ -264,6 +475,14 @@ const adapter = {
         ...(threadMap ? { threadMap } : {}),
         ...(bodyRead ? { bodyRead } : {}),
         ...(checkState ? { check: checkState } : {}),
+        ...(subj.touched || prev.subjectDup
+          ? {
+              subjectDup: {
+                ...(prev.subjectDup || {}),
+                [provider]: capSubjectDup(subjectDup),
+              },
+            }
+          : {}),
       };
       // Dead state from the retired guided scan and the v:2 lookback
       // scheduler: dropped on the next write.

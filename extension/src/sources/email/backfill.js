@@ -147,6 +147,29 @@ export function makeRunBox(start) {
   };
 }
 
+/**
+ * Skips only a NON-forced run can produce (each is gated on !env.force):
+ * a check-now that joins an in-flight automatic run and inherits one of
+ * these never actually ran — retry once forced. (The reinject race: a
+ * re-injected copy's autoTick starts run(false) just before the
+ * orchestrator's re-ask lands.)
+ */
+export const AUTO_JOIN_SKIPS = new Set(["throttled", "locked", "retry"]);
+
+/**
+ * One check-now run through the run box: join whatever is in flight, and
+ * when that was an automatic run that returned an automatic-only skip,
+ * run once more — forced, this time for real.
+ * @param {{run: (force: boolean) => Promise<any>}} box
+ */
+export async function checkNowRun(box) {
+  let res = await box.run(true);
+  if (res && AUTO_JOIN_SKIPS.has(String(res.skipped || ""))) {
+    res = await box.run(true);
+  }
+  return res;
+}
+
 /** settings.outlookCount: one of 50/100/200, default 100. @param {any} v */
 export function clampOutlookCount(v) {
   const n = Number(v);
@@ -204,7 +227,15 @@ export async function backfillRound(env, impl) {
     requests: 0, peakRate: 0, pages: 0, bodies: 0, listed: 0,
     sentListed: 0, bodySkipped: 0,
   };
-  const done = (extra = {}) => ({ sent: 0, ms: wallNow() - t0, ...stats, ...extra });
+  const runId = `${impl.provider}-${nowMs.toString(36)}`;
+  const since = new Date(t0).toISOString();
+  // Set when the final check marker actually shipped — a check-now whose
+  // run ends without one (stale, frozen, provider skip, thrown) must have
+  // content.js send a finishPayload so state.check isn't left "running".
+  let finalSent = false;
+  const done = (extra = {}) => ({
+    sent: 0, ms: wallNow() - t0, ...stats, runId, since, finalSent, ...extra,
+  });
   if (typeof env.isFrozen === "function" && env.isFrozen()) return done({ skipped: "frozen" });
 
   /** @type {any} */
@@ -298,8 +329,6 @@ export async function backfillRound(env, impl) {
     return res;
   };
 
-  const runId = `${impl.provider}-${nowMs.toString(36)}`;
-  const since = new Date(t0).toISOString();
   const checked = new Set();
   let sent = 0;
   let batch = 0;
@@ -336,6 +365,7 @@ export async function backfillRound(env, impl) {
       },
     });
     sent++;
+    if (final) finalSent = true;
   };
 
   const plan = { count: clampOutlookCount(settings.outlookCount) };
@@ -462,6 +492,46 @@ export async function backfillRound(env, impl) {
     ...(partial ? { partial: true } : {}),
   });
   return done({ sent, ...(partial ? { partial: true } : {}) });
+}
+
+/**
+ * A standalone "final" check marker — the same payload shape sendPayload
+ * emits — for check-now end paths that never reached a batch (stale,
+ * frozen, a provider skip, a thrown run). The adapter keys the in-flight
+ * `running` record on `since`, so pass the run's own runId/since from the
+ * backfillRound result when it has them; fresh ones are generated
+ * otherwise (a thrown run may have no identity at all).
+ * @param {string} provider @param {string} pageUrl
+ * @param {{ok?: boolean, reason?: string, checked?: number,
+ *   runId?: string, since?: string}} [info]
+ */
+export function finishPayload(provider, pageUrl, info = {}) {
+  const at = new Date().toISOString();
+  return {
+    type: MSG.OBSERVED,
+    payload: {
+      source: provider,
+      kind: "dom",
+      url: pageUrl || "",
+      body: JSON.stringify({
+        v: 1,
+        provider,
+        folder: "inbox",
+        view: "backfill",
+        messages: [],
+        check: {
+          runId: info.runId || `${provider}-${Date.now().toString(36)}`,
+          since: info.since || at,
+          batch: 0,
+          final: true,
+          checked: Number(info.checked) || 0,
+          ok: info.ok === true,
+          ...(info.reason ? { reason: String(info.reason) } : {}),
+        },
+      }),
+      at,
+    },
+  };
 }
 
 /**

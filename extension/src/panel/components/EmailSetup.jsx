@@ -10,6 +10,7 @@ import { Field, Toggle } from "../../options/bits.jsx";
 import { requestSourceAccess } from "../../core/permissions.js";
 import { IS_PREVIEW } from "../data.js";
 import { fmtAgo } from "../model/agenda.js";
+import { checkStatus } from "../model/setup.js";
 
 const PROVIDER_LABEL = { gmail: "Gmail", outlook: "Outlook" };
 
@@ -79,13 +80,24 @@ export function EmailBackfill({ src, st, now }) {
       </p>
       {enabled.map((prov) => {
         const c = check[prov];
-        const running = c && c.running;
+        const cs = checkStatus(c, (now || new Date()).getTime());
         return (
           <p class="source-detail" key={prov}>
             <strong>{PROVIDER_LABEL[prov]}</strong>
             {" — "}
-            {running ? (
-              <>Checking… {running.checked || 0} so far</>
+            {cs.running ? (
+              <>Checking… {cs.running.checked || 0} so far</>
+            ) : cs.stale ? (
+              cs.at ? (
+                <>
+                  Last checked {cs.checked || 0} messages
+                  {" · "}
+                  {fmtAgo(cs.at, now || new Date())}
+                  {" · last check didn't finish"}
+                </>
+              ) : (
+                "Last check didn't finish — press Check now to retry"
+              )
             ) : c ? (
               <>
                 Last checked {c.checked || 0} messages

@@ -18,7 +18,9 @@ import {
   backfillFreeze,
   clampOutlookCount,
   checkNowDecision,
+  checkNowRun,
   doneFromResult,
+  finishPayload,
   gmailOnInbox,
   makeRunBox,
   makeRate,
@@ -1105,6 +1107,295 @@ test("gmail inbox rows parse through the passive list path", async (t) => {
   assert.equal(row.subject, "Weekend sale starts now");
   assert.match(row.preview || "", /40% off/);
   assert.ok(row.receivedAt);
+});
+
+/* ------------------- check-now finish guarantees ----------------------- */
+
+test("checkNowRun: a joined automatic-run skip retries once, forced", async () => {
+  const answers = [
+    { skipped: "throttled" },
+    { listed: 3, sent: 0, finalSent: true },
+  ];
+  let started = 0;
+  const box = makeRunBox(async () => {
+    started++;
+    return answers[started - 1];
+  });
+  const res = await checkNowRun(box);
+  assert.equal(started, 2); // joined the skip, then ran forced for real
+  assert.equal(res.listed, 3);
+});
+
+test("checkNowRun: a joined run that produced a result is reported as-is", async () => {
+  let started = 0;
+  /** @type {any} */
+  let release;
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  const box = makeRunBox(async () => {
+    started++;
+    await gate;
+    return { listed: 9 };
+  });
+  const auto = box.run(false);
+  const joined = checkNowRun(box);
+  assert.equal(started, 1);
+  release();
+  assert.equal((await joined).listed, 9);
+  assert.equal((await auto).listed, 9);
+});
+
+test("checkNowRun: at most one retry even if the forced run also skips", async () => {
+  let started = 0;
+  const box = makeRunBox(async () => {
+    started++;
+    return { skipped: "locked" };
+  });
+  const res = await checkNowRun(box);
+  assert.equal(started, 2);
+  assert.equal(res.skipped, "locked");
+});
+
+test("backfillRound: finalSent says whether the final marker shipped", async (t) => {
+  before(t);
+  const { env } = gmailEnv();
+  const ok = await backfillRound({ ...env, force: true }, gmailBackfill);
+  assert.equal(ok.finalSent, true);
+  assert.ok(ok.runId && ok.since);
+
+  for (const [name, skipped, e] of [
+    ["off", "off", gmailEnv({ settings: { gmail: false } }).env],
+    ["not-on-page", "not-on-page", gmailEnv({ onInbox: false }).env],
+    ["frozen", "frozen", gmailEnv({ frozen: () => true }).env],
+    ["no-token", "no-token", outlookEnv({ values: [] }).env],
+  ]) {
+    // eslint-disable-next-line no-await-in-loop
+    const r = await backfillRound(
+      { ...e, force: true },
+      name === "no-token" ? outlookBackfill : gmailBackfill,
+    );
+    assert.equal(r.skipped, skipped, name);
+    assert.equal(r.finalSent, false, name);
+  }
+
+  // A failed run DOES land a final ok:false marker — already covered.
+  const { env: errEnv } = gmailEnv();
+  errEnv.fetchImpl = async () => ({
+    status: 302,
+    redirected: true,
+    headers: { get: () => null },
+    text: async () => "",
+  });
+  const err = await backfillRound({ ...errEnv, force: true }, gmailBackfill);
+  assert.equal(err.error, "http");
+  assert.equal(err.finalSent, true);
+});
+
+test("backfillRound: a stale run reports finalSent false", async (t) => {
+  before(t);
+  // gmail/outlook impls swallow a slot() "stale" throw into "abort" (the
+  // failure path DOES send a final marker); the reachable stale exit is
+  // the page-loop top check. Freeze when the page-1 batch ships: the next
+  // iteration returns stale before its fetch — no final marker.
+  let frozen = false;
+  const { env } = outlookEnv({});
+  env.isFrozen = () => frozen;
+  const origSend = env.sendMessage;
+  env.sendMessage = (/** @type {any} */ m) => {
+    origSend(m);
+    frozen = true;
+  };
+  const r = await backfillRound({ ...env, force: true }, outlookBackfill);
+  assert.equal(r.stale, true);
+  assert.equal(r.finalSent, false);
+  assert.ok(r.sent >= 1); // the page-1 batch went out; the final marker did not
+});
+
+test("finishPayload: the check-now fallback marker mirrors the batch shape", async () => {
+  const m = finishPayload("gmail", "https://mail.google.com/mail/u/0/#inbox", {
+    ok: false,
+    reason: "timeout",
+    checked: 42,
+    runId: "g-run-1",
+    since: "2026-10-01T14:00:00.000Z",
+  });
+  assert.equal(m.type, "wa1:observed");
+  assert.equal(m.payload.source, "gmail");
+  assert.equal(m.payload.kind, "dom");
+  assert.equal(m.payload.url, "https://mail.google.com/mail/u/0/#inbox");
+  const b = JSON.parse(m.payload.body);
+  assert.equal(b.view, "backfill");
+  assert.deepEqual(b.messages, []);
+  assert.equal(b.check.final, true);
+  assert.equal(b.check.runId, "g-run-1");
+  assert.equal(b.check.since, "2026-10-01T14:00:00.000Z");
+  assert.equal(b.check.ok, false);
+  assert.equal(b.check.reason, "timeout");
+  assert.equal(b.check.checked, 42);
+
+  // The adapter writes the finish record like any final marker.
+  const res = await adapter.observe.parse(m.payload, ctx({}));
+  assert.equal(res.state.check.gmail.ok, false);
+  assert.equal(res.state.check.gmail.reason, "timeout");
+  assert.equal(res.state.check.gmail.checked, 42);
+  assert.equal(res.state.check.gmail.running, undefined);
+});
+
+test("adapter: a new run's marker closes a stale running record as timeout", async () => {
+  const m = { key: "k1", subject: "x", receivedAt: NOW.toISOString(), links: [] };
+  // A `running` from an older run (since > CHECK_TIMEOUT_MS ago) under a
+  // finished record — its batch arriving now must convert it, not append.
+  const state = {
+    check: {
+      gmail: {
+        at: "2026-10-01T13:00:00.000Z",
+        checked: 40,
+        ok: true,
+        running: { since: "2026-10-01T14:00:00.000Z", checked: 12 },
+      },
+    },
+  };
+  const batch = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [m],
+      check: { runId: "g-new", since: "2026-10-01T15:00:00.000Z", batch: 0, final: false, checked: 7 },
+    }),
+    ctx({}, { state }),
+  );
+  const c = batch.state.check.gmail;
+  assert.equal(c.ok, false);
+  assert.equal(c.reason, "timeout");
+  assert.equal(c.at, "2026-10-01T13:00:00.000Z");
+  assert.equal(c.checked, 40);
+  assert.equal(c.running.since, "2026-10-01T15:00:00.000Z");
+  assert.equal(c.running.checked, 7);
+
+  // A batch of the OLD run (same since) still updates running, no convert.
+  const same = await adapter.observe.parse(
+    payload("gmail", {
+      v: 1, provider: "gmail", folder: "inbox", view: "backfill",
+      messages: [m],
+      check: { runId: "g-old", since: "2026-10-01T14:00:00.000Z", batch: 1, final: false, checked: 30 },
+    }),
+    ctx({}, { state }),
+  );
+  const c2 = same.state.check.gmail;
+  assert.equal(c2.ok, true);
+  assert.equal(c2.running.checked, 30);
+});
+
+/* ----------------- REMINDER/FW subject-normalised merge ----------------- */
+
+const bfParse = (messages, tag, extra = {}) =>
+  adapter.observe.parse(
+    payload("outlook", {
+      v: 1, provider: "outlook", folder: "inbox", view: "backfill",
+      messages,
+      check: { runId: tag, since: NOW.toISOString(), batch: 0, final: true, checked: messages.length, ok: true },
+    }),
+    ctx({}, extra),
+  );
+
+const DATED = {
+  url: "https://outlook.office.com/mail/inbox/id/x",
+  from: "Robotics Lead",
+  fromEmail: "lead@robotics.example.org",
+  body: "Applications are due October 15.",
+  links: [],
+  bodyFetched: true,
+};
+
+test("adapter: a REMINDER/FW copy merges onto the earliest-received item", async () => {
+  const a = { ...DATED, key: "kA", subject: "Fund applications", receivedAt: "2026-10-01T10:00:00.000Z" };
+  const b = {
+    ...DATED,
+    key: "kB",
+    subject: "[EngList] REMINDER - FW: Fund applications",
+    receivedAt: "2026-10-01T12:00:00.000Z",
+  };
+
+  // Cross-payload: A first, then the copy B — one item, A's id survives.
+  const p1 = await bfParse([a], "o1");
+  const itemA = p1.items.find((i) => i.type === "deadline");
+  assert.ok(itemA, "A should produce a deadline");
+  assert.equal(itemA.id, `outlook:mail:kA:${itemA.dueAt}`);
+  let raw = applyResult(null, p1, { mode: "scope", scope: p1.scope });
+  assert.equal(raw.items.length, 1);
+
+  const p2 = await bfParse([b], "o2", { state: p1.state });
+  assert.equal(p2.items.length, 1);
+  const mergedItem = p2.items[0];
+  assert.equal(mergedItem.id, itemA.id, "re-emitted under the canonical id");
+  assert.deepEqual(mergedItem.meta.mergedFrom, ["kB"]);
+  assert.deepEqual(
+    (mergedItem.seenIn || []).map((s) => s.scope).sort(),
+    ["email:outlook:kA", "email:outlook:kB"].sort(),
+  );
+  assert.equal(p2.state.subjectDup.outlook[`fund applications|${itemA.dueAt}`].key, "kA");
+  raw = applyResult(raw, p2, { mode: "scope", scope: p2.scope });
+  assert.equal(raw.items.length, 1);
+  assert.equal(raw.items[0].id, itemA.id);
+
+  // A per-message re-read of B alone that produces nothing keeps the
+  // merged item — the canonical scope stays out of replaceScopes.
+  const p3 = await bfParse(
+    [{ ...b, body: "", preview: "thanks", bodyFetched: false }],
+    "o3",
+    { state: p2.state },
+  );
+  assert.equal(p3.items.length, 0);
+  assert.deepEqual(p3.replaceScopes, ["email:outlook:kB"]);
+  raw = applyResult(raw, p3, { mode: "scope", scope: p3.scope });
+  assert.equal(raw.items.length, 1, "merged item survives a B-only re-read");
+});
+
+test("adapter: subjectDup negatives — different deadline/date/subject stay separate", async () => {
+  // Same sender + same normalised subject but different resolved dates.
+  const d1 = { ...DATED, key: "d1", subject: "Fund applications", receivedAt: "2026-10-01T10:00:00.000Z", body: "Applications are due October 15." };
+  const d2 = { ...DATED, key: "d2", subject: "[EngList] FW: Fund applications", receivedAt: "2026-10-01T12:00:00.000Z", body: "Applications are due October 20." };
+  const r1 = await bfParse([d1, d2], "n1");
+  const ddl = r1.items.filter((i) => i.type === "deadline");
+  assert.equal(ddl.length, 2, "same subject, different dates -> two items");
+  assert.notEqual(ddl[0].id, ddl[1].id);
+
+  // Same date, different normalised subjects (disjoint tokens so the
+  // older title-match dedupe can't merge them either).
+  const s1 = { ...DATED, key: "s1", subject: "Fund applications", receivedAt: "2026-10-01T10:00:00.000Z" };
+  const s2 = { ...DATED, key: "s2", subject: "Housing contract renewal", receivedAt: "2026-10-01T12:00:00.000Z" };
+  const r2 = await bfParse([s1, s2], "n2");
+  assert.equal(r2.items.filter((i) => i.type === "deadline").length, 2, "different subjects -> two items");
+
+  // Same sender, different deadline — the generic non-merge case.
+  const m1 = { ...DATED, key: "m1", subject: "Fund applications", receivedAt: "2026-10-01T10:00:00.000Z" };
+  const m2 = { ...DATED, key: "m2", subject: "Fund applications", receivedAt: "2026-10-01T12:00:00.000Z", body: "Report due November 4." };
+  const r3 = await bfParse([m1, m2], "n3");
+  const ddls = r3.items.filter((i) => i.type === "deadline");
+  assert.equal(ddls.length, 2, "same sender, different deadlines -> two items");
+});
+
+test("adapter: subjectDup ledger persists and caps at 500 newest", async () => {
+  const sd = {};
+  for (let i = 0; i < 500; i++) {
+    sd[`s${i}|2026-10-01T0${i % 9}:00:00.000Z`] = {
+      key: `m${i}`,
+      receivedAt: "2026-09-01T00:00:00.000Z",
+      type: "deadline",
+    };
+  }
+  const a = {
+    ...DATED,
+    key: "kA",
+    subject: "Fund applications",
+    receivedAt: "2026-10-01T10:00:00.000Z",
+  };
+  const res = await bfParse([a], "cap", { state: { subjectDup: { outlook: sd } } });
+  const item = res.items.find((i) => i.type === "deadline");
+  const out = res.state.subjectDup.outlook;
+  assert.equal(Object.keys(out).length, 500);
+  assert.ok(out[`fund applications|${item.dueAt}`], "new entry recorded");
+  assert.equal(Object.values(out).filter((v) => v.key === a.key).length, 1);
 });
 
 /* ----------------------- structural read-only test --------------------- */

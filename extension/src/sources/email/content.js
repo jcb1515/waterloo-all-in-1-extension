@@ -33,7 +33,9 @@ import {
   replayCache,
   makeRunBox,
   checkNowDecision,
+  checkNowRun,
   doneFromResult,
+  finishPayload,
   gmailOnInbox,
   BF_TICK_MS,
   BF_LOCK_PREFIX,
@@ -328,15 +330,29 @@ import { outlookBackfill, outlookToken } from "./outlook-backfill.js";
         // env.force is false — arm the same body deadline so the answer
         // still lands inside the orchestrator's timeout.
         runCtl.forceUntil = Date.now() + BF_FORCE_BUDGET_MS;
-        box
-          .run(true)
+        checkNowRun(box)
           .then((res) => {
+            const done = doneFromResult(res);
+            // A run that ended without its final batch leaves
+            // state.check[provider].running forever — close the record
+            // with a standalone final marker.
+            if (!res || !res.finalSent) {
+              sendMessage(
+                finishPayload(provider, env.pageUrl, {
+                  ok: done.ok === true,
+                  reason: /** @type {any} */ (done).reason || null,
+                  checked: done.checked,
+                  runId: res && res.runId,
+                  since: res && res.since,
+                }),
+              );
+            }
             sendMessage({
               type: CHECK.DONE,
               source,
               provider,
               runId,
-              ...doneFromResult(res),
+              ...done,
             });
           })
           .catch(() => {});

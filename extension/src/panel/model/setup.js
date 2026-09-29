@@ -8,6 +8,7 @@
 */
 
 import { normCourseCode } from "../../core/contract.js";
+import { CHECK_TIMEOUT_MS } from "../../core/messages.js";
 import {
   compareGuildNames,
   watchConfig,
@@ -211,6 +212,34 @@ export function groupPatch(settings, code, value) {
   if (v) groups[key] = v;
   else delete groups[key];
   return groups;
+}
+
+/* ------------------------------ check state ----------------------------- */
+
+/**
+ * View of one provider's state.check record: a `running` marker whose
+ * `since` is older than CHECK_TIMEOUT_MS never finished (the tab froze,
+ * the worker died, the run crashed) — report it as a timed-out check and
+ * keep the last real result underneath.
+ * @param {any} c  state.check[provider] | null
+ * @param {number} nowMs
+ * @returns {{running: any, stale: boolean, at: any, checked: any, ok: any,
+ *   reason: any}}
+ */
+export function checkStatus(c, nowMs) {
+  const rec = isObj(c) ? c : {};
+  const running = isObj(rec.running) ? rec.running : null;
+  const sinceMs = running ? Date.parse(String(running.since || "")) : NaN;
+  const stale =
+    running != null && Number.isFinite(sinceMs) && nowMs - sinceMs > CHECK_TIMEOUT_MS;
+  return {
+    running: stale ? null : running,
+    stale,
+    at: rec.at,
+    checked: rec.checked,
+    ok: stale ? false : rec.ok,
+    reason: stale ? "timeout" : rec.reason,
+  };
 }
 
 /* --------------------------------- term -------------------------------- */

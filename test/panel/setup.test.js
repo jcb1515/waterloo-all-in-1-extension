@@ -17,6 +17,7 @@ import {
   sectionsPatch,
   groupPatch,
   termLabel,
+  checkStatus,
 } from "../../extension/src/panel/model/setup.js";
 
 const GUILD = (name, channels, extra = {}) => ({
@@ -195,6 +196,65 @@ test("groupPatch sets and clears", () => {
   assert.deepEqual(groupPatch(settings, "ECE 190", ""), {});
 });
 
+test("checkStatus: a stale running marker becomes a timed-out check", () => {
+  const nowMs = Date.parse("2026-10-01T15:00:00.000Z"); // CHECK_TIMEOUT_MS = 5 min
+  // Fresh running stays running.
+  const fresh = checkStatus(
+    {
+      running: { since: "2026-10-01T14:58:00.000Z", checked: 10 },
+      at: "2026-10-01T14:00:00.000Z",
+      checked: 40,
+      ok: true,
+    },
+    nowMs,
+  );
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.running.checked, 10);
+  assert.equal(fresh.ok, true);
+
+  // Stale running converts; the last real result is preserved.
+  const stale = checkStatus(
+    {
+      running: { since: "2026-10-01T14:00:00.000Z", checked: 10 },
+      at: "2026-10-01T13:00:00.000Z",
+      checked: 40,
+      ok: true,
+    },
+    nowMs,
+  );
+  assert.deepEqual(stale, {
+    running: null,
+    stale: true,
+    at: "2026-10-01T13:00:00.000Z",
+    checked: 40,
+    ok: false,
+    reason: "timeout",
+  });
+
+  // Stale running with no prior finish record.
+  const bare = checkStatus(
+    { running: { since: "2026-10-01T14:00:00.000Z", checked: 3 } },
+    nowMs,
+  );
+  assert.equal(bare.stale, true);
+  assert.equal(bare.at, undefined);
+  assert.equal(bare.ok, false);
+
+  // No record at all / non-stale shapes.
+  assert.deepEqual(checkStatus(null, nowMs), {
+    running: null,
+    stale: false,
+    at: undefined,
+    checked: undefined,
+    ok: undefined,
+    reason: undefined,
+  });
+  const done = checkStatus({ at: "2026-10-01T14:00:00.000Z", checked: 12, ok: true }, nowMs);
+  assert.equal(done.stale, false);
+  assert.equal(done.running, null);
+  assert.equal(done.ok, true);
+});
+
 test("termLabel renders UW term codes", () => {
   assert.equal(termLabel(1269), "Fall 2026 (1269)");
   assert.equal(termLabel(1271), "Winter 2027 (1271)");
@@ -367,4 +427,75 @@ test("SETUP pages smoke-render: what-we-read text, children gated on enabled", a
   root = document.createElement("div");
   render(SETUP.gcal({ state, actions }), root);
   assert.ok(root.textContent.includes("Google calendars"));
+});
+
+test("SETUP outlook page: a stale running check reads 'didn't finish'", async () => {
+  const { SETUP, render } = await setupModule();
+  const { document, window } = parseHTML(
+    "<html><body><div id='root'></div></body></html>"
+  );
+  globalThis.document = document;
+  globalThis.window = window;
+
+  const NOW_D = new Date("2026-10-01T15:00:00.000Z");
+  const actions = { saveSettings: () => Promise.resolve(null) };
+  const stateFor = (check) => ({
+    settings: resolveSettings(null),
+    sourceState: { outlook: { state: { check } } },
+    courses: {},
+    items: {},
+    userState: {},
+    outlineFiles: [],
+    projects: {},
+    now: NOW_D,
+  });
+
+  // Stale running under a finished record: last result + didn't finish.
+  let root = document.createElement("div");
+  render(
+    SETUP.outlook({
+      state: stateFor({
+        gmail: {
+          running: { since: "2026-10-01T14:00:00.000Z", checked: 7 },
+          at: "2026-10-01T13:30:00.000Z",
+          checked: 41,
+          ok: true,
+        },
+      }),
+      actions,
+    }),
+    root,
+  );
+  assert.ok(root.textContent.includes("Last checked 41 messages"));
+  assert.ok(root.textContent.includes("last check didn't finish"), root.textContent);
+  assert.ok(!root.textContent.includes("Checking… 7"));
+
+  // Stale running with NO prior record: retry hint.
+  root = document.createElement("div");
+  render(
+    SETUP.outlook({
+      state: stateFor({
+        gmail: { running: { since: "2026-10-01T14:00:00.000Z", checked: 7 } },
+      }),
+      actions,
+    }),
+    root,
+  );
+  assert.ok(
+    root.textContent.includes("Last check didn't finish — press Check now to retry"),
+    root.textContent,
+  );
+
+  // A fresh running marker still shows the in-progress line.
+  root = document.createElement("div");
+  render(
+    SETUP.outlook({
+      state: stateFor({
+        gmail: { running: { since: "2026-10-01T14:59:00.000Z", checked: 7 } },
+      }),
+      actions,
+    }),
+    root,
+  );
+  assert.ok(root.textContent.includes("Checking… 7 so far"), root.textContent);
 });
