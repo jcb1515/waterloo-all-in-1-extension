@@ -28,7 +28,7 @@ test("classify: quiz kind", () => {
   assert.deepEqual(classify({ title: "Quiz 3", kind: "quiz" }), { type: "quiz", category: "quiz" });
 });
 
-test("classify: the default keeps the WATnow category", () => {
+test("classify: the default keeps the reader's category", () => {
   assert.deepEqual(classify({ title: "Lab 2 Report", kind: "dropbox", category: "lab" }), {
     type: "deadline",
     category: "lab",

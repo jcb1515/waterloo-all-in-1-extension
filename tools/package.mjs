@@ -37,7 +37,7 @@ async function verifyDist(pkgVersion, expectedServiceUrl) {
     const text = await readFile(p, "utf8");
     const inLicenses = rel.startsWith("licenses/");
     if (/dev-?profile/i.test(text)) problems.push(`${rel}: mentions dev-profile`);
-    if (!inLicenses && /watnow|gurshh/i.test(text))
+    if (!inLicenses && /gurshh/i.test(text))
       problems.push(`${rel}: mentions upstream project names`);
     // A shipped feed URL would bake in as an https?://host literal; the bare
     // "localhost" hostname checks in publish.js/learn mocks are fine.

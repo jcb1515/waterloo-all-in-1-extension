@@ -6,7 +6,7 @@ WaterlooWorks, Discord, Outlook, Gmail) and publishes it to one Google Calendar 
 - Shared contract: `extension/src/core/contract.js` (frozen; coordinate before changing it).
 - An optional local design plan `PLAN.md` may live next to the repo root (outside git). Treat it as
   read-only context if present.
-- Based on gurshh `uwlearn_assignment_extension` (MIT, history merged at 363054e) and WATnow (MIT, Eric Zou, 801a1b1). Keep both attributions (`licenses/`).
+- Based on gurshh `uwlearn_assignment_extension` (MIT, history merged at 363054e). Keep its attribution (`licenses/`).
 
 ## Commands
 - `npm ci` (once per checkout)
